@@ -44,7 +44,7 @@
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+  <script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo}=React;
 
 const RED="#E8312A",WHITE="#fff",GREY="#8E8E93",DARKGREY="#3A3A3C",BG="#000",DIVIDER="#1C1C1E",INPUTBG="#1C1C1E";
@@ -345,7 +345,7 @@ function MonthlyStats({games,players}){
   const playerStats=useMemo(()=>{
     return players.map(p=>{
       const pg=monthGames.filter(g=>g.playerId===p.id);
-      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1)):0};
+      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s+Number(calcFps(g)),0)/pg.length).toFixed(1)):0};
     }).filter(x=>x.games.length>0).sort((a,b)=>b.eff-a.eff);
   },[monthGames,players]);
 
@@ -446,7 +446,7 @@ function WeeklyMVPBanner({games,players}){
   const byPlayer=players.map(p=>{
     const pg=weekGames.filter(g=>g.playerId===p.id);
     if(!pg.length)return null;
-    const eff=parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1));
+    const eff=parseFloat((pg.reduce((s,g)=>s+Number(calcFps(g)),0)/pg.length).toFixed(1));
     return{p,eff,pg};
   }).filter(Boolean).sort((a,b)=>b.eff-a.eff);
   if(!byPlayer.length)return null;
@@ -763,8 +763,8 @@ function App(){
     let uP,uG;
     waitForFirebase().then(()=>{
       const {_db,_col,_onSnapshot}=window;
-      uP=_onSnapshot(_col(_db,"players"),s=>{setPlayers(s.docs.map(d=>d.data()));setLoading(false);});
-      uG=_onSnapshot(_col(_db,"games"),s=>{setGames(s.docs.map(d=>d.data()));setLoading(false);});
+      uP=_onSnapshot(_col(_db,"players"),s=>{setPlayers(s.docs.map(d=>d.data()));setLoading(false);},e=>{console.error("players:",e);setLoading(false);});
+      uG=_onSnapshot(_col(_db,"games"),s=>{setGames(s.docs.map(d=>d.data()));setLoading(false);},e=>{console.error("games:",e);setLoading(false);});
     });
     return()=>{uP&&uP();uG&&uG();};
   },[]);

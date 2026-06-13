@@ -249,14 +249,14 @@ async function searchGifs(query){
   try{
     const res=await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=10&rating=g`);
     const data=await res.json();
-    return data.data?.map(g=>({id:g.id,url:g.images.fixed_height.url,thumb:g.images.fixed_height_small.url}))||[];
+    return data.data?.map(g=>({id:g.id,url:g.images.original.url,thumb:g.images.fixed_height_small.url}))||[];
   }catch(e){console.warn("GIPHY error:",e);return[];}
 }
 async function getTrendingGifs(){
   try{
     const res=await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=10&rating=g`);
     const data=await res.json();
-    return data.data?.map(g=>({id:g.id,url:g.images.fixed_height.url,thumb:g.images.fixed_height_small.url}))||[];
+    return data.data?.map(g=>({id:g.id,url:g.images.original.url,thumb:g.images.fixed_height_small.url}))||[];
   }catch(e){console.warn("GIPHY error:",e);return[];}
 }
 
@@ -604,6 +604,40 @@ function MonthlyStats({games,players}){
               </div>
             </div>
           ))}
+
+          {/* Games by day */}
+          <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:24,marginBottom:12}}>AFGELOPEN GAMES — {monthLabel.toUpperCase()}</div>
+          {(() => {
+            const gamesByDay = {};
+            monthGames.forEach(g => {
+              if (!gamesByDay[g.date]) gamesByDay[g.date] = [];
+              gamesByDay[g.date].push(g);
+            });
+            const sortedDays = Object.keys(gamesByDay).sort().reverse();
+            if (sortedDays.length === 0) return <div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games deze maand</div>;
+            return sortedDays.map(date => (
+              <div key={date} style={{marginBottom:16}}>
+                <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:8}}>{new Date(date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}</div>
+                {gamesByDay[date].map(g => {
+                  const player = players.find(p => p.id === g.playerId);
+                  return (
+                    <div key={g.id} style={{background:INPUTBG,borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+                      <Avatar player={player} size={32}/>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:600,fontSize:14,color:WHITE}}>{player?.name||"?"}</div>
+                        <div style={{color:GREY,fontSize:12}}>{g.pts||0} PTS · {g.reb||0} REB · {g.ast||0} AST · {calcFps(g)} fps</div>
+                      </div>
+                      {g.teamAScore&&g.teamBScore&&(
+                        <div style={{fontSize:14,fontWeight:700,color:WHITE}}>
+                          {g.team==="A"?<span style={{color:RED}}>{g.teamAScore}</span>:g.teamAScore}-{g.team==="B"?<span style={{color:RED}}>{g.teamBScore}</span>:g.teamBScore}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ));
+          })()}
         </>
       )}
     </div>

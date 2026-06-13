@@ -1,6 +1,6 @@
 // SquadStats Service Worker
 // Bump this version string every time you deploy a new version
-const VERSION = 'squadstats-v2';
+const VERSION = 'squadstats-v4';
 const CACHE = VERSION;
 
 // Files to cache for offline / fast load

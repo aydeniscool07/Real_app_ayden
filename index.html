@@ -67,9 +67,80 @@
     .fade-in{animation:fadeIn .18s ease}
     @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   </style>
+  <style>
+    /* Boot-error fallback (shown if React fails to mount) */
+    #boot-fallback{position:fixed;inset:0;background:#000;color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center;z-index:99999;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif}
+    #boot-fallback.show{display:flex}
+    #boot-fallback .logo{font-size:52px}
+    #boot-fallback .title{font-weight:900;font-size:24px;letter-spacing:.5px}
+    #boot-fallback .title span{color:#E8312A}
+    #boot-fallback .msg{color:#8E8E93;font-size:14px;max-width:320px;line-height:1.5}
+    #boot-fallback .err{color:#ff6b6b;font-size:11px;font-family:monospace;max-width:90vw;word-break:break-word;background:#1C1C1E;padding:8px 12px;border-radius:8px;max-height:120px;overflow:auto;text-align:left}
+    #boot-fallback button{background:#E8312A;color:#fff;border:none;border-radius:14px;padding:14px 28px;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit}
+    #boot-fallback button:active{opacity:.7}
+    #boot-fallback .hint{color:#5a5a5e;font-size:11px}
+  </style>
 </head>
 <body>
 <div id="root"></div>
+<div id="boot-fallback">
+  <div class="logo">🏀</div>
+  <div class="title">SQUAD<span>STATS</span></div>
+  <div class="msg" id="boot-fallback-msg">Kon de app niet laden. Tik op de knop om opnieuw te proberen.</div>
+  <div class="err" id="boot-fallback-err" style="display:none"></div>
+  <button id="boot-fallback-btn">Opnieuw laden</button>
+  <div class="hint">Als dit blijft gebeuren, sluit de app volledig en open opnieuw.</div>
+</div>
+<script>
+  // Boot watchdog — must be a plain <script> (NOT babel) so it never fails to parse.
+  (function(){
+    window.__APP_BOOTED__ = false;
+    var fb = document.getElementById('boot-fallback');
+    var errBox = document.getElementById('boot-fallback-err');
+    var msgBox = document.getElementById('boot-fallback-msg');
+    function showFallback(detail){
+      if (window.__APP_BOOTED__) return;
+      fb.classList.add('show');
+      if (detail) {
+        errBox.style.display = 'block';
+        errBox.textContent = String(detail).slice(0, 500);
+      }
+    }
+    // If React hasn't mounted in 10s, assume a boot error and show fallback.
+    setTimeout(function(){
+      if (!window.__APP_BOOTED__) {
+        msgBox.textContent = 'De app reageert niet. Tik op de knop om opnieuw te proberen.';
+        showFallback();
+      }
+    }, 10000);
+    // Catch any uncaught JS errors (incl. Babel compile errors of the babel script)
+    window.addEventListener('error', function(e){
+      var detail = e && (e.message || (e.error && e.error.message)) || 'Onbekende fout';
+      showFallback(detail);
+    });
+    window.addEventListener('unhandledrejection', function(e){
+      var detail = e && e.reason && (e.reason.message || e.reason) || 'Onbekende fout';
+      showFallback(detail);
+    });
+    // Reload button: clear SW + caches so a fresh copy is fetched, then reload.
+    document.getElementById('boot-fallback-btn').addEventListener('click', async function(){
+      this.textContent = 'Bezig...';
+      this.disabled = true;
+      try {
+        if ('serviceWorker' in navigator) {
+          var regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(function(r){ return r.unregister(); }));
+        }
+        if (window.caches && caches.keys) {
+          var keys = await caches.keys();
+          await Promise.all(keys.map(function(k){ return caches.delete(k); }));
+        }
+      } catch(_){}
+      location.reload();
+    });
+    window.__showBootFallback = showFallback;
+  })();
+</script>
 <script type="text/babel">
 const {useState,useEffect,useRef,useMemo}=React;
 
@@ -413,7 +484,7 @@ function MonthlyStats({games,players}){
   const playerStats=useMemo(()=>{
     return players.map(p=>{
       const pg=monthGames.filter(g=>g.playerId===p.id);
-      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1)):0};
+      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1)):0};
     }).filter(x=>x.games.length>0).sort((a,b)=>b.eff-a.eff);
   },[monthGames,players]);
 
@@ -514,7 +585,7 @@ function WeeklyMVPBanner({games,players}){
   const byPlayer=players.map(p=>{
     const pg=weekGames.filter(g=>g.playerId===p.id);
     if(!pg.length)return null;
-    const eff=parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1));
+    const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
     return{p,eff,pg};
   }).filter(Boolean).sort((a,b)=>b.eff-a.eff);
   if(!byPlayer.length)return null;
@@ -1140,7 +1211,15 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  // Mark booted after first paint so the watchdog stays silent on success.
+  requestAnimationFrame(()=>{ window.__APP_BOOTED__ = true; });
+} catch (e) {
+  console.error("App boot failed:", e);
+  window.__showBootFallback && window.__showBootFallback(e && (e.stack || e.message) || e);
+}
 </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

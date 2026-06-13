@@ -9,6 +9,30 @@
   <meta name="theme-color" content="#000000"/>
   <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiU3F1YWRTdGF0cyIsInNob3J0X25hbWUiOiJTcXVhZFN0YXRzIiwic3RhcnRfdXJsIjoiLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiMwMDAwMDAiLCJ0aGVtZV9jb2xvciI6IiMwMDAwMDAifQ=="/>
   <title>SquadStats</title>
+  <script>
+    // Register service worker for auto-update
+    if('serviceWorker' in navigator){
+      window.addEventListener('load',()=>{
+        navigator.serviceWorker.register('/sw.js').then(reg=>{
+          // Check for updates every 30 minutes
+          setInterval(()=>reg.update(),30*60*1000);
+          reg.addEventListener('updatefound',()=>{
+            const newWorker=reg.installing;
+            newWorker.addEventListener('statechange',()=>{
+              if(newWorker.state==='installed'&&navigator.serviceWorker.controller){
+                // New version available — show banner
+                window.dispatchEvent(new Event('swUpdateAvailable'));
+              }
+            });
+          });
+        }).catch(e=>console.warn('SW reg failed:',e));
+        // When new SW takes control, reload
+        navigator.serviceWorker.addEventListener('controllerchange',()=>{
+          window.location.reload();
+        });
+      });
+    }
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -20,14 +44,16 @@
     const app=initializeApp(cfg);
     const db=getFirestore(app);
     window._db=db;window._col=collection;window._doc=doc;window._setDoc=setDoc;window._deleteDoc=deleteDoc;window._onSnapshot=onSnapshot;
-    // Messaging setup (best-effort, fails gracefully if SW not present)
+    // Messaging setup (best-effort)
     try{
       const messaging=getMessaging(app);
       window._messaging=messaging;
       window._getToken=getToken;
       window._onMessage=onMessage;
     }catch(e){console.warn("Messaging not available:",e);}
-    window._firebaseReady=true;window.dispatchEvent(new Event("firebaseReady"));
+    window._firebaseReady=true;
+    // Use setTimeout so Babel React script has time to mount and register listener
+    setTimeout(()=>window.dispatchEvent(new Event("firebaseReady")),0);
   </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -44,7 +70,7 @@
 </head>
 <body>
 <div id="root"></div>
-  <script type="text/babel" data-presets="react">
+<script type="text/babel">
 const {useState,useEffect,useRef,useMemo}=React;
 
 const RED="#E8312A",WHITE="#fff",GREY="#8E8E93",DARKGREY="#3A3A3C",BG="#000",DIVIDER="#1C1C1E",INPUTBG="#1C1C1E";
@@ -75,7 +101,19 @@ function compressImage(file,maxW=400,q=0.6){
     };r.readAsDataURL(file);
   });
 }
-function waitForFirebase(){return new Promise(r=>{if(window._firebaseReady)return r();window.addEventListener("firebaseReady",r,{once:true});});}
+function waitForFirebase(){
+  return new Promise(r=>{
+    if(window._firebaseReady)return r();
+    // Fallback: keep checking every 100ms up to 10s
+    let tries=0;
+    const interval=setInterval(()=>{
+      tries++;
+      if(window._firebaseReady){clearInterval(interval);return r();}
+      if(tries>100){clearInterval(interval);r();} // give up after 10s, let Firestore error handle it
+    },100);
+    window.addEventListener("firebaseReady",()=>{clearInterval(interval);r();},{once:true});
+  });
+}
 async function fbSave(col,obj){await waitForFirebase();await window._setDoc(window._doc(window._db,col,obj.id),obj);}
 async function fbDel(col,id){await waitForFirebase();await window._deleteDoc(window._doc(window._db,col,id));}
 function calcFps(g){
@@ -84,6 +122,17 @@ function calcFps(g){
 }
 function avg(arr,key){if(!arr.length)return 0;return parseFloat((arr.reduce((s,g)=>s+(+g[key]||0),0)/arr.length).toFixed(1));}
 function gameYearMonth(g){return g.date?g.date.slice(0,7):"";}
+function getWinLoss(playerGames){
+  let w=0,l=0,d=0;
+  playerGames.forEach(g=>{
+    if(g.team==="chameleon")return;
+    const myScore=parseFloat(g.team==="A"?g.teamAScore:g.teamBScore);
+    const oppScore=parseFloat(g.team==="A"?g.teamBScore:g.teamAScore);
+    if(isNaN(myScore)||isNaN(oppScore)||(!myScore&&!oppScore))return;
+    if(myScore>oppScore)w++;else if(myScore<oppScore)l++;else d++;
+  });
+  return{w,l,d};
+}
 function gameWeek(g){
   if(!g.date)return "";
   const d=new Date(g.date),jan1=new Date(d.getFullYear(),0,1);
@@ -200,7 +249,7 @@ function LoginScreen({onLogin,onClose}){
 }
 
 // ── Perf Detail Modal
-function PerfDetailModal({game,player,allPlayers,allGames,onClose,onDelete,isAdmin}){
+function PerfDetailModal({game,player,allPlayers,allGames,onClose,onDelete,onEdit,isAdmin}){
   const fps=calcFps(game);
   const matchGames=game.matchId?allGames.filter(g=>g.matchId===game.matchId):[];
   const tAN=game.teamAName||"Team A",tBN=game.teamBName||"Team B";
@@ -225,7 +274,10 @@ function PerfDetailModal({game,player,allPlayers,allGames,onClose,onDelete,isAdm
           </div>
         </div>
         <div style={{padding:"16px 20px 0"}}>
-          <div style={{color:GREY,fontSize:13,marginBottom:4}}>{game.date}{game.opponent?` · vs ${game.opponent.toUpperCase()}`:""}</div>
+          <div style={{color:GREY,fontSize:13,marginBottom:4}}>
+            {game.date}{game.opponent?` · vs ${game.opponent.toUpperCase()}`:""}
+            {game.location?<span style={{marginLeft:6}}>📍 {game.location}</span>:""}
+          </div>
           {game.teamAScore&&game.teamBScore&&(
             <div style={{fontSize:22,fontWeight:800,marginBottom:14}}>
               <span style={{color:game.team==="A"?RED:WHITE}}>{tAN}</span>
@@ -265,6 +317,7 @@ function PerfDetailModal({game,player,allPlayers,allGames,onClose,onDelete,isAdm
           )}
           <div style={{display:"flex",gap:10,marginTop:20}}>
             {isAdmin&&<button onClick={()=>{onDelete(game.id);onClose();}} style={{background:"transparent",border:"1px solid #ff453a",color:"#ff453a",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>Delete</button>}
+            {isAdmin&&<button onClick={()=>onEdit(game)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>✏️ Edit</button>}
             <button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,fontSize:15,cursor:"pointer",flex:2}}>Sluiten</button>
           </div>
         </div>
@@ -291,6 +344,21 @@ function PlayerProfileModal({player,allGames,allPlayers,onClose,onEditPlayer,onP
           </div>
         </div>
         <div style={{padding:"16px 20px 0"}}>
+          {/* W/L Record */}
+          {(()=>{const{w,l,d}=getWinLoss(pg);const tot=w+l+d;return tot>0&&(
+            <div style={{display:"flex",gap:10,marginBottom:16}}>
+              {[{lbl:"Wins",val:w,col:"#27AE60"},{lbl:"Losses",val:l,col:RED},{lbl:"Games",val:pg.length,col:WHITE}].map(({lbl,val,col})=>(
+                <div key={lbl} style={{flex:1,background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+                  <div style={{color:col,fontWeight:800,fontSize:22}}>{val}</div>
+                  <div style={{color:GREY,fontSize:10}}>{lbl}</div>
+                </div>
+              ))}
+              <div style={{flex:1,background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+                <div style={{color:WHITE,fontWeight:800,fontSize:22}}>{tot>0?Math.round(w/tot*100):0}%</div>
+                <div style={{color:GREY,fontSize:10}}>Win%</div>
+              </div>
+            </div>
+          );})()}
           <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>CAREER AVERAGES · {pg.length}G</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:20}}>
             {["pts","reb","ast","stl","blk","to","fg","threept"].map(k=>(
@@ -345,7 +413,7 @@ function MonthlyStats({games,players}){
   const playerStats=useMemo(()=>{
     return players.map(p=>{
       const pg=monthGames.filter(g=>g.playerId===p.id);
-      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s+Number(calcFps(g)),0)/pg.length).toFixed(1)):0};
+      return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:pg.length?parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1)):0};
     }).filter(x=>x.games.length>0).sort((a,b)=>b.eff-a.eff);
   },[monthGames,players]);
 
@@ -446,7 +514,7 @@ function WeeklyMVPBanner({games,players}){
   const byPlayer=players.map(p=>{
     const pg=weekGames.filter(g=>g.playerId===p.id);
     if(!pg.length)return null;
-    const eff=parseFloat((pg.reduce((s,g)=>s+Number(calcFps(g)),0)/pg.length).toFixed(1));
+    const eff=parseFloat((pg.reduce((s,g)=>s++calcFps(g),0)/pg.length).toFixed(1));
     return{p,eff,pg};
   }).filter(Boolean).sort((a,b)=>b.eff-a.eff);
   if(!byPlayer.length)return null;
@@ -554,6 +622,7 @@ function GameRow({game,players,onDelete,onClick,isAdmin}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
             <span style={{color:GREY,fontSize:12}}>
               {game.date}
+              {game.location?<span style={{marginLeft:6}}>📍 {game.location}</span>:""}
               {game.teamAScore&&game.teamBScore?(
                 <span style={{marginLeft:6}}>
                   <span style={{color:game.team==="A"?WHITE:GREY}}>{tAN}</span>
@@ -570,10 +639,93 @@ function GameRow({game,players,onDelete,onClick,isAdmin}){
   );
 }
 
+// ── Edit Game Modal (edit stats for a single player's game entry)
+function EditGameModal({game,players,allGames,onSave,onClose}){
+  const [form,setForm]=useState({...game});
+  const [saving,setSaving]=useState(false);
+  const {IS,BR,BG2}=styles();
+  const player=players.find(p=>p.id===game.playerId);
+
+  // Also allow editing shared game fields (scores, names, location, date)
+  function setF(k,v){setForm(f=>({...f,[k]:v}));}
+
+  async function save(){
+    setSaving(true);
+    const updated={...form};
+    STAT_KEYS.forEach(k=>{updated[k]=parseFloat(form[k])||0;});
+    // If matchId exists, update shared fields on all games in same match
+    if(game.matchId){
+      const matchGames=allGames.filter(g=>g.matchId===game.matchId&&g.id!==game.id);
+      await Promise.all(matchGames.map(g=>fbSave("games",{
+        ...g,
+        date:form.date,
+        location:form.location||"",
+        teamAName:form.teamAName,
+        teamBName:form.teamBName,
+        teamAScore:form.teamAScore,
+        teamBScore:form.teamBScore,
+      })));
+    }
+    await onSave(updated);
+    setSaving(false);
+    onClose();
+  }
+
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:350}}>
+      <div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto"}}>
+        <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+        <div style={{fontWeight:700,fontSize:20,marginBottom:16,textAlign:"center"}}>✏️ Game bewerken</div>
+        {/* Player info */}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"10px 12px",background:"#111",borderRadius:10}}>
+          <Avatar player={player} size={38}/>
+          <div>
+            <div style={{fontWeight:700,fontSize:15}}>{player?.name}</div>
+            <div style={{color:RED,fontSize:12}}>{form.team==="A"?(form.teamAName||"Team A"):form.team==="B"?(form.teamBName||"Team B"):"🦎 Kameleon"}</div>
+          </div>
+        </div>
+        {/* Shared game info */}
+        <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>GAME INFO</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          <input type="date" style={IS} value={form.date||""} onChange={e=>setF("date",e.target.value)}/>
+          <input placeholder="📍 Locatie (optioneel)" style={IS} value={form.location||""} onChange={e=>setF("location",e.target.value)}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center"}}>
+            <div>
+              <div style={{color:GREY,fontSize:11,marginBottom:4}}>{form.teamAName||"Team A"}</div>
+              <input type="text" inputMode="decimal" placeholder="0" style={IS} value={form.teamAScore||""} onChange={e=>setF("teamAScore",e.target.value)}/>
+            </div>
+            <div style={{color:GREY,fontSize:18,fontWeight:700,paddingTop:16,textAlign:"center"}}>–</div>
+            <div>
+              <div style={{color:GREY,fontSize:11,marginBottom:4}}>{form.teamBName||"Team B"}</div>
+              <input type="text" inputMode="decimal" placeholder="0" style={IS} value={form.teamBScore||""} onChange={e=>setF("teamBScore",e.target.value)}/>
+            </div>
+          </div>
+        </div>
+        {/* Stats */}
+        <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>STATS</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {STAT_KEYS.map(k=>(
+            <div key={k}>
+              <div style={{color:GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
+              <input type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS}
+                value={form[k]||""} onChange={e=>setF(k,e.target.value)}/>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:16}}>
+          <button onClick={onClose} style={BG2}>Annuleer</button>
+          <button onClick={save} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Log Game Modal
 function LogGameModal({players,onSave,onClose}){
   const [step,setStep]=useState("setup");
   const [gameDate,setGameDate]=useState(new Date().toISOString().slice(0,10));
+  const [location,setLocation]=useState("");
   const [tAN,setTAN]=useState("Team A"),[tBN,setTBN]=useState("Team B");
   const [teamA,setTeamA]=useState([]),[teamB,setTeamB]=useState([]),[chams,setChams]=useState([]);
   const [tAS,setTAS]=useState(""),[tBS,setTBS]=useState("");
@@ -594,7 +746,7 @@ function LogGameModal({players,onSave,onClose}){
     const mid=Date.now().toString();
     const newGames=all.map((pid,i)=>{
       const sf=statForms[pid]||{};
-      const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||""};
+      const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||""};
       if(teamA.includes(pid)){g.team="A";g.opponent=tBN;}
       else if(teamB.includes(pid)){g.team="B";g.opponent=tAN;}
       else{g.team="chameleon";g.opponent="";}
@@ -616,10 +768,11 @@ function LogGameModal({players,onSave,onClose}){
           <>
             <div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>Log Game</div>
             <input type="date" style={{...IS,marginBottom:12}} value={gameDate} onChange={e=>setGameDate(e.target.value)}/>
+            <input placeholder="📍 Locatie (optioneel, bijv. Sporthal Noord)" style={{...IS,marginBottom:12}} value={location} onChange={e=>setLocation(e.target.value)}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
-              <div><input placeholder="Team A naam" style={{...IS,marginBottom:6}} value={tAN} onChange={e=>setTAN(e.target.value)}/><input type="number" placeholder="Score" style={IS} value={tAS} onChange={e=>setTAS(e.target.value)}/></div>
+              <div><input placeholder="Team A naam" style={{...IS,marginBottom:6}} value={tAN} onChange={e=>setTAN(e.target.value)}/><input type="text" inputMode="decimal" placeholder="0.0" style={IS} value={tAS} onChange={e=>setTAS(e.target.value)}/></div>
               <div style={{color:GREY,fontSize:20,fontWeight:700,textAlign:"center",paddingTop:6}}>–</div>
-              <div><input placeholder="Team B naam" style={{...IS,marginBottom:6}} value={tBN} onChange={e=>setTBN(e.target.value)}/><input type="number" placeholder="Score" style={IS} value={tBS} onChange={e=>setTBS(e.target.value)}/></div>
+              <div><input placeholder="Team B naam" style={{...IS,marginBottom:6}} value={tBN} onChange={e=>setTBN(e.target.value)}/><input type="text" inputMode="decimal" placeholder="0.0" style={IS} value={tBS} onChange={e=>setTBS(e.target.value)}/></div>
             </div>
             <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SPELERS TOEWIJZEN</div>
             {players.map(p=>{
@@ -752,8 +905,10 @@ function App(){
   const [games,setGames]=useState([]);
   const [loading,setLoading]=useState(true);
   const [saveStatus,setSaveStatus]=useState("");
+  const [updateAvailable,setUpdateAvailable]=useState(false);
   const [tab,setTab]=useState("performances");
   const [modal,setModal]=useState(null);
+  const [editingGame,setEditingGame]=useState(null);
   const [filterPos,setFilterPos]=useState("All positions");
   const [showPosPicker,setShowPosPicker]=useState(false);
   const [sortBy,setSortBy]=useState("Beste");
@@ -761,12 +916,24 @@ function App(){
 
   useEffect(()=>{
     let uP,uG;
+    // Safety: force loading=false after 6s even if Firebase hasn't responded
+    const timeout=setTimeout(()=>setLoading(false),6000);
     waitForFirebase().then(()=>{
       const {_db,_col,_onSnapshot}=window;
-      uP=_onSnapshot(_col(_db,"players"),s=>{setPlayers(s.docs.map(d=>d.data()));setLoading(false);},e=>{console.error("players:",e);setLoading(false);});
-      uG=_onSnapshot(_col(_db,"games"),s=>{setGames(s.docs.map(d=>d.data()));setLoading(false);},e=>{console.error("games:",e);setLoading(false);});
-    });
-    return()=>{uP&&uP();uG&&uG();};
+      let pReady=false,gReady=false;
+      uP=_onSnapshot(_col(_db,"players"),s=>{
+        setPlayers(s.docs.map(d=>d.data()));
+        pReady=true;if(pReady&&gReady){clearTimeout(timeout);setLoading(false);}
+      },(err)=>{console.error("Players listener error:",err);clearTimeout(timeout);setLoading(false);});
+      uG=_onSnapshot(_col(_db,"games"),s=>{
+        setGames(s.docs.map(d=>d.data()));
+        gReady=true;if(pReady&&gReady){clearTimeout(timeout);setLoading(false);}
+      },(err)=>{console.error("Games listener error:",err);clearTimeout(timeout);setLoading(false);});
+    }).catch(()=>{clearTimeout(timeout);setLoading(false);});
+    // Listen for SW update
+    const onUpdate=()=>setUpdateAvailable(true);
+    window.addEventListener('swUpdateAvailable',onUpdate);
+    return()=>{uP&&uP();uG&&uG();window.removeEventListener('swUpdateAvailable',onUpdate);clearTimeout(timeout);};
   },[]);
 
   function showSaved(){setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),2500);}
@@ -779,6 +946,7 @@ function App(){
     catch(e){console.error(e);showError();}
   }
   async function saveGames(gs){setSaveStatus("saving");try{await Promise.all(gs.map(g=>fbSave("games",g)));showSaved();}catch(e){console.error(e);showError();}}
+  async function saveGameEdit(g){setSaveStatus("saving");try{await fbSave("games",g);showSaved();}catch(e){console.error(e);showError();}}
   async function deleteGame(gid){setSaveStatus("saving");try{await fbDel("games",gid);showSaved();}catch(e){console.error(e);showError();}}
 
   function getSorted(){
@@ -806,8 +974,11 @@ function App(){
 
   if(loading)return(
     <div style={{background:BG,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
-      <div style={{fontSize:48}}>🏀</div>
-      <div style={{color:GREY,fontSize:15}}>Verbinden met database...</div>
+      <div style={{fontSize:52}}>🏀</div>
+      <div style={{fontWeight:900,fontSize:22}}>SQUAD<span style={{color:RED}}>STATS</span></div>
+      <div style={{color:GREY,fontSize:14}}>Verbinden met database...</div>
+      <div style={{width:32,height:32,border:`3px solid ${DIVIDER}`,borderTop:`3px solid ${RED}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 
@@ -816,6 +987,18 @@ function App(){
       {saveStatus&&(
         <div style={{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 8px)",right:12,zIndex:999,background:saveStatus==="error"?"#ff453a22":INPUTBG,border:`1px solid ${saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}`,borderRadius:20,padding:"5px 14px",fontSize:12,color:saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}}>
           {saveStatus==="saving"?"Opslaan...":saveStatus==="saved"?"✓ Opgeslagen":"✗ Fout bij opslaan"}
+        </div>
+      )}
+      {updateAvailable&&(
+        <div style={{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 8px)",left:"50%",transform:"translateX(-50%)",zIndex:998,background:"#1C1C1E",border:`1px solid ${RED}`,borderRadius:20,padding:"8px 16px",fontSize:13,color:WHITE,display:"flex",alignItems:"center",gap:10,boxShadow:"0 4px 20px rgba(0,0,0,0.5)",whiteSpace:"nowrap"}}>
+          <span>🆕 Update beschikbaar</span>
+          <button onClick={()=>{
+            navigator.serviceWorker.getRegistration().then(reg=>{
+              if(reg&&reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
+            });
+          }} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"4px 12px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+            Nu updaten
+          </button>
         </div>
       )}
 
@@ -941,6 +1124,7 @@ function App(){
       {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
       {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
       {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}
+      {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
       {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
       {modal?.type==="playerProfile"&&profilePlayer&&(
         <PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} isAdmin={isAdmin}
@@ -949,7 +1133,8 @@ function App(){
       )}
       {modal?.type==="perfDetail"&&detailGame&&detailPlayer&&(
         <PerfDetailModal game={detailGame} player={detailPlayer} allPlayers={players} allGames={games}
-          isAdmin={isAdmin} onClose={()=>setModal(null)} onDelete={deleteGame}/>
+          isAdmin={isAdmin} onClose={()=>setModal(null)} onDelete={deleteGame}
+          onEdit={g=>{setEditingGame(g);setModal(null);}}/>
       )}
     </div>
   );

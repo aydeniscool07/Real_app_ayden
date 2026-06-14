@@ -2496,6 +2496,13 @@ function formatOdds(american){
 const dec=oddsToDecimal(american);
 return dec.toFixed(2);
 }
+// European decimal → American odds (for admin editor internal storage)
+function decimalToAmerican(dec){
+const d=parseFloat(dec);
+if(isNaN(d)||d<=1)return -110;
+if(d>=2)return Math.round((d-1)*100);
+return Math.round(-100/(d-1));
+}
 function impliedProb(american){
 const o=parseInt(american);
 if(isNaN(o))return 50;
@@ -2706,11 +2713,11 @@ return(
 </div>
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:4}}>OVER</div>
-<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.overOdds} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),overOdds:parseInt(e.target.value)||prop.overOdds}}))}/>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.overOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),overOdds:decimalToAmerican(e.target.value)}}))}/>
 </div>
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:4}}>UNDER</div>
-<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.underOdds} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),underOdds:parseInt(e.target.value)||prop.underOdds}}))}/>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.underOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),underOdds:decimalToAmerican(e.target.value)}}))}/>
 </div>
 </div>
 </div>
@@ -2738,7 +2745,7 @@ return(
 <div style={{color:GREY,fontSize:12}}>{f.eff} gem. eff · {f.prob}% kans</div>
 </div>
 <div style={{display:"flex",alignItems:"center",gap:8}}>
-<input type="number" style={{...IS,width:90,fontSize:14,padding:"8px 10px"}} defaultValue={f.american} onChange={e=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),american:parseInt(e.target.value)||f.american}}))}/>
+<input type="number" style={{...IS,width:90,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(f.american).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),american:decimalToAmerican(e.target.value)}}))}/>
 <button onClick={()=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),disabled:!disNow}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>{disNow?"Aan":"Uit"}</button>
 </div>
 </div>

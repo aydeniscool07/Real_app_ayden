@@ -213,6 +213,24 @@ if(!g.date)return "";
 const d=new Date(g.date),jan1=new Date(d.getFullYear(),0,1);
 return `${d.getFullYear()}-W${String(Math.ceil((((d-jan1)/86400000)+jan1.getDay()+1)/7)).padStart(2,"0")}`;
 }
+// ISO week key for a JS Date
+function isoWeekKey(date){
+const d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));
+const day=d.getUTCDay()||7;
+d.setUTCDate(d.getUTCDate()+4-day);
+const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));
+const weekNum=Math.ceil((((d-yearStart)/86400000)+1)/7);
+return `${d.getUTCFullYear()}-W${String(weekNum).padStart(2,"0")}`;
+}
+// Boundaries of the most recently completed Mon–Sun week
+function lastCompletedWeekRange(now){
+const today=new Date(now);today.setHours(0,0,0,0);
+const dow=today.getDay(); // 0=Sun..6=Sat
+const daysToLastSun=dow===0?7:dow; // last Sunday (end of completed week)
+const lastSun=new Date(today);lastSun.setDate(today.getDate()-daysToLastSun);
+const lastMon=new Date(lastSun);lastMon.setDate(lastSun.getDate()-6);
+return{start:lastMon,end:lastSun,key:isoWeekKey(lastSun)};
+}
 
 function styles(){
 return{
@@ -432,6 +450,134 @@ return(
 );
 }
 
+// ── Trophy Case helpers
+// Only completed months/years count as trophies
+function currentMonthKey(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
+function currentYearKey(){return String(new Date().getFullYear());}
+function isMonthCompleted(m){return m<currentMonthKey();}
+function isYearCompleted(y){return y<currentYearKey();}
+
+function computeTrophies(player,allGames,allPlayers){
+const monthMvps=[]; // {month, lbl}
+const yearMvps=[];  // {year}
+const statLeaders=[]; // {month, lbl, stat, val}
+// Group by month — only completed months count
+const months=[...new Set(allGames.map(g=>gameYearMonth(g)).filter(Boolean))].filter(isMonthCompleted).sort();
+months.forEach(m=>{
+const mg=allGames.filter(g=>gameYearMonth(g)===m);
+const stats=allPlayers.map(p=>{
+const pg=mg.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,pg};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+if(stats[0]&&stats[0].p.id===player.id){
+const [y,mo]=m.split("-");
+monthMvps.push({month:m,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`});
+}
+["pts","reb","ast","stl","blk"].forEach(k=>{
+const best=stats.slice().sort((a,b)=>avg(b.pg,k)-avg(a.pg,k))[0];
+if(best&&best.p.id===player.id&&avg(best.pg,k)>0){
+const [y,mo]=m.split("-");
+statLeaders.push({month:m,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`,stat:STAT_LABEL[k],val:avg(best.pg,k)});
+}
+});
+});
+// Year MVPs — only completed years count
+const years=[...new Set(allGames.map(g=>g.date&&g.date.slice(0,4)).filter(Boolean))].filter(isYearCompleted).sort();
+years.forEach(y=>{
+const yg=allGames.filter(g=>g.date&&g.date.startsWith(y));
+const stats=allPlayers.map(p=>{
+const pg=yg.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+if(stats[0]&&stats[0].p.id===player.id) yearMvps.push({year:y});
+});
+// Special achievements (count occurrences)
+const myGames=allGames.filter(g=>g.playerId===player.id);
+const special=[];
+const c30=myGames.filter(g=>(+g.pts||0)>=30).length;
+if(c30>0)special.push({icon:"🔥",label:`30+ punten game`,count:c30});
+const c20r=myGames.filter(g=>(+g.reb||0)>=20).length;
+if(c20r>0)special.push({icon:"💪",label:`20+ rebounds`,count:c20r});
+const c10a=myGames.filter(g=>(+g.ast||0)>=10).length;
+if(c10a>0)special.push({icon:"🎯",label:`10+ assists`,count:c10a});
+const c5s=myGames.filter(g=>(+g.stl||0)>=5).length;
+if(c5s>0)special.push({icon:"🦅",label:`5+ steals`,count:c5s});
+const c5b=myGames.filter(g=>(+g.blk||0)>=5).length;
+if(c5b>0)special.push({icon:"🚫",label:`5+ blocks`,count:c5b});
+// Triple double = at least 3 stats with 10+
+const td=myGames.filter(g=>{
+const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=10).length;
+return ten>=3;
+}).length;
+if(td>0)special.push({icon:"💎",label:`Triple-double`,count:td});
+return{monthMvps,yearMvps,statLeaders,special};
+}
+
+// ── Trophy Case Component
+function TrophyCase({player,allGames,allPlayers}){
+const t=useMemo(()=>computeTrophies(player,allGames,allPlayers),[player,allGames,allPlayers]);
+const totalTrophies=t.monthMvps.length+t.yearMvps.length+t.statLeaders.length+t.special.reduce((s,x)=>s+x.count,0);
+if(totalTrophies===0)return null;
+return(
+<div data-testid="trophy-case" style={{marginBottom:20}}>
+<div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5}}>🏆 TROPHY CASE</div>
+<div style={{color:"#f5a524",fontSize:11,fontWeight:700}}>{totalTrophies} prijzen</div>
+</div>
+{t.yearMvps.length>0&&(
+<div style={{marginBottom:10}}>
+<div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>👑 MVP VAN HET JAAR</div>
+<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+{t.yearMvps.map(y=>(
+<div key={y.year} style={{background:"linear-gradient(135deg,#3a1500,#1a0a0a)",border:"1px solid #f5a524",borderRadius:10,padding:"6px 10px",fontSize:12,fontWeight:700,color:"#f5a524"}}>👑 {y.year}</div>
+))}
+</div>
+</div>
+)}
+{t.monthMvps.length>0&&(
+<div style={{marginBottom:10}}>
+<div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>🏆 MVP VAN DE MAAND <span style={{color:GREY,fontWeight:500}}>· {t.monthMvps.length}×</span></div>
+<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+{t.monthMvps.map(m=>(
+<div key={m.month} style={{background:`${RED}22`,border:`1px solid ${RED}`,borderRadius:10,padding:"5px 10px",fontSize:11,fontWeight:700,color:WHITE}}>🏆 {m.lbl}</div>
+))}
+</div>
+</div>
+)}
+{t.statLeaders.length>0&&(
+<div style={{marginBottom:10}}>
+<div style={{color:"#27AE60",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>📊 STAT LEADER TITELS <span style={{color:GREY,fontWeight:500}}>· {t.statLeaders.length}×</span></div>
+<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+{t.statLeaders.map((s,i)=>(
+<div key={i} style={{background:"#0a2a0a",border:"1px solid #27AE60",borderRadius:10,padding:"5px 10px",fontSize:11,fontWeight:700,color:"#27AE60"}}>📊 {s.stat} · {s.lbl}</div>
+))}
+</div>
+</div>
+)}
+{t.special.length>0&&(
+<div>
+<div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>⭐ SPECIALE PRESTATIES</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+{t.special.map((s,i)=>(
+<div key={i} style={{background:INPUTBG,border:"1px solid #f5a52455",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:8}}>
+<div style={{fontSize:20}}>{s.icon}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</div>
+<div style={{color:"#f5a524",fontSize:11,fontWeight:700}}>{s.count}×</div>
+</div>
+</div>
+))}
+</div>
+</div>
+)}
+</div>
+);
+}
+
 // ── Player Profile Modal
 function PlayerProfileModal({player,allGames,allPlayers,onClose,onEditPlayer,onPerfClick,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
@@ -474,6 +620,7 @@ return(
 </div>
 ))}
 </div>
+<TrophyCase player={player} allGames={allGames} allPlayers={allPlayers}/>
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
 return(
@@ -503,7 +650,7 @@ return(
 }
 
 // ── Monthly Stats Tab
-function MonthlyStats({games,players}){
+function MonthlyStats({games,players,onOpenPlayer}){
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 
@@ -535,6 +682,60 @@ return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 const [yr,mo]=selMonth.split("-");
 const monthLabel=`${MONTHS[parseInt(mo)-1]} ${yr}`;
 
+// MVP per month (used for streaks + counts + past-months carousel)
+// Only completed months count as trophies
+const monthMvpInfo=useMemo(()=>{
+const map={};
+availMonths.filter(isMonthCompleted).forEach(m=>{
+const mGames=games.filter(g=>gameYearMonth(g)===m);
+const stats=players.map(p=>{
+const pg=mGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast")};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+if(stats[0])map[m]={...stats[0]};
+});
+return map;
+},[availMonths,games,players]);
+
+// Count of MVP titles per player
+const mvpCounts=useMemo(()=>{
+const c={};
+Object.values(monthMvpInfo).forEach(info=>{c[info.p.id]=(c[info.p.id]||0)+1;});
+return c;
+},[monthMvpInfo]);
+
+// Streak ending at a given month for a player
+function streakAt(monthKey,playerId){
+const asc=[...availMonths].sort();
+const idx=asc.indexOf(monthKey);
+if(idx<0)return 0;
+let s=0;
+for(let i=idx;i>=0;i--){
+if(monthMvpInfo[asc[i]]&&monthMvpInfo[asc[i]].p.id===playerId)s++;
+else break;
+}
+return s;
+}
+
+// MVP of the year (across current year's games) — only awarded for completed years
+const yearKey=selMonth.split("-")[0];
+const yearMvp=useMemo(()=>{
+if(!isYearCompleted(yearKey))return null; // year not over yet → no trophy
+const yGames=games.filter(g=>g.date&&g.date.startsWith(yearKey));
+if(!yGames.length)return null;
+const stats=players.map(p=>{
+const pg=yGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast")};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+return stats[0]||null;
+},[games,players,yearKey]);
+
+const openPlayer=pid=>{if(onOpenPlayer)onOpenPlayer(pid);};
+
 return(
 <div style={{padding:"16px 16px 80px"}}>
 {/* Month picker */}
@@ -555,10 +756,37 @@ return(
 
 {monthGames.length>0&&(
 <>
+{/* MVP van het jaar */}
+{yearMvp&&(
+<div onClick={()=>openPlayer(yearMvp.p.id)} data-testid="mvp-of-year-card" style={{background:"linear-gradient(135deg,#3a1500,#1a0a0a)",border:`1px solid #f5a524`,borderRadius:14,padding:"14px 16px",marginBottom:14,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+<div style={{fontSize:26}}>👑</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#f5a524",fontSize:10,fontWeight:800,letterSpacing:1.5,marginBottom:2}}>MVP VAN HET JAAR · {yearKey}</div>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={yearMvp.p} size={36}/>
+<div style={{minWidth:0,flex:1}}>
+<div style={{fontWeight:800,fontSize:16,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{yearMvp.p.name}</div>
+<div style={{color:GREY,fontSize:12}}>{yearMvp.games.length}G · {yearMvp.eff} gem. eff · {yearMvp.ppg} PPG</div>
+</div>
+</div>
+</div>
+<span style={{color:GREY,fontSize:14}}>→</span>
+</div>
+)}
+
 {/* MVP Card */}
-{mvp&&(
-<div style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:2,marginBottom:12}}>🏆 MVP VAN DE MAAND</div>
+{mvp&&(() => {
+const titles=mvpCounts[mvp.player.id]||0;
+const stk=streakAt(selMonth,mvp.player.id);
+return (
+<div onClick={()=>openPlayer(mvp.player.id)} data-testid="mvp-of-month-card" style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:14,padding:"16px",marginBottom:20,cursor:"pointer",position:"relative"}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:2}}>🏆 MVP VAN DE MAAND</div>
+<div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+{stk>=2&&<span style={{background:"#f5a52422",color:"#f5a524",border:"1px solid #f5a52455",borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🔥 {stk}-streak</span>}
+{titles>=2&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🏆 {titles}× MVP</span>}
+</div>
+</div>
 <div style={{display:"flex",alignItems:"center",gap:14}}>
 <Avatar player={mvp.player} size={56}/>
 <div style={{flex:1}}>
@@ -572,7 +800,7 @@ return(
 </div>
 </div>
 </div>
-)}
+);})()}
 
 {/* Stat leaders */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>STAT LEADERS — {monthLabel.toUpperCase()}</div>
@@ -607,70 +835,63 @@ return(
 </div>
 ))}
 
-          {/* Games by day */}
-          <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:24,marginBottom:12}}>AFGELOPEN GAMES — {monthLabel.toUpperCase()}</div>
+          {/* MVPs van afgelopen maanden — carousel */}
           {(() => {
-            const matchMap={};
-            monthGames.forEach(g=>{const key=g.matchId||g.id;if(!matchMap[key])matchMap[key]=[];matchMap[key].push(g);});
-            const matchesByDate={};
-            Object.values(matchMap).forEach(mG=>{const date=mG[0].date;if(!matchesByDate[date])matchesByDate[date]=[];matchesByDate[date].push(mG);});
-            const sortedDays=Object.keys(matchesByDate).sort().reverse();
-            if(sortedDays.length===0)return <div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games deze maand</div>;
-            return sortedDays.map(date=>(
-              <div key={date} style={{marginBottom:20}}>
-                <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:8}}>
-                  {new Date(date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}
-                </div>
-                {matchesByDate[date].map((mG,mi)=>{
-                  const s=mG[0];
-                  const tAN=s.teamAName||"Team A",tBN=s.teamBName||"Team B";
-                  const hasScore=s.teamAScore&&s.teamBScore;
-                  const aS=parseFloat(s.teamAScore),bS=parseFloat(s.teamBScore);
-                  const aWon=hasScore&&aS>bS,bWon=hasScore&&bS>aS;
-                  const tAP=mG.filter(g=>g.team==="A"),tBP=mG.filter(g=>g.team==="B"),tCP=mG.filter(g=>g.team==="chameleon");
-                  return(
-                    <div key={mi} style={{background:INPUTBG,borderRadius:12,overflow:"hidden",marginBottom:12}}>
-                      {hasScore?(
-                        <div style={{background:"#111",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
-                          <div style={{textAlign:"right",flex:1}}><span style={{fontWeight:700,fontSize:13,color:aWon?WHITE:GREY}}>{tAN}</span></div>
-                          <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <span style={{fontSize:22,fontWeight:800,color:aWon?WHITE:GREY}}>{s.teamAScore}</span>
-                            <span style={{color:GREY,fontSize:14}}>–</span>
-                            <span style={{fontSize:22,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
-                          </div>
-                          <div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:13,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+            const otherMonths = availMonths.filter(m => m !== selMonth);
+            if (otherMonths.length === 0) return null;
+            // Rank players by total MVP titles to assign podium medals
+            const rankList = Object.entries(mvpCounts).sort((a,b)=>b[1]-a[1]);
+            const medalFor = pid => {
+              const idx = rankList.findIndex(([id])=>id===pid);
+              if (idx === 0 && rankList[0] && rankList[0][1] >= 2) return "🥇";
+              if (idx === 1 && rankList[1] && rankList[1][1] >= 2) return "🥈";
+              if (idx === 2 && rankList[2] && rankList[2][1] >= 2) return "🥉";
+              return null;
+            };
+            const cards = otherMonths.map(m => {
+              const info = monthMvpInfo[m];
+              if (!info) return null;
+              const [y2, mo2] = m.split("-");
+              const lbl = `${MONTHS[parseInt(mo2)-1]} ${y2}`;
+              return {m, lbl, mvp: info, streak: streakAt(m, info.p.id), titles: mvpCounts[info.p.id]||0, medal: medalFor(info.p.id)};
+            }).filter(Boolean);
+            if (cards.length === 0) return null;
+            return (
+              <>
+                <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:24,marginBottom:12}}>MVP'S AFGELOPEN MAANDEN</div>
+                <div data-testid="mvps-past-months-carousel" style={{display:"flex",gap:12,overflowX:"auto",paddingBottom:8,marginBottom:4,marginLeft:-16,marginRight:-16,paddingLeft:16,paddingRight:16}}>
+                  {cards.map(({m, lbl, mvp, streak, titles, medal}) => (
+                    <div key={m} data-testid={`mvp-past-card-${m}`} onClick={()=>openPlayer(mvp.p.id)} style={{flexShrink:0,width:210,background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${medal?"#f5a52488":`${RED}55`}`,borderRadius:14,padding:"14px",cursor:"pointer",position:"relative"}}>
+                      {medal&&<div style={{position:"absolute",top:-10,right:-6,fontSize:24,filter:"drop-shadow(0 2px 4px rgba(0,0,0,0.6))"}}>{medal}</div>}
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,gap:6}}>
+                        <div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1.5}}>🏆 {lbl.toUpperCase()}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                        <Avatar player={mvp.p} size={44}/>
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{fontWeight:800,fontSize:15,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mvp.p.name}</div>
+                          <div style={{color:GREY,fontSize:11}}>{mvp.games.length}G · {mvp.eff} eff</div>
                         </div>
-                      ):(
-                        <div style={{background:"#111",padding:"8px 14px",textAlign:"center"}}>
-                          <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span>
+                      </div>
+                      {(streak>=2||titles>=2)&&(
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+                          {streak>=2&&<span style={{background:"#f5a52422",color:"#f5a524",border:"1px solid #f5a52455",borderRadius:8,padding:"1px 6px",fontSize:9,fontWeight:700}}>🔥 {streak}x</span>}
+                          {titles>=2&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:8,padding:"1px 6px",fontSize:9,fontWeight:700}}>{titles}× MVP</span>}
                         </div>
                       )}
-                      <div style={{padding:"8px 0"}}>
-                        {[{label:tAN,list:tAP,won:aWon},{label:tBN,list:tBP,won:bWon},{label:"🦎 Kameleon",list:tCP,won:false}]
-                          .filter(t=>t.list.length>0).map(({label,list,won})=>(
-                          <div key={label}>
-                            <div style={{color:won?RED:GREY,fontSize:11,fontWeight:700,padding:"4px 14px 2px"}}>{label}{won?" 🏆":""}</div>
-                            {list.map(g=>{
-                              const p=players.find(pl=>pl.id===g.playerId);
-                              return(
-                                <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 14px"}}>
-                                  <Avatar player={p} size={30}/>
-                                  <div style={{flex:1}}>
-                                    <div style={{fontWeight:600,fontSize:13,color:WHITE}}>{p?.name||"?"}</div>
-                                    <div style={{color:GREY,fontSize:11}}>{g.pts||0} pts · {g.reb||0} reb · {g.ast||0} ast</div>
-                                  </div>
-                                  <div style={{color:RED,fontSize:12,fontWeight:700}}>{calcFps(g)} fps</div>
-                                </div>
-                              );
-                            })}
+                      <div style={{display:"flex",gap:12,paddingTop:8,borderTop:`1px solid ${RED}22`}}>
+                        {[["PPG",mvp.ppg],["RPG",mvp.rpg],["APG",mvp.apg]].map(([l,v])=>(
+                          <div key={l} style={{flex:1,textAlign:"center"}}>
+                            <div style={{color:WHITE,fontWeight:700,fontSize:15}}>{v}</div>
+                            <div style={{color:GREY,fontSize:10}}>{l}</div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            ));
+                  ))}
+                </div>
+              </>
+            );
           })()}
 </>
 )}
@@ -763,20 +984,23 @@ return(
 );
 }
 
-// ── Comment Section
+// ── Comment Section (with nested replies)
 function CommentSection({gameId,comments,onAddComment}){
 const [tempName,setTempName]=useState("");
 const [text,setText]=useState("");
 const [showGifPicker,setShowGifPicker]=useState(false);
 const [showStickerPicker,setShowStickerPicker]=useState(false);
 const [selectedGif,setSelectedGif]=useState(null);
+const [replyTo,setReplyTo]=useState(null); // comment id we're replying to (null = top-level)
+const [stickerTarget,setStickerTarget]=useState(null); // null=main input, otherwise comment id
 const {IS,BR}=styles();
 
 function handleSubmit(){
-if(!tempName.trim()||!text.trim()&&!selectedGif)return;
+if(!tempName.trim()||(!text.trim()&&!selectedGif))return;
 onAddComment({
-id:Date.now().toString(),
+id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),
 gameId,
+parentId:replyTo||null,
 tempName:tempName.trim(),
 text:text.trim(),
 gif:selectedGif||null,
@@ -784,7 +1008,36 @@ createdAt:new Date().toISOString()
 });
 setText("");
 setSelectedGif(null);
+setReplyTo(null);
 }
+
+// Build tree
+const byParent={};
+comments.forEach(c=>{const pid=c.parentId||"_root";if(!byParent[pid])byParent[pid]=[];byParent[pid].push(c);});
+Object.keys(byParent).forEach(k=>byParent[k].sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt)));
+
+const renderComment=(c,depth=0)=>{
+const children=byParent[c.id]||[];
+return (
+<div key={c.id} style={{marginLeft:depth>0?Math.min(depth*16,48):0,marginBottom:8}}>
+<div data-testid={`comment-${c.id}`} style={{background:INPUTBG,borderRadius:10,padding:"10px 12px",borderLeft:depth>0?`2px solid ${RED}33`:"none"}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+<div style={{width:28,height:28,borderRadius:"50%",background:"#2a2a2a",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,color:WHITE}}>{(c.tempName||"?").slice(0,2).toUpperCase()}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:600,fontSize:13,color:WHITE}}>{c.tempName}</div>
+<div style={{color:GREY,fontSize:10}}>{new Date(c.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+</div>
+</div>
+{c.text&&<div style={{color:WHITE,fontSize:14,lineHeight:1.5,marginTop:4}}>{c.text}</div>}
+{c.gif&&<img src={c.gif} alt="" style={{maxHeight:140,borderRadius:8,marginTop:6}}/>}
+<button data-testid={`reply-btn-${c.id}`} onClick={()=>{setReplyTo(c.id);setText("");setSelectedGif(null);}} style={{background:"transparent",border:"none",color:GREY,fontSize:11,fontWeight:600,cursor:"pointer",padding:"6px 0 0",display:"flex",alignItems:"center",gap:4}}>↩ Reageer</button>
+</div>
+{children.map(ch=>renderComment(ch,depth+1))}
+</div>
+);
+};
+
+const replyTarget=replyTo?comments.find(c=>c.id===replyTo):null;
 
 return(
 <div style={{marginTop:20,paddingTop:20,borderTop:`1px solid ${DIVIDER}`}}>
@@ -792,33 +1045,27 @@ return(
 
 {/* Comment input */}
 <div style={{background:INPUTBG,borderRadius:12,padding:"12px",marginBottom:16}}>
+{replyTarget&&(
+<div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:`${RED}15`,borderRadius:8,marginBottom:8,fontSize:12}}>
+<span style={{color:RED}}>↩ Reactie op <b>{replyTarget.tempName}</b></span>
+<button onClick={()=>setReplyTo(null)} style={{marginLeft:"auto",background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:14}}>×</button>
+</div>
+)}
 <input placeholder="Je naam (tijdelijk)" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>
 <div style={{display:"flex",gap:8,marginBottom:8}}>
-<input placeholder="Schrijf een comment..." style={{...IS,flex:1}} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
+<input placeholder={replyTarget?"Schrijf je antwoord...":"Schrijf een comment..."} style={{...IS,flex:1}} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSubmit()}/>
 </div>
 {selectedGif&&<div style={{marginBottom:8}}><img src={selectedGif} alt="" style={{maxHeight:120,borderRadius:8}}/><button onClick={()=>setSelectedGif(null)} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",marginLeft:8}}>✕</button></div>}
 <div style={{display:"flex",gap:8}}>
 <button onClick={()=>setShowGifPicker(true)} style={{background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:8,padding:"8px 12px",fontSize:13,cursor:"pointer"}}>🎬 GIF</button>
 <button onClick={()=>setShowStickerPicker(true)} style={{background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:8,padding:"8px 12px",fontSize:13,cursor:"pointer"}}>✨ Sticker</button>
-<button onClick={handleSubmit} disabled={!tempName.trim()||(!text.trim()&&!selectedGif)} style={{...BR,flex:1,opacity:(!tempName.trim()||(!text.trim()&&!selectedGif))?0.5:1}}>Plaatsen</button>
+<button onClick={handleSubmit} disabled={!tempName.trim()||(!text.trim()&&!selectedGif)} style={{...BR,flex:1,opacity:(!tempName.trim()||(!text.trim()&&!selectedGif))?0.5:1}}>{replyTarget?"Antwoord":"Plaatsen"}</button>
 </div>
 </div>
 
-{/* Comments list */}
-{comments.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Nog geen comments</div>}
-{comments.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(c=>(
-<div key={c.id} style={{background:INPUTBG,borderRadius:10,padding:"12px",marginBottom:8}}>
-<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-<div style={{width:32,height:32,borderRadius:"50%",background:"#2a2a2a",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:12,color:WHITE}}>{c.tempName.slice(0,2).toUpperCase()}</div>
-<div>
-<div style={{fontWeight:600,fontSize:14,color:WHITE}}>{c.tempName}</div>
-<div style={{color:GREY,fontSize:11}}>{new Date(c.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}</div>
-</div>
-</div>
-{c.text&&<div style={{color:WHITE,fontSize:14,lineHeight:1.5,marginTop:8}}>{c.text}</div>}
-{c.gif&&<img src={c.gif} alt="" style={{maxHeight:150,borderRadius:8,marginTop:8}}/>}
-</div>
-))}
+{/* Comments tree */}
+{(!byParent._root||byParent._root.length===0)&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Nog geen comments</div>}
+{byParent._root&&byParent._root.slice().reverse().map(c=>renderComment(c,0))}
 
 {showGifPicker&&<GifPicker onSelect={url=>{setSelectedGif(url);setShowGifPicker(false);}} onClose={()=>setShowGifPicker(false)}/>}
 {showStickerPicker&&<StickerPicker onSelect={sticker=>{setText(t=>t+sticker);setShowStickerPicker(false);}} onClose={()=>setShowStickerPicker(false)}/>}
@@ -827,7 +1074,7 @@ return(
 }
 
 // ── Full Games Section
-function FullGamesSection({scheduledGames,pastGames,onAddScheduledGame,onEditScheduledGame,onDeleteScheduledGame,isAdmin}){
+function FullGamesSection({scheduledGames,pastGames,players,onAddScheduledGame,onEditScheduledGame,onDeleteScheduledGame,isAdmin}){
 const [selectedMonth,setSelectedMonth]=useState(new Date());
 const [showAddModal,setShowAddModal]=useState(false);
 const [editingScheduled,setEditingScheduled]=useState(null);
@@ -937,18 +1184,78 @@ position:"relative"
 </div>
 ))}
 
-{/* Past Games */}
-{pastGamesList.length>0&&(
-<>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12,marginTop:24}}>AFGELOPEN GAMES</div>
-{pastGamesList.map(g=>(
-<div key={g.id} style={{background:INPUTBG,borderRadius:10,padding:"12px",marginBottom:8,opacity:0.7}}>
-<div style={{fontWeight:700,fontSize:16,color:WHITE}}>{g.title}</div>
-<div style={{color:GREY,fontSize:13}}>{new Date(g.date).toLocaleDateString("nl-NL",{day:"numeric",month:"short",year:"numeric"})}</div>
-</div>
-))}
-</>
-)}
+{/* Past Games — detailed */}
+{(() => {
+  const calMonthKey = `${year}-${String(month+1).padStart(2,"0")}`;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const monthPast = pastGames.filter(g => g.date && g.date.slice(0,7) === calMonthKey && g.date <= todayStr);
+  if (monthPast.length === 0) return null;
+  const matchMap = {};
+  monthPast.forEach(g => { const key = g.matchId||g.id; if(!matchMap[key]) matchMap[key]=[]; matchMap[key].push(g); });
+  const matchesByDate = {};
+  Object.values(matchMap).forEach(mG => { const date=mG[0].date; if(!matchesByDate[date]) matchesByDate[date]=[]; matchesByDate[date].push(mG); });
+  const sortedDays = Object.keys(matchesByDate).sort().reverse();
+  return (
+    <>
+      <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12,marginTop:24}}>AFGELOPEN GAMES — {MONTHS[month].toUpperCase()} {year}</div>
+      {sortedDays.map(date => (
+        <div key={date} data-testid={`past-games-day-${date}`} style={{marginBottom:20}}>
+          <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:8}}>
+            {new Date(date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}
+          </div>
+          {matchesByDate[date].map((mG,mi) => {
+            const s = mG[0];
+            const tAN = s.teamAName||"Team A", tBN = s.teamBName||"Team B";
+            const hasScore = s.teamAScore && s.teamBScore;
+            const aS = parseFloat(s.teamAScore), bS = parseFloat(s.teamBScore);
+            const aWon = hasScore && aS>bS, bWon = hasScore && bS>aS;
+            const tAP = mG.filter(g=>g.team==="A"), tBP = mG.filter(g=>g.team==="B"), tCP = mG.filter(g=>g.team==="chameleon");
+            return (
+              <div key={mi} style={{background:INPUTBG,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+                {hasScore ? (
+                  <div style={{background:"#111",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+                    <div style={{textAlign:"right",flex:1}}><span style={{fontWeight:700,fontSize:13,color:aWon?WHITE:GREY}}>{tAN}</span></div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:22,fontWeight:800,color:aWon?WHITE:GREY}}>{s.teamAScore}</span>
+                      <span style={{color:GREY,fontSize:14}}>–</span>
+                      <span style={{fontSize:22,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
+                    </div>
+                    <div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:13,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+                  </div>
+                ) : (
+                  <div style={{background:"#111",padding:"8px 14px",textAlign:"center"}}>
+                    <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span>
+                  </div>
+                )}
+                <div style={{padding:"8px 0"}}>
+                  {[{label:tAN,list:tAP,won:aWon},{label:tBN,list:tBP,won:bWon},{label:"🦎 Kameleon",list:tCP,won:false}]
+                    .filter(t=>t.list.length>0).map(({label,list,won}) => (
+                    <div key={label}>
+                      <div style={{color:won?RED:GREY,fontSize:11,fontWeight:700,padding:"4px 14px 2px"}}>{label}{won?" 🏆":""}</div>
+                      {list.map(g => {
+                        const p = (players||[]).find(pl=>pl.id===g.playerId);
+                        return (
+                          <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 14px"}}>
+                            <Avatar player={p} size={30}/>
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:600,fontSize:13,color:WHITE}}>{p?.name||"?"}</div>
+                              <div style={{color:GREY,fontSize:11}}>{g.pts||0} pts · {g.reb||0} reb · {g.ast||0} ast</div>
+                            </div>
+                            <div style={{color:RED,fontSize:12,fontWeight:700}}>{calcFps(g)} fps</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </>
+  );
+})()}
 
 {isAdmin&&<button onClick={()=>{setEditingScheduled(null);setShowAddModal(true);}} style={{background:RED,color:WHITE,border:"none",borderRadius:20,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%",marginTop:16}}>+ Game plannen</button>}
 
@@ -992,6 +1299,219 @@ return(
 <button onClick={save} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
 </div>
 </div>
+</div>
+);
+}
+
+// ── Performance Picker (for attaching a performance to a LARP post)
+function PerfPicker({games,players,onSelect,onClose}){
+const [q,setQ]=useState("");
+const {IS}=styles();
+const sorted=games.slice().sort((a,b)=>b.date.localeCompare(a.date));
+const filtered=sorted.filter(g=>{
+const p=players.find(pl=>pl.id===g.playerId);
+const name=(p?.name||"").toLowerCase();
+return !q||name.includes(q.toLowerCase())||g.date.includes(q);
+});
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:550}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:12}}>🏀 Performance koppelen</div>
+<input placeholder="Zoek op naam of datum..." style={{...IS,marginBottom:14}} value={q} onChange={e=>setQ(e.target.value)}/>
+{filtered.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen performances gevonden</div>}
+{filtered.slice(0,30).map(g=>{
+const p=players.find(pl=>pl.id===g.playerId);
+return(
+<div key={g.id} onClick={()=>onSelect(g)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<Avatar player={p} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p?.name||"?"}</div>
+<div style={{color:GREY,fontSize:11}}>{g.date} · {g.pts||0} pts · {g.reb||0} reb · {g.ast||0} ast</div>
+</div>
+<div style={{color:RED,fontSize:12,fontWeight:700}}>{calcFps(g)} fps</div>
+</div>
+);
+})}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:12}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
+// ── Performance Embed Card (used in LARP posts)
+function PerfEmbed({game,players,onClick}){
+if(!game)return null;
+const p=players.find(pl=>pl.id===game.playerId);
+return(
+<div onClick={e=>{e.stopPropagation();onClick&&onClick();}} data-testid={`perf-embed-${game.id}`} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#0d0d0d",border:`1px solid ${RED}55`,borderRadius:12,marginTop:8,cursor:"pointer"}}>
+<Avatar player={p} size={38}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+<span style={{color:RED,fontSize:9,fontWeight:700,letterSpacing:1}}>🏀 PERFORMANCE</span>
+</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name||"?"}</div>
+<div style={{color:GREY,fontSize:11}}>{game.pts||0} pts · {game.reb||0} reb · {game.ast||0} ast · {game.date}</div>
+</div>
+<div style={{color:RED,fontSize:14,fontWeight:800}}>{calcFps(game)}</div>
+</div>
+);
+}
+
+// ── LARP Replies (one-level nested would be okay; keeping flat per post)
+function LarpReplies({postId,replies,onAddReply,onDeleteReply,isAdmin}){
+const [tempName,setTempName]=useState("");
+const [text,setText]=useState("");
+const [selectedGif,setSelectedGif]=useState(null);
+const [showGifPicker,setShowGifPicker]=useState(false);
+const [showStickerPicker,setShowStickerPicker]=useState(false);
+const {IS,BR}=styles();
+function submit(){
+if(!tempName.trim()||(!text.trim()&&!selectedGif))return;
+onAddReply({id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),postId,tempName:tempName.trim(),text:text.trim(),gif:selectedGif||null,createdAt:new Date().toISOString()});
+setText("");setSelectedGif(null);
+}
+const postReplies=replies.filter(r=>r.postId===postId).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));
+return(
+<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
+<div style={{background:"#0a0a0a",borderRadius:10,padding:"10px",marginBottom:10}}>
+<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:6,fontSize:13}} value={tempName} onChange={e=>setTempName(e.target.value)}/>
+<input placeholder="Antwoord..." style={{...IS,fontSize:13,marginBottom:6}} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+{selectedGif&&<div style={{marginBottom:6}}><img src={selectedGif} alt="" style={{maxHeight:100,borderRadius:8}}/><button onClick={()=>setSelectedGif(null)} style={{background:"transparent",border:"none",color:GREY,fontSize:11,cursor:"pointer",marginLeft:6}}>✕</button></div>}
+<div style={{display:"flex",gap:6}}>
+<button onClick={()=>setShowGifPicker(true)} style={{background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:8,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>🎬</button>
+<button onClick={()=>setShowStickerPicker(true)} style={{background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:8,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>✨</button>
+<button onClick={submit} disabled={!tempName.trim()||(!text.trim()&&!selectedGif)} style={{...BR,flex:1,padding:"6px 0",fontSize:13,opacity:(!tempName.trim()||(!text.trim()&&!selectedGif))?0.5:1}}>Reageer</button>
+</div>
+</div>
+{postReplies.length===0&&<div style={{color:GREY,fontSize:12,textAlign:"center",padding:10}}>Wees de eerste die reageert</div>}
+{postReplies.map(r=>(
+<div key={r.id} data-testid={`larp-reply-${r.id}`} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:`1px solid ${DIVIDER}`}}>
+<div style={{width:28,height:28,borderRadius:"50%",background:"#2a2a2a",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,color:WHITE,flexShrink:0}}>{(r.tempName||"?").slice(0,2).toUpperCase()}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:2}}>
+<span style={{fontWeight:700,fontSize:13,color:WHITE}}>{r.tempName}</span>
+<span style={{color:GREY,fontSize:10}}>{new Date(r.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+{isAdmin&&<button data-testid={`larp-reply-del-${r.id}`} onClick={()=>{if(confirm("Reply verwijderen?"))onDeleteReply(r.id);}} style={{marginLeft:"auto",background:"transparent",border:"none",color:RED,cursor:"pointer",fontSize:12,padding:"0 4px"}}>🗑</button>}
+</div>
+{r.text&&<div style={{color:WHITE,fontSize:13,lineHeight:1.4}}>{r.text}</div>}
+{r.gif&&<img src={r.gif} alt="" style={{maxHeight:120,borderRadius:8,marginTop:4}}/>}
+</div>
+</div>
+))}
+{showGifPicker&&<GifPicker onSelect={url=>{setSelectedGif(url);setShowGifPicker(false);}} onClose={()=>setShowGifPicker(false)}/>}
+{showStickerPicker&&<StickerPicker onSelect={s=>{setText(t=>t+s);setShowStickerPicker(false);}} onClose={()=>setShowStickerPicker(false)}/>}
+</div>
+);
+}
+
+// ── LARP Section (Twitter-like feed)
+function LarpSection({posts,replies,games,players,onCreatePost,onDeletePost,onPinPost,onLikePost,onAddReply,onDeleteReply,isAdmin,onOpenPerf}){
+const [tempName,setTempName]=useState("");
+const [text,setText]=useState("");
+const [selectedGif,setSelectedGif]=useState(null);
+const [selectedPerf,setSelectedPerf]=useState(null);
+const [showGifPicker,setShowGifPicker]=useState(false);
+const [showStickerPicker,setShowStickerPicker]=useState(false);
+const [showPerfPicker,setShowPerfPicker]=useState(false);
+const [expandedReplies,setExpandedReplies]=useState({});
+const [likedLocal,setLikedLocal]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_likes")||"{}");}catch(e){return{};}});
+const {IS,BR}=styles();
+
+function submit(){
+if(!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf))return;
+onCreatePost({
+id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),
+tempName:tempName.trim(),
+text:text.trim(),
+gif:selectedGif||null,
+performanceId:selectedPerf?.id||null,
+likes:0,
+pinned:false,
+createdAt:new Date().toISOString()
+});
+setText("");setSelectedGif(null);setSelectedPerf(null);
+}
+
+function toggleLike(p){
+const liked=!!likedLocal[p.id];
+const nl={...likedLocal,[p.id]:!liked};
+if(liked) delete nl[p.id];
+setLikedLocal(nl);
+try{localStorage.setItem("larp_likes",JSON.stringify(nl));}catch(e){}
+onLikePost(p,liked?-1:1);
+}
+
+const pinnedPost=posts.find(p=>p.pinned);
+const otherPosts=posts.filter(p=>!p.pinned).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+const ordered=pinnedPost?[pinnedPost,...otherPosts]:otherPosts;
+
+const renderPost=(post)=>{
+const perfGame=post.performanceId?games.find(g=>g.id===post.performanceId):null;
+const isLiked=!!likedLocal[post.id];
+const replyCount=replies.filter(r=>r.postId===post.id).length;
+const expanded=expandedReplies[post.id];
+return (
+<div key={post.id} data-testid={`larp-post-${post.id}`} style={{background:post.pinned?"linear-gradient(135deg,#1a0a0a,#150505)":INPUTBG,borderRadius:14,padding:"14px",marginBottom:12,border:post.pinned?`1px solid ${RED}55`:"none"}}>
+{post.pinned&&<div style={{color:RED,fontSize:9,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>📌 GEPIIND</div>}
+<div style={{display:"flex",gap:10,marginBottom:8}}>
+<div style={{width:40,height:40,borderRadius:"50%",background:`linear-gradient(135deg,${RED},#7a0000)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,color:WHITE,flexShrink:0}}>{(post.tempName||"?").slice(0,2).toUpperCase()}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
+<span style={{fontWeight:700,fontSize:15,color:WHITE}}>{post.tempName}</span>
+<span style={{color:GREY,fontSize:12}}>· {new Date(post.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+</div>
+</div>
+{isAdmin&&(
+<div style={{display:"flex",gap:4}}>
+<button onClick={()=>onPinPost(post.id)} style={{background:"transparent",border:"none",color:post.pinned?RED:GREY,cursor:"pointer",fontSize:14,padding:4}}>📌</button>
+<button data-testid={`larp-post-del-${post.id}`} onClick={()=>{if(confirm("Post verwijderen? Alle replies worden ook verwijderd."))onDeletePost(post.id);}} style={{background:"transparent",border:"none",color:RED,cursor:"pointer",fontSize:14,padding:4}}>🗑</button>
+</div>
+)}
+</div>
+{post.text&&<div style={{color:WHITE,fontSize:15,lineHeight:1.5,marginBottom:8,whiteSpace:"pre-wrap"}}>{post.text}</div>}
+{post.gif&&<img src={post.gif} alt="" style={{maxWidth:"100%",maxHeight:280,borderRadius:10,marginBottom:8}}/>}
+{perfGame&&<PerfEmbed game={perfGame} players={players} onClick={()=>onOpenPerf&&onOpenPerf(perfGame.id)}/>}
+<div style={{display:"flex",gap:14,marginTop:10,paddingTop:8,borderTop:`1px solid ${DIVIDER}`}}>
+<button data-testid={`larp-like-${post.id}`} onClick={()=>toggleLike(post)} style={{background:"transparent",border:"none",color:isLiked?RED:GREY,cursor:"pointer",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:5}}>
+{isLiked?"❤️":"🤍"} {post.likes||0}
+</button>
+<button data-testid={`larp-reply-toggle-${post.id}`} onClick={()=>setExpandedReplies(s=>({...s,[post.id]:!s[post.id]}))} style={{background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:5}}>
+💬 {replyCount}
+</button>
+</div>
+{expanded&&<LarpReplies postId={post.id} replies={replies} onAddReply={onAddReply} onDeleteReply={onDeleteReply} isAdmin={isAdmin}/>}
+</div>
+);
+};
+
+return(
+<div style={{padding:"16px 16px 80px"}}>
+{/* Compose box */}
+<div data-testid="larp-compose" style={{background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:16,border:`1px solid ${RED}33`}}>
+<div style={{color:RED,fontSize:10,fontWeight:800,letterSpacing:2,marginBottom:8}}>🐦 LARP</div>
+<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>
+<textarea placeholder="Wat speelt er...?" style={{...IS,minHeight:60,fontFamily:"inherit",resize:"vertical",fontSize:15,marginBottom:8}} value={text} onChange={e=>setText(e.target.value)}/>
+{selectedGif&&<div style={{position:"relative",marginBottom:8,display:"inline-block"}}><img src={selectedGif} alt="" style={{maxHeight:140,borderRadius:8}}/><button onClick={()=>setSelectedGif(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",width:24,height:24,color:WHITE,fontSize:12,cursor:"pointer"}}>✕</button></div>}
+{selectedPerf&&(
+<div style={{position:"relative",marginBottom:8}}>
+<PerfEmbed game={selectedPerf} players={players}/>
+<button onClick={()=>setSelectedPerf(null)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",width:22,height:22,color:WHITE,fontSize:11,cursor:"pointer"}}>✕</button>
+</div>
+)}
+<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+<button onClick={()=>setShowGifPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🎬 GIF</button>
+<button onClick={()=>setShowStickerPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>✨ Sticker</button>
+<button onClick={()=>setShowPerfPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🏀 Performance</button>
+<button data-testid="larp-post-btn" onClick={submit} disabled={!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:(!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf))?0.4:1}}>Larp 🐦</button>
+</div>
+</div>
+{/* Feed */}
+{posts.length===0&&<div style={{textAlign:"center",padding:"60px 20px",color:GREY}}><div style={{fontSize:48,marginBottom:12}}>🐦</div><div style={{color:WHITE,fontSize:17,fontWeight:600}}>Nog geen larps</div><div style={{fontSize:13,marginTop:4}}>Wees de eerste die wat post!</div></div>}
+{ordered.map(renderPost)}
+{showGifPicker&&<GifPicker onSelect={url=>{setSelectedGif(url);setShowGifPicker(false);}} onClose={()=>setShowGifPicker(false)}/>}
+{showStickerPicker&&<StickerPicker onSelect={s=>{setText(t=>t+s);setShowStickerPicker(false);}} onClose={()=>setShowStickerPicker(false)}/>}
+{showPerfPicker&&<PerfPicker games={games} players={players} onSelect={g=>{setSelectedPerf(g);setShowPerfPicker(false);}} onClose={()=>setShowPerfPicker(false)}/>}
 </div>
 );
 }
@@ -1501,6 +2021,8 @@ const [games,setGames]=useState([]);
 const [comments,setComments]=useState([]);
 const [scheduledGames,setScheduledGames]=useState([]);
 const [blogPosts,setBlogPosts]=useState([]);
+const [larpPosts,setLarpPosts]=useState([]);
+const [larpReplies,setLarpReplies]=useState([]);
 const [loading,setLoading]=useState(true);
 const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
@@ -1515,7 +2037,7 @@ const [viewingPost,setViewingPost]=useState(null);
 const [editingPost,setEditingPost]=useState(null);
 
 useEffect(()=>{
-let uP,uG,uC,uS,uB;
+let uP,uG,uC,uS,uB,uL,uLR;
 // Safety: force loading=false after 6s even if Firebase hasn't responded
 const timeout=setTimeout(()=>setLoading(false),6000);
 waitForFirebase().then(()=>{
@@ -1541,12 +2063,119 @@ uB=_onSnapshot(_col(_db,"blog_posts"),s=>{
 setBlogPosts(s.docs.map(d=>d.data()));
 bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
 },(err)=>{console.error("Blog posts listener error:",err);clearTimeout(timeout);setLoading(false);});
+uL=_onSnapshot(_col(_db,"larp_posts"),s=>{
+setLarpPosts(s.docs.map(d=>d.data()));
+},(err)=>console.error("Larp posts listener error:",err));
+uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
+setLarpReplies(s.docs.map(d=>d.data()));
+},(err)=>console.error("Larp replies listener error:",err));
 }).catch(()=>{clearTimeout(timeout);setLoading(false);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
 window.addEventListener('swUpdateAvailable',onUpdate);
-return()=>{uP&&uP();uG&&uG();uC&&uC();uS&&uS();uB&&uB();window.removeEventListener('swUpdateAvailable',onUpdate);clearTimeout(timeout);};
+return()=>{uP&&uP();uG&&uG();uC&&uC();uS&&uS();uB&&uB();uL&&uL();uLR&&uLR();window.removeEventListener('swUpdateAvailable',onUpdate);clearTimeout(timeout);};
 },[]);
+
+// ── Auto-generated LARP recaps (weekly + monthly MVP announcement)
+const autoRecapRanRef=useRef(false);
+useEffect(()=>{
+if(autoRecapRanRef.current)return;
+if(!games.length||!players.length||loading)return;
+// Wait one full cycle to ensure larpPosts subscription has fired at least once
+const t=setTimeout(async()=>{
+autoRecapRanRef.current=true;
+try{
+const now=new Date();
+// ── Weekly recap (top performer + biggest comeback of last completed week)
+const{start:wkStart,end:wkEnd,key:wkKey}=lastCompletedWeekRange(now);
+const recapId=`auto-week-${wkKey}`;
+if(!larpPosts.find(p=>p.id===recapId)){
+const inWeek=g=>{const d=new Date(g.date);d.setHours(0,0,0,0);return d>=wkStart&&d<=wkEnd;};
+const weekGames=games.filter(inWeek);
+if(weekGames.length>=2){
+const stats=players.map(p=>{
+const pg=weekGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+const bestGame=pg.slice().sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
+return{p,eff,pg,bestGame};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+// Previous week for comeback delta
+const prevEnd=new Date(wkStart);prevEnd.setDate(wkStart.getDate()-1);
+const prevStart=new Date(prevEnd);prevStart.setDate(prevEnd.getDate()-6);
+const inPrev=g=>{const d=new Date(g.date);d.setHours(0,0,0,0);return d>=prevStart&&d<=prevEnd;};
+const prevGames=games.filter(inPrev);
+let bigComeback=null;
+players.forEach(p=>{
+const cur=weekGames.filter(g=>g.playerId===p.id);
+const prev=prevGames.filter(g=>g.playerId===p.id);
+if(cur.length&&prev.length){
+const curEff=cur.reduce((s,g)=>s+(+calcFps(g)),0)/cur.length;
+const prevEff=prev.reduce((s,g)=>s+(+calcFps(g)),0)/prev.length;
+const delta=curEff-prevEff;
+if(delta>0&&(!bigComeback||delta>bigComeback.delta)){
+bigComeback={p,delta:parseFloat(delta.toFixed(1)),curEff:parseFloat(curEff.toFixed(1))};
+}
+}
+});
+const top=stats[0];
+if(top){
+const dateLbl=`${wkStart.toLocaleDateString("nl-NL",{day:"numeric",month:"short"})} – ${wkEnd.toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}`;
+let text=`📅 WEEKLY RECAP · ${dateLbl}\n\n🔥 Top performer:\n${top.p.name} · ${top.eff} gem. eff · ${top.pg.length}G\n\n`;
+if(bigComeback){
+text+=`📈 Grootste comeback:\n${bigComeback.p.name} · +${bigComeback.delta} eff t.o.v. vorige week`;
+}else{
+text+=`📈 Geen comeback-data (te weinig speeldagen vorige week)`;
+}
+await fbSave("larp_posts",{
+id:recapId,
+tempName:"LBA Bot 🤖",
+text,
+gif:null,
+performanceId:top.bestGame?.id||null,
+likes:0,
+pinned:false,
+createdAt:new Date().toISOString()
+});
+}
+}
+}
+// ── Monthly MVP announcement (previous completed month)
+const prevMonthDate=new Date(now.getFullYear(),now.getMonth()-1,1);
+const prevMonthKey=`${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth()+1).padStart(2,"0")}`;
+const mvpId=`auto-mvp-${prevMonthKey}`;
+if(!larpPosts.find(p=>p.id===mvpId)){
+const mGames=games.filter(g=>gameYearMonth(g)===prevMonthKey);
+if(mGames.length>=2){
+const stats=players.map(p=>{
+const pg=mGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,pg};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+const mvp=stats[0];
+if(mvp){
+const [y,mo]=prevMonthKey.split("-");
+const lbl=`${MONTHS[parseInt(mo)-1]} ${y}`;
+const text=`🏆 MVP VAN DE MAAND · ${lbl.toUpperCase()}\n\n${mvp.p.name} is officieel de MVP! 👑\n${mvp.pg.length}G · ${mvp.eff} gem. eff · ${avg(mvp.pg,"pts")} PPG · ${avg(mvp.pg,"reb")} RPG · ${avg(mvp.pg,"ast")} APG\n\nGefeliciteerd! 🎉🔥`;
+const bestGame=mvp.pg.slice().sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
+await fbSave("larp_posts",{
+id:mvpId,
+tempName:"LBA Bot 🤖",
+text,
+gif:null,
+performanceId:bestGame?.id||null,
+likes:0,
+pinned:false,
+createdAt:new Date().toISOString()
+});
+}
+}
+}
+}catch(e){console.error("Auto-recap error:",e);}
+},2500);
+return()=>clearTimeout(t);
+},[games,players,larpPosts,loading]);
 
 function showSaved(){setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),2500);}
 function showError(){setSaveStatus("error");setTimeout(()=>setSaveStatus(""),3000);}
@@ -1577,6 +2206,29 @@ showSaved();
 }
 }catch(e){console.error(e);showError();}
 }
+
+// LARP handlers
+async function createLarpPost(p){setSaveStatus("saving");try{await fbSave("larp_posts",p);showSaved();}catch(e){console.error(e);showError();}}
+async function deleteLarpPost(id){setSaveStatus("saving");try{await fbDel("larp_posts",id);await Promise.all(larpReplies.filter(r=>r.postId===id).map(r=>fbDel("larp_replies",r.id)));showSaved();}catch(e){console.error(e);showError();}}
+async function pinLarpPost(id){
+setSaveStatus("saving");
+try{
+const post=larpPosts.find(p=>p.id===id);
+if(post){
+const newPinned=!post.pinned;
+await Promise.all(larpPosts.filter(p=>p.pinned&&p.id!==id).map(p=>fbSave("larp_posts",{...p,pinned:false})));
+await fbSave("larp_posts",{...post,pinned:newPinned});
+showSaved();
+}
+}catch(e){console.error(e);showError();}
+}
+async function likeLarpPost(post,delta){
+setSaveStatus("saving");
+try{await fbSave("larp_posts",{...post,likes:Math.max(0,(post.likes||0)+delta)});showSaved();}
+catch(e){console.error(e);showError();}
+}
+async function addLarpReply(r){setSaveStatus("saving");try{await fbSave("larp_replies",r);showSaved();}catch(e){console.error(e);showError();}}
+async function deleteLarpReply(id){setSaveStatus("saving");try{await fbDel("larp_replies",id);showSaved();}catch(e){console.error(e);showError();}}
 
 function getSorted(){
 let gs=[...games];
@@ -1673,26 +2325,10 @@ Nu updaten
 )}
 </div>
 
-{/* Pinned Article Banner */}
-{(() => {
-const pinnedPost = blogPosts.find(p => p.pinned);
-if (!pinnedPost) return null;
-return (
-<div onClick={() => setViewingPost(pinnedPost)} style={{background: "linear-gradient(135deg,#1a0a0a,#2a0a0a)", border: `1px solid ${RED}33`, borderRadius: 12, padding: "10px 14px", margin: "0 16px 12px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12}}>
-<span style={{fontSize: 18}}>📌</span>
-<div style={{flex: 1, minWidth: 0}}>
-<div style={{color: RED, fontSize: 10, fontWeight: 700, letterSpacing: 1.5, marginBottom: 2}}>GEPIIND ARTIKEL</div>
-<div style={{color: WHITE, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{pinnedPost.title}</div>
-</div>
-<span style={{color: GREY, fontSize: 12}}>→</span>
-</div>
-);
-})()}
-
 {/* Tabs — 5 tabs now */}
 <div style={{display:"flex",borderBottom:`1px solid ${DIVIDER}`}}>
-{[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Maand"},{id:"blog",label:"Blog"},{id:"players",label:"Players"}].map(({id,label})=>(
-<button key={id} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
+{[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Maand"},{id:"larp",label:"LARP"},{id:"players",label:"Players"}].map(({id,label})=>(
+<button key={id} data-testid={`top-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
 ))}
 </div>
 
@@ -1716,13 +2352,13 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* MONTHLY TAB */}
-{tab==="monthly"&&<MonthlyStats games={games} players={players}/>}
+{tab==="monthly"&&<MonthlyStats games={games} players={players} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
 
 {/* FULL GAMES TAB */}
-{tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}
+{tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}
 
-{/* BLOG TAB */}
-{tab==="blog"&&<BlogSection posts={blogPosts} onAddPost={()=>setEditingPost({})} onEditPost={(p)=>setEditingPost(p)} onDeletePost={deleteBlogPost} onPinPost={pinBlogPost} isAdmin={isAdmin} onViewPost={setViewingPost}/>}
+{/* LARP TAB */}
+{tab==="larp"&&<LarpSection posts={larpPosts} replies={larpReplies} games={games} players={players} onCreatePost={createLarpPost} onDeletePost={deleteLarpPost} onPinPost={pinLarpPost} onLikePost={likeLarpPost} onAddReply={addLarpReply} onDeleteReply={deleteLarpReply} isAdmin={isAdmin} onOpenPerf={gid=>setModal({type:"perfDetail",gameId:gid})}/>}
 
 {/* PLAYERS TAB */}
 {tab==="players"&&(
@@ -1761,10 +2397,27 @@ return(
 </div>
 )}
 
+{/* Pinned LARP Banner — bottom (above tabs) */}
+{(() => {
+const pinnedLarp = larpPosts.find(p => p.pinned);
+if (!pinnedLarp) return null;
+const preview = (pinnedLarp.text||"").slice(0,80) || (pinnedLarp.gif?"[GIF]":"") || (pinnedLarp.performanceId?"[Performance]":"");
+return (
+<div data-testid="pinned-banner-bottom" onClick={() => setTab("larp")} style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",borderTop:`1px solid ${RED}55`,borderBottom:`1px solid ${RED}22`,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,zIndex:50,backdropFilter:"blur(8px)"}}>
+<span style={{fontSize:18}}>📌</span>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:2}}>GEPIIND · {pinnedLarp.tempName}</div>
+<div style={{color:WHITE,fontWeight:600,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{preview}</div>
+</div>
+<span style={{color:GREY,fontSize:12}}>→</span>
+</div>
+);
+})()}
+
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"blog",icon:"📝",label:"Blog"},{id:"players",icon:"👥",label:"Players"}].map(({id,icon,label})=>(
-<button key={id} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"}].map(({id,icon,label})=>(
+<button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>
 </button>
@@ -1803,5 +2456,6 @@ window.__showBootFallback && window.__showBootFallback(e && (e.stack || e.messag
 }
 </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-</body>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b89b372e1fe6fe',t:'MTc4MTQzMjQ2Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

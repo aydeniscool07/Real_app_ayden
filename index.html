@@ -2177,6 +2177,42 @@ createdAt:new Date().toISOString()
 return()=>clearTimeout(t);
 },[games,players,larpPosts,loading]);
 
+// ── One-time migration: blog_posts → larp_posts
+const migrationRanRef=useRef(false);
+useEffect(()=>{
+if(migrationRanRef.current||loading)return;
+if(!blogPosts.length){migrationRanRef.current=true;return;}
+migrationRanRef.current=true;
+(async()=>{
+try{
+for(const bp of blogPosts){
+const newId=`migrated-${bp.id}`;
+// If already migrated, just cleanup the old blog post
+if(larpPosts.find(p=>p.id===newId)){
+await fbDel("blog_posts",bp.id);
+continue;
+}
+let text="";
+if(bp.title)text+=`📰 ${bp.title}\n\n`;
+if(bp.content)text+=bp.content;
+if(bp.video)text+=`\n\n🎬 ${bp.video}`;
+await fbSave("larp_posts",{
+id:newId,
+tempName:"Redactie 📰",
+text:text.trim()||"(geen content)",
+gif:bp.image||null,
+performanceId:null,
+likes:0,
+pinned:!!bp.pinned,
+createdAt:bp.createdAt||new Date().toISOString()
+});
+await fbDel("blog_posts",bp.id);
+}
+console.log("Blog → LARP migratie voltooid");
+}catch(e){console.error("Migration error:",e);}
+})();
+},[blogPosts,larpPosts,loading]);
+
 function showSaved(){setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),2500);}
 function showError(){setSaveStatus("error");setTimeout(()=>setSaveStatus(""),3000);}
 
@@ -2456,6 +2492,6 @@ window.__showBootFallback && window.__showBootFallback(e && (e.stack || e.messag
 }
 </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b89b372e1fe6fe',t:'MTc4MTQzMjQ2Nw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b8c12f386919f7',t:'MTc4MTQzNDAyMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
 </html>

@@ -2482,6 +2482,582 @@ return(
 }
 
 // ══════════════════════════════════════════
+// ── BETTING SYSTEM
+// ══════════════════════════════════════════
+
+// American odds → decimal multiplier
+function oddsToDecimal(american){
+const o=parseInt(american);
+if(isNaN(o))return 1;
+return o>0?(o/100)+1:(100/Math.abs(o))+1;
+}
+function formatOdds(american){
+const o=parseInt(american);
+if(isNaN(o))return "+100";
+return o>0?`+${o}`:`${o}`;
+}
+function impliedProb(american){
+const o=parseInt(american);
+if(isNaN(o))return 50;
+return o>0?Math.round(100/(o+100)*100):Math.round(Math.abs(o)/(Math.abs(o)+100)*100);
+}
+
+// Auto-generate prop odds from player stats
+function generatePlayerProps(player,games){
+const pg=games.filter(g=>g.playerId===player.id).slice().sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+const last5=pg.slice(0,5);
+if(!last5.length)return[];
+const avgPts=avg(last5,"pts");
+const avgReb=avg(last5,"reb");
+const avgAst=avg(last5,"ast");
+const props=[];
+// PTS line
+if(avgPts>0){
+const line=Math.round(avgPts*2)/2; // round to .5
+const variance=avgPts<10?-120:avgPts<20?-110:+100;
+props.push({type:"pts",label:`${player.name} PTS`,line,overOdds:variance,underOdds:variance>0?-130:-120,stat:"pts"});
+}
+// REB line
+if(avgReb>0){
+const line=Math.round(avgReb*2)/2;
+props.push({type:"reb",label:`${player.name} REB`,line,overOdds:-110,underOdds:-110,stat:"reb"});
+}
+// AST line
+if(avgAst>0){
+const line=Math.round(avgAst*2)/2;
+props.push({type:"ast",label:`${player.name} AST`,line,overOdds:-110,underOdds:-110,stat:"ast"});
+}
+return props;
+}
+
+function generateFutureOdds(players,games){
+// Base MVP month odds on last 30 days efficiency
+const now=new Date();
+const cutoff=new Date(now);cutoff.setDate(now.getDate()-30);
+const recentGames=games.filter(g=>{if(!g.date)return false;return new Date(g.date)>=cutoff;});
+const effMap=players.map(p=>{
+const pg=recentGames.filter(g=>g.playerId===p.id);
+const eff=pg.length?parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1)):0;
+return{p,eff,gp:pg.length};
+}).filter(x=>x.gp>0).sort((a,b)=>b.eff-a.eff);
+if(!effMap.length)return[];
+const total=effMap.reduce((s,x)=>s+Math.max(x.eff,0.1),0);
+return effMap.map((x,i)=>{
+const prob=Math.max(x.eff,0.1)/total;
+const american=prob>0.5?Math.round(-(prob/(1-prob))*100):Math.round(((1-prob)/prob)*100);
+return{playerId:x.p.id,name:x.p.name,eff:x.eff,american,prob:Math.round(prob*100)};
+});
+}
+
+// ── Bet Slip Component
+function BetSlip({slip,onRemove,onClear,onPlace,wallet,userIp}){
+const {IS,BR,BG2}=styles();
+const [stake,setStake]=useState("");
+const isParlay=slip.length>1;
+const totalOdds=slip.reduce((acc,b)=>acc*oddsToDecimal(b.odds),1);
+const payout=stake?(parseFloat(stake)*totalOdds).toFixed(2):null;
+const profit=stake?(parseFloat(stake)*(totalOdds-1)).toFixed(2):null;
+const balance=wallet?.balance||0;
+const canPlace=slip.length>0&&parseFloat(stake)>0&&parseFloat(stake)<=balance;
+
+return(
+<div className="fade-in" style={{position:"fixed",bottom:0,left:0,right:0,background:"#111",borderRadius:"18px 18px 0 0",zIndex:500,maxHeight:"80vh",overflowY:"auto",paddingBottom:"calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"12px auto 0"}}/>
+<div style={{padding:"14px 20px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div style={{fontWeight:800,fontSize:18}}>🎰 Bet Slip {isParlay&&<span style={{color:RED,fontSize:13,fontWeight:600,marginLeft:6}}>PARLAY</span>}</div>
+<button onClick={onClear} style={{background:"transparent",border:"none",color:GREY,fontSize:13,cursor:"pointer"}}>Wissen</button>
+</div>
+<div style={{padding:"10px 20px"}}>
+{slip.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:"20px 0"}}>Voeg selecties toe aan je betslip</div>}
+{slip.map((b,i)=>(
+<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+<div style={{flex:1}}>
+<div style={{fontWeight:600,fontSize:14,color:WHITE}}>{b.label}</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>{b.sublabel}</div>
+</div>
+<div style={{color:RED,fontWeight:800,fontSize:16}}>{formatOdds(b.odds)}</div>
+<button onClick={()=>onRemove(i)} style={{background:"transparent",border:"none",color:GREY,fontSize:18,cursor:"pointer",padding:"0 4px"}}>×</button>
+</div>
+))}
+{slip.length>0&&(
+<>
+{isParlay&&(
+<div style={{background:"#1a1500",border:"1px solid #f5a52466",borderRadius:12,padding:"10px 14px",marginBottom:10}}>
+<div style={{color:"#f5a524",fontSize:12,fontWeight:700,marginBottom:4}}>PARLAY ODDS</div>
+<div style={{display:"flex",justifyContent:"space-between"}}>
+<span style={{color:WHITE,fontWeight:800,fontSize:18}}>{totalOdds.toFixed(2)}×</span>
+<span style={{color:GREY,fontSize:13}}>{slip.length} selecties</span>
+</div>
+</div>
+)}
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+<div style={{flex:1,position:"relative"}}>
+<span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",color:GREY,fontSize:16}}>€</span>
+<input type="number" placeholder="Inzet" style={{...IS,paddingLeft:28}} value={stake} onChange={e=>setStake(e.target.value)}/>
+</div>
+<div style={{color:GREY,fontSize:12}}>Saldo: <span style={{color:WHITE,fontWeight:700}}>€{balance.toFixed(2)}</span></div>
+</div>
+{[5,10,20,50].map(q=>(
+<button key={q} onClick={()=>setStake(String(Math.min(q,balance)))} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"6px 12px",fontSize:13,fontWeight:600,cursor:"pointer",marginRight:6,marginBottom:8}}>€{q}</button>
+))}
+{payout&&(
+<div style={{background:"#0a1a0a",border:"1px solid #27AE6066",borderRadius:12,padding:"10px 14px",marginBottom:12}}>
+<div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+<span style={{color:GREY,fontSize:13}}>Winst</span>
+<span style={{color:"#27AE60",fontWeight:700,fontSize:15}}>+€{profit}</span>
+</div>
+<div style={{display:"flex",justifyContent:"space-between"}}>
+<span style={{color:GREY,fontSize:13}}>Totale uitbetaling</span>
+<span style={{color:WHITE,fontWeight:800,fontSize:16}}>€{payout}</span>
+</div>
+</div>
+)}
+<button onClick={()=>canPlace&&onPlace(parseFloat(stake))} style={{...BR,opacity:canPlace?1:0.4}}>
+{!parseFloat(stake)?"Voer inzet in":parseFloat(stake)>balance?"Onvoldoende saldo":"🎰 Weddenschap plaatsen"}
+</button>
+</>
+)}
+</div>
+</div>
+);
+}
+
+// ── Admin: Odds Editor Modal
+function OddsEditorModal({players,games,betOdds,onSave,onClose,wallets,onTopUp,bets,onVoid}){
+const {IS,BR,BG2}=styles();
+const [tab2,setTab2]=useState("props");
+const [editOdds,setEditOdds]=useState({});
+const [topUpIp,setTopUpIp]=useState("");
+const [topUpAmt,setTopUpAmt]=useState("");
+const [topUpNote,setTopUpNote]=useState("");
+const [futureOdds,setFutureOdds]=useState({});
+
+// Build all props across all players, merging with saved overrides
+const allProps=players.flatMap(p=>{
+const base=generatePlayerProps(p,games);
+return base.map(prop=>{
+const key=`${p.id}_${prop.type}`;
+const saved=betOdds.find(o=>o.id===key);
+return{...prop,id:key,playerId:p.id,playerName:p.name,
+overOdds:saved?.overOdds??prop.overOdds,
+underOdds:saved?.underOdds??prop.underOdds,
+line:saved?.line??prop.line,
+disabled:saved?.disabled||false};
+});
+});
+const futureBase=generateFutureOdds(players,games);
+const mergedFutures=futureBase.map(f=>{
+const saved=betOdds.find(o=>o.id===`future_mvp_${f.playerId}`);
+return{...f,american:saved?.american??f.american,disabled:saved?.disabled||false};
+});
+
+async function saveOdds(){
+const entries=Object.entries(editOdds);
+for(const[id,val]of entries){
+const existing=betOdds.find(o=>o.id===id)||{id};
+await onSave({...existing,...val,id});
+}
+setEditOdds({});
+}
+async function handleTopUp(){
+if(!topUpIp.trim()||!parseFloat(topUpAmt))return;
+const ip=topUpIp.trim();
+const existing=wallets.find(w=>w.id===ip)||{id:ip,balance:0,history:[]};
+const newBal=Math.max(0,(existing.balance||0)+parseFloat(topUpAmt));
+const entry={type:parseFloat(topUpAmt)>0?"topup":"adjust",amount:parseFloat(topUpAmt),note:topUpNote||"Admin aanpassing",date:new Date().toISOString()};
+await onSave({...existing,balance:newBal,history:[...(existing.history||[]),entry]},"wallets");
+setTopUpAmt("");setTopUpNote("");
+}
+
+const tabs2=[{id:"props",label:"Props"},{id:"futures",label:"Futures"},{id:"wallets",label:"Wallets"},{id:"bets",label:"Bets"}];
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:600}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",paddingBottom:"calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"12px auto 0"}}/>
+<div style={{padding:"14px 20px 0",fontWeight:800,fontSize:18}}>⚙️ Bet Admin</div>
+<div style={{display:"flex",padding:"10px 20px 0",gap:8,overflowX:"auto"}}>
+{tabs2.map(t=>(
+<button key={t.id} onClick={()=>setTab2(t.id)} style={{background:tab2===t.id?RED:INPUTBG,color:WHITE,border:"none",borderRadius:20,padding:"6px 16px",fontWeight:600,fontSize:13,cursor:"pointer",flexShrink:0}}>{t.label}</button>
+))}
+</div>
+
+{tab2==="props"&&(
+<div style={{padding:"14px 20px"}}>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>Bewerk de odds voor speler props. Leeg = auto op basis van stats.</div>
+{players.map(p=>{
+const pProps=allProps.filter(x=>x.playerId===p.id);
+if(!pProps.length)return null;
+return(
+<div key={p.id} style={{marginBottom:16}}>
+<div style={{fontWeight:700,fontSize:14,color:RED,marginBottom:8}}>{p.name}</div>
+{pProps.map(prop=>{
+const cur=editOdds[prop.id]||{};
+const disNow=cur.disabled!==undefined?cur.disabled:prop.disabled;
+return(
+<div key={prop.id} style={{background:INPUTBG,borderRadius:12,padding:"12px",marginBottom:8,opacity:disNow?0.5:1}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+<div style={{fontWeight:600,fontSize:13,color:WHITE}}>{prop.type.toUpperCase()} lijn</div>
+<button onClick={()=>setEditOdds(e=>({...e,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{}),disabled:!disNow}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{disNow?"Activeer":"Disable"}</button>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+<div>
+<div style={{color:GREY,fontSize:10,marginBottom:4}}>LIJN</div>
+<input type="number" step="0.5" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.line} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),line:parseFloat(e.target.value)||prop.line}}))}/>
+</div>
+<div>
+<div style={{color:GREY,fontSize:10,marginBottom:4}}>OVER</div>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.overOdds} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),overOdds:parseInt(e.target.value)||prop.overOdds}}))}/>
+</div>
+<div>
+<div style={{color:GREY,fontSize:10,marginBottom:4}}>UNDER</div>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.underOdds} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),underOdds:parseInt(e.target.value)||prop.underOdds}}))}/>
+</div>
+</div>
+</div>
+);
+})}
+</div>
+);
+})}
+<button onClick={saveOdds} style={BR}>💾 Odds opslaan</button>
+</div>
+)}
+
+{tab2==="futures"&&(
+<div style={{padding:"14px 20px"}}>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>MVP van de maand odds. Auto-berekend op basis van de laatste 30 dagen.</div>
+{mergedFutures.map(f=>{
+const key=`future_mvp_${f.playerId}`;
+const cur=editOdds[key]||{};
+const disNow=cur.disabled!==undefined?cur.disabled:f.disabled;
+return(
+<div key={f.playerId} style={{background:INPUTBG,borderRadius:12,padding:"12px",marginBottom:8,opacity:disNow?0.5:1}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{f.name}</div>
+<div style={{color:GREY,fontSize:12}}>{f.eff} gem. eff · {f.prob}% kans</div>
+</div>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<input type="number" style={{...IS,width:90,fontSize:14,padding:"8px 10px"}} defaultValue={f.american} onChange={e=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),american:parseInt(e.target.value)||f.american}}))}/>
+<button onClick={()=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),disabled:!disNow}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>{disNow?"Aan":"Uit"}</button>
+</div>
+</div>
+</div>
+);
+})}
+<button onClick={saveOdds} style={{...BR,marginTop:8}}>💾 Futures opslaan</button>
+</div>
+)}
+
+{tab2==="wallets"&&(
+<div style={{padding:"14px 20px"}}>
+<div style={{color:GREY,fontSize:12,marginBottom:14}}>Beheer speler saldo's. IP-adres = identiteit.</div>
+<div style={{background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:14}}>
+<div style={{fontWeight:600,fontSize:14,marginBottom:10}}>Saldo aanpassen</div>
+<input placeholder="IP-adres / Device ID" style={{...IS,marginBottom:8}} value={topUpIp} onChange={e=>setTopUpIp(e.target.value)}/>
+<input type="number" placeholder="Bedrag (negatief = aftrekken)" style={{...IS,marginBottom:8}} value={topUpAmt} onChange={e=>setTopUpAmt(e.target.value)}/>
+<input placeholder="Opmerking (optioneel)" style={{...IS,marginBottom:10}} value={topUpNote} onChange={e=>setTopUpNote(e.target.value)}/>
+<button onClick={handleTopUp} style={BR}>💰 Uitvoeren</button>
+</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>ALLE WALLETS</div>
+{wallets.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:14}}>Nog geen wallets</div>}
+{wallets.slice().sort((a,b)=>(b.balance||0)-(a.balance||0)).map(w=>(
+<div key={w.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div>
+<div style={{fontWeight:600,fontSize:13,color:WHITE,wordBreak:"break-all"}}>{w.id}</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{bets.filter(b=>b.walletId===w.id).length} weddenschappen</div>
+</div>
+<div style={{fontWeight:800,fontSize:18,color:(w.balance||0)>=0?"#27AE60":"#ff453a"}}>€{(w.balance||0).toFixed(2)}</div>
+</div>
+<button onClick={()=>{setTopUpIp(w.id);setTab2("wallets");}} style={{background:"transparent",border:"none",color:RED,fontSize:12,cursor:"pointer",marginTop:4,padding:0}}>Aanpassen →</button>
+</div>
+))}
+</div>
+)}
+
+{tab2==="bets"&&(
+<div style={{padding:"14px 20px"}}>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>Alle geplaatste weddenschappen. Admin kan bets voiden (inzet teruggeven).</div>
+{bets.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:20}}>Nog geen weddenschappen</div>}
+{bets.slice().sort((a,b)=>new Date(b.placedAt)-new Date(a.placedAt)).map(bet=>(
+<div key={bet.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+<div style={{fontWeight:600,fontSize:13,color:WHITE}}>{bet.isParlay?"🔗 PARLAY":"📋 Enkelvoudig"}</div>
+<div style={{fontSize:12,color:bet.status==="won"?"#27AE60":bet.status==="lost"?"#ff453a":bet.status==="void"?"#f5a524":GREY,fontWeight:700}}>{bet.status?.toUpperCase()||"OPEN"}</div>
+</div>
+{(bet.selections||[]).map((s,i)=>(
+<div key={i} style={{color:GREY,fontSize:12,marginBottom:2}}>• {s.label} — {formatOdds(s.odds)}</div>
+))}
+<div style={{display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,borderTop:`1px solid ${DIVIDER}`}}>
+<span style={{color:GREY,fontSize:12}}>{bet.walletId?.slice(0,20)}… · €{(bet.stake||0).toFixed(2)}</span>
+<span style={{color:WHITE,fontWeight:700}}>→ €{(bet.potentialPayout||0).toFixed(2)}</span>
+</div>
+{bet.status==="open"&&(
+<button onClick={()=>onVoid&&onVoid(bet)} style={{background:"transparent",border:"1px solid #f5a52466",color:"#f5a524",borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",marginTop:6}}>Void (teruggeven)</button>
+)}
+</div>
+))}
+</div>
+)}
+<div style={{padding:"0 20px 8px"}}>
+<button onClick={onClose} style={BG2}>Sluiten</button>
+</div>
+</div>
+</div>
+);
+}
+
+// ── Main Betting Tab
+function BettingTab({players,games,betOdds,bets,wallets,userIp,isAdmin,betSlip,setBetSlip,showBetSlip,setShowBetSlip,onSaveBet,onSaveOdds,onSaveWallet,onVoidBet}){
+const {IS,BR,BG2}=styles();
+const [section,setSection]=useState("props"); // props | futures | mybets
+const [adminOpen,setAdminOpen]=useState(false);
+
+// My wallet
+const myWallet=wallets.find(w=>w.id===userIp)||{id:userIp,balance:0,history:[]};
+const myBets=bets.filter(b=>b.walletId===userIp).sort((a,b)=>new Date(b.placedAt)-new Date(a.placedAt));
+
+// Build prop market list
+const propMarkets=players.flatMap(p=>{
+const base=generatePlayerProps(p,games);
+return base.map(prop=>{
+const key=`${p.id}_${prop.type}`;
+const saved=betOdds.find(o=>o.id===key);
+if(saved?.disabled)return null;
+return{...prop,id:key,playerId:p.id,playerName:p.name,
+overOdds:saved?.overOdds??prop.overOdds,
+underOdds:saved?.underOdds??prop.underOdds,
+line:saved?.line??prop.line};
+}).filter(Boolean);
+});
+
+// Build futures market
+const futureBase=generateFutureOdds(players,games);
+const futureMarkets=futureBase.map(f=>{
+const key=`future_mvp_${f.playerId}`;
+const saved=betOdds.find(o=>o.id===key);
+if(saved?.disabled)return null;
+return{...f,id:key,american:saved?.american??f.american};
+}).filter(Boolean);
+
+function addToSlip(label,sublabel,odds,marketId){
+// Max 10 legs
+if(betSlip.length>=10)return;
+// No duplicate markets
+if(betSlip.find(b=>b.marketId===marketId))return;
+setBetSlip(s=>[...s,{label,sublabel,odds,marketId}]);
+setShowBetSlip(true);
+}
+function removeFromSlip(i){setBetSlip(s=>s.filter((_,idx)=>idx!==i));}
+function clearSlip(){setBetSlip([]);setShowBetSlip(false);}
+
+async function placeBet(stake){
+if(!stake||stake<=0||stake>(myWallet.balance||0))return;
+const totalOdds=betSlip.reduce((acc,b)=>acc*oddsToDecimal(b.odds),1);
+const potentialPayout=parseFloat((stake*totalOdds).toFixed(2));
+const bet={
+id:Date.now().toString(),
+walletId:userIp,
+isParlay:betSlip.length>1,
+selections:[...betSlip],
+stake,
+potentialPayout,
+status:"open",
+placedAt:new Date().toISOString()
+};
+// Deduct from wallet
+const newBal=parseFloat(((myWallet.balance||0)-stake).toFixed(2));
+await onSaveWallet({...myWallet,id:userIp,balance:newBal,history:[...(myWallet.history||[]),{type:"bet",amount:-stake,betId:bet.id,date:new Date().toISOString()}]});
+await onSaveBet(bet);
+clearSlip();
+}
+
+const slipCount=betSlip.length;
+
+return(
+<div style={{paddingBottom:120}}>
+{/* Header */}
+<div style={{padding:"16px 16px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div>
+<div style={{fontWeight:900,fontSize:22}}>LBA <span style={{color:RED}}>BETS</span></div>
+<div style={{color:GREY,fontSize:13,marginTop:2}}>Saldo: <span style={{color:"#27AE60",fontWeight:700}}>€{(myWallet.balance||0).toFixed(2)}</span></div>
+</div>
+<div style={{display:"flex",gap:8}}>
+{isAdmin&&<button onClick={()=>setAdminOpen(true)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"8px 14px",fontWeight:600,fontSize:13,cursor:"pointer"}}>⚙️ Admin</button>}
+<button onClick={()=>setShowBetSlip(true)} style={{background:RED,border:"none",color:WHITE,borderRadius:10,padding:"8px 14px",fontWeight:700,fontSize:13,cursor:"pointer",position:"relative"}}>
+🎰 Slip{slipCount>0&&<span style={{background:WHITE,color:RED,borderRadius:"50%",width:16,height:16,fontSize:10,fontWeight:800,display:"inline-flex",alignItems:"center",justifyContent:"center",marginLeft:6}}>{slipCount}</span>}
+</button>
+</div>
+</div>
+
+{/* IP notice */}
+<div style={{margin:"10px 16px 0",background:INPUTBG,borderRadius:10,padding:"8px 12px",display:"flex",alignItems:"center",gap:8}}>
+<span style={{fontSize:14}}>📱</span>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:GREY,fontSize:11}}>Jouw device ID: <span style={{color:WHITE,fontSize:10,fontBreak:"break-all"}}>{userIp}</span></div>
+</div>
+</div>
+
+{/* Section tabs */}
+<div style={{display:"flex",padding:"12px 16px 0",gap:8}}>
+{[{id:"props",label:"📋 Props"},{id:"futures",label:"🏆 Futures"},{id:"mybets",label:`📁 Mijn bets${myBets.length?` (${myBets.length})`:""}`}].map(s=>(
+<button key={s.id} onClick={()=>setSection(s.id)} style={{background:section===s.id?RED:INPUTBG,color:WHITE,border:"none",borderRadius:20,padding:"7px 14px",fontWeight:600,fontSize:13,cursor:"pointer",flexShrink:0}}>{s.label}</button>
+))}
+</div>
+
+{/* PROPS */}
+{section==="props"&&(
+<div style={{padding:"12px 16px 0"}}>
+{propMarkets.length===0&&(
+<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
+<div style={{fontSize:40,marginBottom:10}}>📋</div>
+<div style={{color:WHITE,fontWeight:600,marginBottom:6}}>Geen prop markets</div>
+<div style={{fontSize:13}}>Er zijn minstens 5 games per speler nodig voor automatische odds.</div>
+</div>
+)}
+{players.map(p=>{
+const pp=propMarkets.filter(m=>m.playerId===p.id);
+if(!pp.length)return null;
+const pg=games.filter(g=>g.playerId===p.id);
+return(
+<div key={p.id} style={{marginBottom:16}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+<Avatar player={p} size={36}/>
+<div>
+<div style={{fontWeight:700,fontSize:15,color:WHITE}}>{p.name}</div>
+<div style={{color:GREY,fontSize:12}}>
+{[["PPG",avg(pg.slice(0,5),"pts")],["RPG",avg(pg.slice(0,5),"reb")],["APG",avg(pg.slice(0,5),"ast")]].map(([l,v])=>`${v} ${l}`).join(" · ")} <span style={{color:GREY}}>(L5)</span>
+</div>
+</div>
+</div>
+{pp.map(market=>{
+const overInSlip=betSlip.find(b=>b.marketId===market.id+"_over");
+const underInSlip=betSlip.find(b=>b.marketId===market.id+"_under");
+return(
+<div key={market.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+<div style={{fontWeight:600,fontSize:14,color:WHITE}}>{market.type.toUpperCase()} Lijn: <span style={{color:RED}}>{market.line}</span></div>
+<div style={{color:GREY,fontSize:11}}>{impliedProb(market.overOdds)}% kans over</div>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+<button onClick={()=>addToSlip(`${p.name} Over ${market.line} ${market.type.toUpperCase()}`,`${formatOdds(market.overOdds)}`,market.overOdds,market.id+"_over")} style={{background:overInSlip?"#27AE60":BG,border:`1.5px solid ${overInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}>
+<div style={{color:GREY,fontSize:11,marginBottom:4}}>OVER {market.line}</div>
+<div style={{color:overInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.overOdds)}</div>
+</button>
+<button onClick={()=>addToSlip(`${p.name} Under ${market.line} ${market.type.toUpperCase()}`,`${formatOdds(market.underOdds)}`,market.underOdds,market.id+"_under")} style={{background:underInSlip?"#27AE60":BG,border:`1.5px solid ${underInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}>
+<div style={{color:GREY,fontSize:11,marginBottom:4}}>UNDER {market.line}</div>
+<div style={{color:underInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.underOdds)}</div>
+</button>
+</div>
+</div>
+);
+})}
+</div>
+);
+})}
+</div>
+)}
+
+{/* FUTURES */}
+{section==="futures"&&(
+<div style={{padding:"12px 16px 0"}}>
+<div style={{background:"linear-gradient(135deg,#1a0a00,#2a1500)",border:"1px solid #f5a52433",borderRadius:14,padding:"14px",marginBottom:16}}>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:16,marginBottom:4}}>🏆 MVP van de Maand</div>
+<div style={{color:GREY,fontSize:13}}>Wie wint de MVP award van de huidige maand? Odds berekend op basis van de laatste 30 dagen prestaties.</div>
+</div>
+{futureMarkets.length===0&&(
+<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
+<div style={{fontSize:40,marginBottom:10}}>🏆</div>
+<div style={{color:WHITE,fontWeight:600,marginBottom:6}}>Geen futures beschikbaar</div>
+<div style={{fontSize:13}}>Er zijn recent games nodig voor futures odds.</div>
+</div>
+)}
+{futureMarkets.map((f,i)=>{
+const inSlip=betSlip.find(b=>b.marketId===f.id);
+const player=players.find(p=>p.id===f.playerId);
+return(
+<div key={f.id} style={{background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+<div style={{fontSize:18,fontWeight:800,color:i===0?"#f5a524":i===1?GREY:DARKGREY,width:22,textAlign:"center"}}>{i===0?"👑":i+1}</div>
+{player&&<Avatar player={player} size={40}/>}
+<div style={{flex:1}}>
+<div style={{fontWeight:700,fontSize:15,color:WHITE}}>{f.name}</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>{f.eff} gem. eff · {f.prob}% kans</div>
+</div>
+<button onClick={()=>addToSlip(`${f.name} MVP Maand`,`${formatOdds(f.american)}`,f.american,f.id)} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:15}}>{formatOdds(f.american)}</div>
+<div style={{color:"rgba(255,255,255,0.7)",fontSize:10,marginTop:2}}>{inSlip?"✓ Gekozen":"Kiezen"}</div>
+</button>
+</div>
+);
+})}
+</div>
+)}
+
+{/* MY BETS */}
+{section==="mybets"&&(
+<div style={{padding:"12px 16px 0"}}>
+{myBets.length===0&&(
+<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
+<div style={{fontSize:40,marginBottom:10}}>📁</div>
+<div style={{color:WHITE,fontWeight:600}}>Nog geen weddenschappen</div>
+<div style={{fontSize:13,marginTop:6}}>Selecteer props of futures en plaats je eerste weddenschap.</div>
+</div>
+)}
+{myBets.map(bet=>{
+const isParlay=bet.isParlay;
+const statusColor=bet.status==="won"?"#27AE60":bet.status==="lost"?"#ff453a":bet.status==="void"?"#f5a524":GREY;
+return(
+<div key={bet.id} style={{background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:10}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{isParlay?"🔗 PARLAY":"📋 Enkelvoudig"}</div>
+{isParlay&&<div style={{background:"#f5a52422",border:"1px solid #f5a52466",borderRadius:8,padding:"2px 8px",fontSize:11,fontWeight:700,color:"#f5a524"}}>{bet.selections?.length} legs</div>}
+</div>
+<div style={{fontWeight:700,fontSize:13,color:statusColor}}>{bet.status?.toUpperCase()||"OPEN"}</div>
+</div>
+{(bet.selections||[]).map((s,i)=>(
+<div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+<span style={{color:GREY,fontSize:13,flex:1,marginRight:8}}>{s.label}</span>
+<span style={{color:RED,fontWeight:700,fontSize:13}}>{formatOdds(s.odds)}</span>
+</div>
+))}
+<div style={{borderTop:`1px solid ${DIVIDER}`,paddingTop:10,marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<div>
+<div style={{color:GREY,fontSize:12}}>Inzet: <span style={{color:WHITE,fontWeight:600}}>€{(bet.stake||0).toFixed(2)}</span></div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{new Date(bet.placedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+</div>
+<div style={{textAlign:"right"}}>
+<div style={{color:GREY,fontSize:12}}>Uitbetaling</div>
+<div style={{color:bet.status==="won"?"#27AE60":WHITE,fontWeight:800,fontSize:18}}>€{(bet.potentialPayout||0).toFixed(2)}</div>
+</div>
+</div>
+</div>
+);
+})}
+</div>
+)}
+
+{/* Bet Slip Overlay */}
+{showBetSlip&&(
+<div onClick={()=>setShowBetSlip(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:499}}>
+<BetSlip slip={betSlip} onRemove={removeFromSlip} onClear={clearSlip} onPlace={placeBet} wallet={myWallet} userIp={userIp}/>
+</div>
+)}
+
+{/* Admin Modal */}
+{adminOpen&&isAdmin&&(
+<OddsEditorModal players={players} games={games} betOdds={betOdds} wallets={wallets} bets={bets}
+onSave={(obj,col)=>onSaveOdds(obj,col||"bet_odds")}
+onTopUp={(wallet)=>onSaveWallet(wallet)}
+onVoid={onVoidBet}
+onClose={()=>setAdminOpen(false)}/>
+)}
+</div>
+);
+}
+
+// ══════════════════════════════════════════
 // ── MAIN APP
 // ══════════════════════════════════════════
 function App(){
@@ -2509,6 +3085,23 @@ const [sortBy,setSortBy]=useState("Beste");
 const [showSortPicker,setShowSortPicker]=useState(false);
 const [viewingPost,setViewingPost]=useState(null);
 const [editingPost,setEditingPost]=useState(null);
+const [bets,setBets]=useState([]);
+const [wallets,setWallets]=useState([]);
+const [betOdds,setBetOdds]=useState([]);
+const [userIp,setUserIp]=useState("unknown");
+const [betSlip,setBetSlip]=useState([]);
+const [showBetSlip,setShowBetSlip]=useState(false);
+const [betAdminModal,setBetAdminModal]=useState(null);
+
+// Fetch user IP for wallet identification
+useEffect(()=>{
+fetch("https://api.ipify.org?format=json").then(r=>r.json()).then(d=>setUserIp(d.ip||"unknown")).catch(()=>{
+// Fallback: use a stable device fingerprint from localStorage
+let fp=localStorage.getItem("lba_fp");
+if(!fp){fp="dev_"+Math.random().toString(36).slice(2,10);localStorage.setItem("lba_fp",fp);}
+setUserIp(fp);
+});
+},[]);
 
 useEffect(()=>{
 let uP,uG,uC,uS,uB,uL,uLR;
@@ -2540,6 +3133,9 @@ bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);set
 uL=_onSnapshot(_col(_db,"larp_posts"),s=>{
 setLarpPosts(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp posts listener error:",err));
+_onSnapshot(_col(_db,"bets"),s=>{setBets(s.docs.map(d=>d.data()));},(err)=>console.error("Bets error:",err));
+_onSnapshot(_col(_db,"wallets"),s=>{setWallets(s.docs.map(d=>d.data()));},(err)=>console.error("Wallets error:",err));
+_onSnapshot(_col(_db,"bet_odds"),s=>{setBetOdds(s.docs.map(d=>d.data()));},(err)=>console.error("Odds error:",err));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
@@ -2762,6 +3358,19 @@ async function deleteLarpReply(id){setSaveStatus("saving");try{await fbDel("larp
 async function saveHighlight(h){setSaveStatus("saving");try{await fbSave("highlights",h);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteHighlight(id){setSaveStatus("saving");try{await fbDel("highlights",id);showSaved();}catch(e){console.error(e);showError();}}
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
+async function saveBet(b){setSaveStatus("saving");try{await fbSave("bets",b);showSaved();}catch(e){console.error(e);showError();}}
+async function saveOddsOrWallet(obj,col){setSaveStatus("saving");try{await fbSave(col,obj);showSaved();}catch(e){console.error(e);showError();}}
+async function voidBet(bet){
+setSaveStatus("saving");
+try{
+// Refund stake to wallet
+const w=wallets.find(ww=>ww.id===bet.walletId)||{id:bet.walletId,balance:0,history:[]};
+const newBal=parseFloat(((w.balance||0)+(bet.stake||0)).toFixed(2));
+await fbSave("wallets",{...w,id:bet.walletId,balance:newBal,history:[...(w.history||[]),{type:"void",amount:bet.stake,betId:bet.id,date:new Date().toISOString()}]});
+await fbSave("bets",{...bet,status:"void"});
+showSaved();
+}catch(e){console.error(e);showError();}
+}
 
 function getSorted(){
 let gs=[...games];
@@ -2930,6 +3539,27 @@ return(
 </div>
 )}
 
+{/* BETTING TAB */}
+{tab==="betting"&&(
+<BettingTab
+players={players}
+games={games}
+betOdds={betOdds}
+bets={bets}
+wallets={wallets}
+userIp={userIp}
+isAdmin={isAdmin}
+betSlip={betSlip}
+setBetSlip={setBetSlip}
+showBetSlip={showBetSlip}
+setShowBetSlip={setShowBetSlip}
+onSaveBet={saveBet}
+onSaveOdds={saveOddsOrWallet}
+onSaveWallet={(w)=>saveOddsOrWallet(w,"wallets")}
+onVoidBet={voidBet}
+/>
+)}
+
 {/* Pinned LARP Banner — bottom (above tabs) */}
 {(() => {
 const pinnedLarp = larpPosts.find(p => p.pinned);
@@ -2949,7 +3579,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"}].map(({id,icon,label})=>(
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"betting",icon:"🎰",label:"Bets"}].map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>

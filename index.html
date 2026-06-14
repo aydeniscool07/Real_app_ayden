@@ -610,30 +610,62 @@ return(
           {/* Games by day */}
           <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:24,marginBottom:12}}>AFGELOPEN GAMES — {monthLabel.toUpperCase()}</div>
           {(() => {
-            const gamesByDay = {};
-            monthGames.forEach(g => {
-              if (!gamesByDay[g.date]) gamesByDay[g.date] = [];
-              gamesByDay[g.date].push(g);
-            });
-            const sortedDays = Object.keys(gamesByDay).sort().reverse();
-            if (sortedDays.length === 0) return <div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games deze maand</div>;
-            return sortedDays.map(date => (
-              <div key={date} style={{marginBottom:16}}>
-                <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:8}}>{new Date(date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}</div>
-                {gamesByDay[date].map(g => {
-                  const player = players.find(p => p.id === g.playerId);
-                  return (
-                    <div key={g.id} style={{background:INPUTBG,borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
-                      <Avatar player={player} size={32}/>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:600,fontSize:14,color:WHITE}}>{player?.name||"?"}</div>
-                        <div style={{color:GREY,fontSize:12}}>{g.pts||0} PTS · {g.reb||0} REB · {g.ast||0} AST · {calcFps(g)} fps</div>
-                      </div>
-                      {g.teamAScore&&g.teamBScore&&(
-                        <div style={{fontSize:14,fontWeight:700,color:WHITE}}>
-                          {g.team==="A"?<span style={{color:RED}}>{g.teamAScore}</span>:g.teamAScore}-{g.team==="B"?<span style={{color:RED}}>{g.teamBScore}</span>:g.teamBScore}
+            const matchMap={};
+            monthGames.forEach(g=>{const key=g.matchId||g.id;if(!matchMap[key])matchMap[key]=[];matchMap[key].push(g);});
+            const matchesByDate={};
+            Object.values(matchMap).forEach(mG=>{const date=mG[0].date;if(!matchesByDate[date])matchesByDate[date]=[];matchesByDate[date].push(mG);});
+            const sortedDays=Object.keys(matchesByDate).sort().reverse();
+            if(sortedDays.length===0)return <div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games deze maand</div>;
+            return sortedDays.map(date=>(
+              <div key={date} style={{marginBottom:20}}>
+                <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:8}}>
+                  {new Date(date).toLocaleDateString("nl-NL",{weekday:"long",day:"numeric",month:"long"})}
+                </div>
+                {matchesByDate[date].map((mG,mi)=>{
+                  const s=mG[0];
+                  const tAN=s.teamAName||"Team A",tBN=s.teamBName||"Team B";
+                  const hasScore=s.teamAScore&&s.teamBScore;
+                  const aS=parseFloat(s.teamAScore),bS=parseFloat(s.teamBScore);
+                  const aWon=hasScore&&aS>bS,bWon=hasScore&&bS>aS;
+                  const tAP=mG.filter(g=>g.team==="A"),tBP=mG.filter(g=>g.team==="B"),tCP=mG.filter(g=>g.team==="chameleon");
+                  return(
+                    <div key={mi} style={{background:INPUTBG,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+                      {hasScore?(
+                        <div style={{background:"#111",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+                          <div style={{textAlign:"right",flex:1}}><span style={{fontWeight:700,fontSize:13,color:aWon?WHITE:GREY}}>{tAN}</span></div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:22,fontWeight:800,color:aWon?WHITE:GREY}}>{s.teamAScore}</span>
+                            <span style={{color:GREY,fontSize:14}}>–</span>
+                            <span style={{fontSize:22,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
+                          </div>
+                          <div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:13,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+                        </div>
+                      ):(
+                        <div style={{background:"#111",padding:"8px 14px",textAlign:"center"}}>
+                          <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span>
                         </div>
                       )}
+                      <div style={{padding:"8px 0"}}>
+                        {[{label:tAN,list:tAP,won:aWon},{label:tBN,list:tBP,won:bWon},{label:"🦎 Kameleon",list:tCP,won:false}]
+                          .filter(t=>t.list.length>0).map(({label,list,won})=>(
+                          <div key={label}>
+                            <div style={{color:won?RED:GREY,fontSize:11,fontWeight:700,padding:"4px 14px 2px"}}>{label}{won?" 🏆":""}</div>
+                            {list.map(g=>{
+                              const p=players.find(pl=>pl.id===g.playerId);
+                              return(
+                                <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 14px"}}>
+                                  <Avatar player={p} size={30}/>
+                                  <div style={{flex:1}}>
+                                    <div style={{fontWeight:600,fontSize:13,color:WHITE}}>{p?.name||"?"}</div>
+                                    <div style={{color:GREY,fontSize:11}}>{g.pts||0} pts · {g.reb||0} reb · {g.ast||0} ast</div>
+                                  </div>
+                                  <div style={{color:RED,fontSize:12,fontWeight:700}}>{calcFps(g)} fps</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   );
                 })}
@@ -697,7 +729,7 @@ return(
 <div style={{fontWeight:700,fontSize:18,marginBottom:12}}>🎬 GIF kiezen</div>
 <div style={{display:"flex",gap:8,marginBottom:16}}>
 <input placeholder="Zoek GIFs..." style={{...IS,flex:1}} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSearch()}/>
-<button onClick={handleSearch} disabled={loading} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"0 16px",fontWeight:700,cursor:pointer,opacity:loading?0.6:1}}>{loading?"...":"🔍"}</button>
+<button onClick={handleSearch} disabled={loading} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"0 16px",fontWeight:700,cursor:"pointer",opacity:loading?0.6:1}}>{loading?"...":"🔍"}</button>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
 {gifs.map(g=>(
@@ -1013,8 +1045,8 @@ return(
 
 // ── Blog Post Modal
 function BlogPostModal({post,onSave,onClose}){
-const isEdit=!!post;
-const [form,setForm]=useState(post?{...post}:{title:"",content:"",image:null,video:null,pinned:false});
+const isEdit=!!(post&&post.id);
+const [form,setForm]=useState(post&&post.id?{...post}:{title:"",content:"",image:null,video:null,pinned:false});
 const [saving,setSaving]=useState(false);
 const imageRef=useRef();
 const {IS,BR,BG2}=styles();
@@ -1690,7 +1722,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}
 
 {/* BLOG TAB */}
-{tab==="blog"&&<BlogSection posts={blogPosts} onAddPost={()=>setEditingPost(null)} onEditPost={(p)=>setEditingPost(p)} onDeletePost={deleteBlogPost} onPinPost={pinBlogPost} isAdmin={isAdmin} onViewPost={setViewingPost}/>}
+{tab==="blog"&&<BlogSection posts={blogPosts} onAddPost={()=>setEditingPost({})} onEditPost={(p)=>setEditingPost(p)} onDeletePost={deleteBlogPost} onPinPost={pinBlogPost} isAdmin={isAdmin} onViewPost={setViewingPost}/>}
 
 {/* PLAYERS TAB */}
 {tab==="players"&&(

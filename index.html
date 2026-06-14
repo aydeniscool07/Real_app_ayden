@@ -2486,17 +2486,17 @@ return(
 // ══════════════════════════════════════════
 
 // American odds → decimal multiplier
-function oddsToDecimal(american){
-const o=parseInt(american);
-if(isNaN(o))return 1;
-return o>0?(o/100)+1:(100/Math.abs(o))+1;
+function oddsToDecimal(decimalOdds){
+const o=parseFloat(decimalOdds);
+if(isNaN(o)||o<=1)return 1;
+return o;
 }
-function formatOdds(american){
-const o=parseInt(american);
-if(isNaN(o))return "+100";
-return o>0?`+${o}`:`${o}`;
+function formatOdds(decimalOdds){
+const o=parseFloat(decimalOdds);
+if(isNaN(o))return "2.00";
+return o.toFixed(2);
 }
-function impliedProb(american){
+function impliedProb(decimalOdds){
 const o=parseInt(american);
 if(isNaN(o))return 50;
 return o>0?Math.round(100/(o+100)*100):Math.round(Math.abs(o)/(Math.abs(o)+100)*100);
@@ -2662,7 +2662,7 @@ setEditOdds({});
 async function handleTopUp(){
 if(!topUpIp.trim()||!parseFloat(topUpAmt))return;
 const ip=topUpIp.trim();
-const existing=wallets.find(w=>w.id===ip)||{id:ip,balance:0,history:[]};
+const existing=wallets.find(w=>w.id===ip)||{id:ip,balance:10,history:[]};
 const newBal=Math.max(0,(existing.balance||0)+parseFloat(topUpAmt));
 const entry={type:parseFloat(topUpAmt)>0?"topup":"adjust",amount:parseFloat(topUpAmt),note:topUpNote||"Admin aanpassing",date:new Date().toISOString()};
 await onSave({...existing,balance:newBal,history:[...(existing.history||[]),entry]},"wallets");
@@ -2815,7 +2815,7 @@ const [section,setSection]=useState("props"); // props | futures | mybets
 const [adminOpen,setAdminOpen]=useState(false);
 
 // My wallet
-const myWallet=wallets.find(w=>w.id===userIp)||{id:userIp,balance:0,history:[]};
+const myWallet=wallets.find(w=>w.id===userIp)||{id:userIp,balance:10,history:[]};
 const myBets=bets.filter(b=>b.walletId===userIp).sort((a,b)=>new Date(b.placedAt)-new Date(a.placedAt));
 
 // Build prop market list

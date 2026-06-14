@@ -2557,7 +2557,7 @@ return{playerId:x.p.id,name:x.p.name,eff:x.eff,american,prob:Math.round(prob*100
 }
 
 // ── Bet Slip Component
-function BetSlip({slip,onRemove,onClear,onPlace,wallet,userIp}){
+function BetSlip({slip,onRemove,onClear,onClose,onPlace,wallet,userIp}){
 const {IS,BR,BG2}=styles();
 const [stake,setStake]=useState("");
 const isParlay=slip.length>1;
@@ -2572,7 +2572,10 @@ return(
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"12px auto 0"}}/>
 <div style={{padding:"14px 20px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
 <div style={{fontWeight:800,fontSize:18}}>🎰 Bet Slip {isParlay&&<span style={{color:RED,fontSize:13,fontWeight:600,marginLeft:6}}>PARLAY</span>}</div>
+<div style={{display:"flex",gap:12,alignItems:"center"}}>
 <button onClick={onClear} style={{background:"transparent",border:"none",color:GREY,fontSize:13,cursor:"pointer"}}>Wissen</button>
+<button onClick={onClose} style={{background:"transparent",border:"none",color:WHITE,fontSize:20,cursor:"pointer",lineHeight:1}}>×</button>
+</div>
 </div>
 <div style={{padding:"10px 20px"}}>
 {slip.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:"20px 0"}}>Voeg selecties toe aan je betslip</div>}
@@ -3065,8 +3068,8 @@ return(
 
 {/* Bet Slip Overlay */}
 {showBetSlip&&(
-<div onClick={()=>setShowBetSlip(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:499}}>
-<BetSlip slip={betSlip} onRemove={removeFromSlip} onClear={clearSlip} onPlace={placeBet} wallet={myWallet} userIp={userIp}/>
+<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:499}}>
+<BetSlip slip={betSlip} onRemove={removeFromSlip} onClear={clearSlip} onClose={()=>setShowBetSlip(false)} onPlace={placeBet} wallet={myWallet} userIp={userIp}/>
 </div>
 )}
 

@@ -371,11 +371,13 @@ return(
 }
 
 // ── Perf Detail Modal
-function PerfDetailModal({game,player,allPlayers,allGames,comments,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment}){
+function PerfDetailModal({game,player,allPlayers,allGames,comments,highlights,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment,onAddHighlight,onDeleteHighlight,onOpenHighlight}){
 const fps=calcFps(game);
 const matchGames=game.matchId?allGames.filter(g=>g.matchId===game.matchId):[];
 const tAN=game.teamAName||"Team A",tBN=game.teamBName||"Team B";
 const gameComments=comments.filter(c=>c.gameId===game.id);
+const matchKey=game.matchId||game.id;
+const matchHighlights=(highlights||[]).filter(h=>h.gameId===matchKey).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
 <div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom,0px))"}}>
@@ -439,6 +441,21 @@ return(
 </div>
 )}
 <CommentSection gameId={game.id} comments={gameComments} onAddComment={onAddComment} onDeleteComment={onDeleteComment} isAdmin={isAdmin}/>
+
+{/* Highlights for this match */}
+<div style={{marginTop:20,paddingTop:20,borderTop:`1px solid ${DIVIDER}`}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5}}>🎬 HIGHLIGHTS</div>
+{isAdmin&&<button data-testid="add-highlight-btn" onClick={()=>onAddHighlight&&onAddHighlight({gameId:matchKey,playerId:game.playerId,date:game.date,teamAName:tAN,teamBName:tBN,teamAScore:game.teamAScore,teamBScore:game.teamBScore})} style={{background:"transparent",border:`1px solid ${RED}55`,color:RED,borderRadius:14,padding:"4px 10px",fontWeight:600,fontSize:11,cursor:"pointer"}}>+ Highlight</button>}
+</div>
+{matchHighlights.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:14}}>Nog geen highlights voor deze match</div>}
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{matchHighlights.map(hl=>{
+const pl=allPlayers.find(p=>p.id===hl.playerId);
+return<HighlightCard key={hl.id} hl={hl} player={pl} onClick={()=>onOpenHighlight&&onOpenHighlight(hl)}/>;
+})}
+</div>
+</div>
 <div style={{display:"flex",gap:10,marginTop:20}}>
 {isAdmin&&<button onClick={()=>{onDelete(game.id);onClose();}} style={{background:"transparent",border:"1px solid #ff453a",color:"#ff453a",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>Delete</button>}
 {isAdmin&&<button onClick={()=>onEdit(game)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>✏️ Edit</button>}
@@ -579,8 +596,10 @@ return(
 }
 
 // ── Player Profile Modal
-function PlayerProfileModal({player,allGames,allPlayers,onClose,onEditPlayer,onPerfClick,isAdmin}){
+function PlayerProfileModal({player,allGames,allPlayers,highlights,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
+const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
+const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:250}}>
 <div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom,0px))"}}>
@@ -624,10 +643,30 @@ return(
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
 return(
-<div style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:20}}>
+<div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+<div style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>BEST GAME</div>
 <StatLine game={best} max={3}/>
 <div style={{color:GREY,fontSize:12,marginTop:6}}>{best.date} · {calcFps(best)} fps</div>
+</div>
+<div data-testid="profile-highlight-section" style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200,display:"flex",flexDirection:"column"}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5}}>🎬 HIGHLIGHT</div>
+{playerHighlights.length>0&&<button data-testid="view-all-highlights-btn" onClick={()=>onViewAllHighlights&&onViewAllHighlights(playerHighlights,player.name)} style={{background:"transparent",border:"none",color:"#4FC3F7",cursor:"pointer",fontSize:11,fontWeight:700}}>Bekijk alle ›</button>}
+</div>
+{randomHighlight?(
+<div onClick={()=>onOpenHighlight&&onOpenHighlight(randomHighlight)} style={{cursor:"pointer",flex:1}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,fontSize:11}}>
+<span style={{color:WHITE,fontWeight:700}}>{randomHighlight.teamAScore||"-"}<span style={{color:GREY,margin:"0 4px"}}>–</span>{randomHighlight.teamBScore||"-"}</span>
+{(randomHighlight.quarter||randomHighlight.time)&&<span style={{color:GREY}}>{randomHighlight.quarter} {randomHighlight.time}</span>}
+{randomHighlight.rating!=null&&<span style={{marginLeft:"auto",color:"#4FC3F7",fontWeight:700}}>▼ {parseFloat(randomHighlight.rating).toFixed(1)}</span>}
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:15,lineHeight:1.3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{randomHighlight.description}</div>
+</div>
+):(
+<div style={{color:GREY,fontSize:12,padding:"6px 0"}}>Nog geen highlights</div>
+)}
+</div>
 </div>
 );
 })()}
@@ -984,6 +1023,300 @@ return(
 );
 }
 
+// ── Basketball Court SVG (shared by picker + display)
+function CourtSVG({children,onClick,style}){
+return(
+<svg viewBox="0 0 200 188" preserveAspectRatio="xMidYMid meet" onClick={onClick} style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:onClick?"crosshair":"default",...style}}>
+<rect x="70" y="0" width="60" height="76" fill="#ecd9b0"/>
+<rect x="70" y="0" width="60" height="76" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<circle cx="100" cy="76" r="24" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5" strokeDasharray="3 3"/>
+<path d="M 100 52 A 24 24 0 0 0 100 100 Z" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<line x1="84" y1="14" x2="116" y2="14" stroke="rgba(255,255,255,0.8)" strokeWidth="3"/>
+<circle cx="100" cy="20" r="6" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="1.5"/>
+<line x1="10" y1="0" x2="10" y2="44" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<line x1="190" y1="0" x2="190" y2="44" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<path d="M 10 44 Q 100 175 190 44" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<path d="M 132 188 A 32 32 0 0 0 68 188" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+{children}
+</svg>
+);
+}
+
+// ── Court shot picker — click to place marker
+function CourtShotPicker({value,onChange}){
+function handleClick(e){
+const svg=e.currentTarget;
+const rect=svg.getBoundingClientRect();
+const x=((e.clientX-rect.left)/rect.width)*100;
+const y=((e.clientY-rect.top)/rect.height)*100;
+onChange({x:Math.round(x*10)/10,y:Math.round(y*10)/10});
+}
+return(
+<div data-testid="court-shot-picker" style={{position:"relative",maxWidth:320,margin:"0 auto"}}>
+<CourtSVG onClick={handleClick}>
+{value&&<circle cx={value.x*2} cy={value.y*1.88} r="6" fill="#4FC3F7" stroke="white" strokeWidth="1.5"/>}
+</CourtSVG>
+<div style={{textAlign:"center",color:GREY,fontSize:11,marginTop:6}}>{value?"Tap nogmaals om te verplaatsen":"Tap op de court waar het schot was"}</div>
+</div>
+);
+}
+
+// ── Court shot chart — display markers
+function CourtShotChart({shots}){
+const list=(shots||[]).filter(s=>s&&typeof s.x==="number"&&typeof s.y==="number");
+return(
+<CourtSVG>
+{list.map((s,i)=>(
+<g key={i}>
+<circle cx={s.x*2} cy={s.y*1.88} r="7" fill="#4FC3F7" opacity="0.85"/>
+{s.rating&&parseFloat(s.rating)>=8&&<text x={s.x*2} y={s.y*1.88+3} textAnchor="middle" fontSize="9">🔥</text>}
+</g>
+))}
+</CourtSVG>
+);
+}
+
+// ── Auto-tag extractor for highlights
+const HL_KEYWORDS=["dunk","floater","layup","fadeaway","buzzer","stepback","crossover","block","steal","alleyoop","threepointer","clutch","fastbreak","putback","pullup","midrange","crunchtime","gamewinner","poster","drive","jumper","handoff","euro","spin"];
+function extractTags(description,quarter){
+const tags=new Set();
+const text=(description||"").toLowerCase();
+(text.match(/#[a-z0-9]+/g)||[]).forEach(t=>tags.add(t));
+HL_KEYWORDS.forEach(k=>{if(text.includes(k))tags.add("#"+k);});
+if(quarter){
+const q=quarter.toLowerCase();
+if(q==="q4"||q==="ot")tags.add("#crunchtime");
+tags.add("#"+q);
+}
+if(/\b(lead|tie|game.?winn|buzzer)\b/.test(text))tags.add("#crunchtime");
+return [...tags];
+}
+
+// ── Highlight Card (compact list item, like image 3)
+function HighlightCard({hl,player,onClick,onTagClick}){
+const rating=hl.rating?parseFloat(hl.rating):null;
+const tags=extractTags(hl.description,hl.quarter).slice(0,3);
+return(
+<div data-testid={`highlight-card-${hl.id}`} style={{display:"flex",gap:12,background:INPUTBG,borderRadius:12,padding:"12px",cursor:"pointer",alignItems:"center"}}>
+<div onClick={onClick} style={{flexShrink:0}}><Avatar player={player} size={56}/></div>
+<div onClick={onClick} style={{flex:1,minWidth:0}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+<span style={{color:WHITE,fontWeight:700,fontSize:13}}>{hl.teamAScore||"-"}<span style={{color:GREY,margin:"0 4px"}}>–</span>{hl.teamBScore||"-"}</span>
+{(hl.quarter||hl.time)&&<span style={{color:GREY,fontSize:12}}>{hl.quarter} {hl.time}</span>}
+{rating!=null&&<span style={{marginLeft:"auto",color:"#4FC3F7",fontSize:13,fontWeight:700}}>▼ {rating.toFixed(1)}</span>}
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,lineHeight:1.3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{hl.description||"(geen titel)"}</div>
+{tags.length>0&&(
+<div style={{display:"flex",gap:4,marginTop:6,flexWrap:"wrap"}}>
+{tags.map(t=>(
+<span key={t} onClick={e=>{e.stopPropagation();onTagClick&&onTagClick(t);}} style={{color:"#4FC3F7",fontSize:11,fontWeight:600,cursor:"pointer"}}>{t}</span>
+))}
+</div>
+)}
+</div>
+<span onClick={onClick} style={{color:GREY,fontSize:16,marginLeft:4}}>›</span>
+</div>
+);
+}
+
+// ── Highlight Detail Modal (image 2 style)
+function HighlightDetailModal({hl,player,gameStats,comments,onAddComment,onDeleteComment,onLike,onClose,onDelete,onEdit,onTagClick,isAdmin}){
+const rating=hl.rating?parseFloat(hl.rating):null;
+const tags=extractTags(hl.description,hl.quarter);
+const [liked,setLiked]=useState(()=>{try{return !!JSON.parse(localStorage.getItem("hl_likes")||"{}")[hl.id];}catch(e){return false;}});
+function toggleLike(){
+const cur={};
+try{Object.assign(cur,JSON.parse(localStorage.getItem("hl_likes")||"{}"));}catch(e){}
+const isLiked=!!cur[hl.id];
+if(isLiked)delete cur[hl.id]; else cur[hl.id]=true;
+try{localStorage.setItem("hl_likes",JSON.stringify(cur));}catch(e){}
+setLiked(!isLiked);
+onLike(hl,isLiked?-1:1);
+}
+const hlComments=(comments||[]).filter(c=>c.gameId===hl.id);
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:520}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" data-testid={`highlight-detail-${hl.id}`} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"16px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto"}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+<button onClick={onClose} style={{background:"transparent",border:"none",color:WHITE,fontSize:24,cursor:"pointer"}}>‹</button>
+<div style={{fontWeight:700,fontSize:16,color:WHITE}}>Play</div>
+<div style={{width:24}}/>
+</div>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+<span style={{color:WHITE,fontWeight:700,fontSize:15}}>{hl.teamAName||"Team A"} <span style={{color:"#4FC3F7"}}>{hl.teamAScore||"-"}–{hl.teamBScore||"-"}</span> {hl.teamBName||"Team B"}</span>
+<span style={{color:GREY,fontSize:13,marginLeft:"auto"}}>{hl.quarter} {hl.time}</span>
+{rating!=null&&<span style={{color:"#4FC3F7",fontSize:14,fontWeight:700}}>▼ {rating.toFixed(1)}</span>}
+</div>
+<div style={{display:"flex",gap:12,alignItems:"center",marginBottom:14}}>
+<Avatar player={player} size={64}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:22,lineHeight:1.2,marginBottom:4}}>{hl.description||"(geen titel)"}</div>
+{player&&<div style={{color:GREY,fontSize:13}}>{player.name}{gameStats?` · ${gameStats.pts||0} pt`:""}</div>}
+</div>
+</div>
+{gameStats&&(
+<button onClick={onClose} style={{width:"100%",background:"#1d5fa6",color:WHITE,border:"none",borderRadius:24,padding:"12px 16px",fontWeight:700,fontSize:15,cursor:"pointer",marginBottom:14}}>Performance</button>
+)}
+
+{/* Like + share */}
+<div style={{display:"flex",alignItems:"center",gap:14,padding:"10px 0",borderTop:`1px solid ${DIVIDER}`,borderBottom:`1px solid ${DIVIDER}`,marginBottom:14}}>
+<button data-testid={`highlight-like-${hl.id}`} onClick={toggleLike} style={{background:"transparent",border:"none",color:liked?RED:GREY,cursor:"pointer",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",gap:6}}>
+{liked?"❤️":"🤍"} {hl.likes||0}
+</button>
+<div style={{color:GREY,fontSize:13,display:"flex",alignItems:"center",gap:6}}>💬 {hlComments.length}</div>
+<div style={{marginLeft:"auto",color:GREY,fontSize:12}}>{new Date(hl.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}</div>
+</div>
+
+{/* Tags */}
+{tags.length>0&&(
+<div style={{marginBottom:14}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>TAGS</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+{tags.map(t=>(
+<button key={t} data-testid={`hl-tag-${t.slice(1)}`} onClick={()=>onTagClick&&onTagClick(t)} style={{background:"transparent",border:"1px solid #4FC3F744",color:"#4FC3F7",borderRadius:12,padding:"3px 10px",fontSize:12,fontWeight:600,cursor:"pointer"}}>{t}</button>
+))}
+</div>
+</div>
+)}
+
+{/* Shot chart */}
+{hl.shotLocation&&(
+<div style={{marginBottom:14}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>SHOT CHART</div>
+<div style={{maxWidth:300,margin:"0 auto"}}><CourtShotChart shots={[{...hl.shotLocation,rating:hl.rating}]}/></div>
+</div>
+)}
+
+{/* Comments */}
+<CommentSection gameId={hl.id} comments={comments||[]} onAddComment={onAddComment} onDeleteComment={onDeleteComment} isAdmin={isAdmin}/>
+
+{isAdmin&&(
+<div style={{display:"flex",gap:8,paddingTop:12,marginTop:12,borderTop:`1px solid ${DIVIDER}`}}>
+<button data-testid={`highlight-edit-${hl.id}`} onClick={()=>onEdit&&onEdit(hl)} style={{flex:1,background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:10,padding:"10px",cursor:"pointer",fontWeight:600,fontSize:13}}>✏️ Bewerken</button>
+<button data-testid={`highlight-delete-${hl.id}`} onClick={()=>{if(confirm("Highlight verwijderen?")){onDelete(hl.id);onClose();}}} style={{flex:1,background:`${RED}22`,color:RED,border:`1px solid ${RED}`,borderRadius:10,padding:"10px",cursor:"pointer",fontWeight:600,fontSize:13}}>🗑️ Verwijderen</button>
+</div>
+)}
+</div>
+</div>
+);
+}
+
+// ── Highlight Form Modal (add/edit)
+function HighlightFormModal({existing,defaults,players,onSave,onClose}){
+const [form,setForm]=useState(existing?{...existing}:{
+playerId:defaults?.playerId||"",
+gameId:defaults?.gameId||"",
+date:defaults?.date||new Date().toISOString().slice(0,10),
+teamAName:defaults?.teamAName||"",
+teamBName:defaults?.teamBName||"",
+teamAScore:defaults?.teamAScore||"",
+teamBScore:defaults?.teamBScore||"",
+description:"",
+quarter:"Q4",
+time:"",
+rating:"",
+shotLocation:null,
+});
+const [saving,setSaving]=useState(false);
+const {IS,BR,BG2}=styles();
+
+async function save(){
+if(!form.description?.trim()||!form.playerId)return;
+setSaving(true);
+await onSave({
+id:existing?existing.id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,6),
+gameId:form.gameId||"",
+playerId:form.playerId,
+date:form.date||new Date().toISOString().slice(0,10),
+teamAName:form.teamAName||"",
+teamBName:form.teamBName||"",
+teamAScore:form.teamAScore||"",
+teamBScore:form.teamBScore||"",
+description:form.description.trim(),
+quarter:form.quarter||"",
+time:form.time||"",
+rating:form.rating?parseFloat(form.rating):null,
+shotLocation:form.shotLocation||null,
+likes:existing?.likes||0,
+createdAt:existing?existing.createdAt:new Date().toISOString()
+});
+setSaving(false);
+onClose();
+}
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:540}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:20,marginBottom:16,textAlign:"center"}}>{existing?"Highlight bewerken":"🎬 Highlight loggen"}</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+<select data-testid="highlight-player-select" style={IS} value={form.playerId} onChange={e=>setForm(f=>({...f,playerId:e.target.value}))}>
+<option value="">— Kies speler —</option>
+{(players||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+</select>
+<input data-testid="highlight-description" placeholder="Beschrijving (bv. '12' drive lead-taking floater')" style={IS} value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
+<div style={{display:"flex",gap:8}}>
+<select style={{...IS,flex:1}} value={form.quarter} onChange={e=>setForm(f=>({...f,quarter:e.target.value}))}>
+{["Q1","Q2","Q3","Q4","OT"].map(q=><option key={q} value={q}>{q}</option>)}
+</select>
+<input placeholder="Tijd (1:05)" style={{...IS,flex:1}} value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))}/>
+</div>
+<div style={{display:"flex",gap:8}}>
+<input placeholder="Team A naam" style={{...IS,flex:1}} value={form.teamAName} onChange={e=>setForm(f=>({...f,teamAName:e.target.value}))}/>
+<input placeholder="Team B naam" style={{...IS,flex:1}} value={form.teamBName} onChange={e=>setForm(f=>({...f,teamBName:e.target.value}))}/>
+</div>
+<div style={{display:"flex",gap:8}}>
+<input placeholder="Score A" type="number" style={{...IS,flex:1}} value={form.teamAScore} onChange={e=>setForm(f=>({...f,teamAScore:e.target.value}))}/>
+<input placeholder="Score B" type="number" style={{...IS,flex:1}} value={form.teamBScore} onChange={e=>setForm(f=>({...f,teamBScore:e.target.value}))}/>
+</div>
+<input placeholder="Rating (bv. 7.4 — optioneel)" type="number" step="0.1" style={IS} value={form.rating} onChange={e=>setForm(f=>({...f,rating:e.target.value}))}/>
+<input type="date" style={IS} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
+
+{/* Shot location picker */}
+<div style={{marginTop:6}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>📍 SCHOT LOCATIE</div>
+<CourtShotPicker value={form.shotLocation} onChange={loc=>setForm(f=>({...f,shotLocation:loc}))}/>
+{form.shotLocation&&<button onClick={()=>setForm(f=>({...f,shotLocation:null}))} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",marginTop:4,textAlign:"center",width:"100%"}}>✕ Locatie wissen</button>}
+</div>
+</div>
+<div style={{display:"flex",gap:10,marginTop:16}}>
+<button onClick={onClose} style={BG2}>Annuleer</button>
+<button data-testid="highlight-save-btn" onClick={save} disabled={saving||!form.description?.trim()||!form.playerId} style={{...BR,opacity:(saving||!form.description?.trim()||!form.playerId)?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
+</div>
+</div>
+</div>
+);
+}
+
+// ── Highlights List Modal
+function HighlightsListModal({highlights,players,games,title,onClose,onSelectHighlight,initialTag}){
+const [tagFilter,setTagFilter]=useState(initialTag||null);
+const sorted=highlights.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")||new Date(b.createdAt)-new Date(a.createdAt));
+const filtered=tagFilter?sorted.filter(h=>extractTags(h.description,h.quarter).includes(tagFilter)):sorted;
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:510}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 16px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>🎬 {title||"Alle Highlights"}</div>
+{tagFilter&&(
+<div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"#4FC3F722",borderRadius:10,marginBottom:12}}>
+<span style={{color:"#4FC3F7",fontSize:13,fontWeight:700}}>Filter: {tagFilter}</span>
+<button onClick={()=>setTagFilter(null)} style={{marginLeft:"auto",background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:14}}>✕</button>
+</div>
+)}
+{filtered.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:30}}>Geen highlights{tagFilter?" met deze tag":""}</div>}
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{filtered.map(hl=>{
+const p=players.find(pl=>pl.id===hl.playerId);
+return<HighlightCard key={hl.id} hl={hl} player={p} onClick={()=>onSelectHighlight(hl)} onTagClick={setTagFilter}/>;
+})}
+</div>
+<button onClick={onClose} style={{width:"100%",background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px",fontWeight:600,fontSize:15,cursor:"pointer",marginTop:14}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
 // ── Comment Section (with nested replies)
 function CommentSection({gameId,comments,onAddComment,onDeleteComment,isAdmin}){
 const [tempName,setTempName]=useState("");
@@ -1160,7 +1493,9 @@ position:"relative"
 {/* Future Games */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>KOMENDE GAMES</div>
 {futureGames.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen geplande games</div>}
-{futureGames.map(g=>(
+{futureGames.map(g=>{
+const injuredEntries=Object.entries(g.injuryReport||{}).filter(([pid,r])=>r&&r.status);
+return(
 <div key={g.id} style={{background:INPUTBG,borderRadius:10,padding:"12px",marginBottom:8}}>
 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
 <div>
@@ -1182,8 +1517,29 @@ position:"relative"
 )}
 </div>
 </div>
+{injuredEntries.length>0&&(
+<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>🩺 INJURY REPORT</div>
+{injuredEntries.map(([pid,rep])=>{
+const p=players.find(pl=>pl.id===pid);
+if(!p)return null;
+const statusColor=rep.status==="active"?"#27AE60":rep.status==="questionable"?"#f5a524":RED;
+const statusLabel=rep.status==="active"?"Active":rep.status==="questionable"?"Questionable":"Out";
+return(
+<div key={pid} data-testid={`injury-display-${pid}`} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",borderBottom:`1px solid ${DIVIDER}`}}>
+<Avatar player={p} size={42}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:15,color:WHITE,marginBottom:2}}>{p.name}</div>
+<div style={{fontSize:13,color:GREY}}><span style={{color:statusColor,fontWeight:700}}>● {statusLabel}</span>{rep.reason?<span style={{color:GREY}}> · {rep.reason}</span>:null}</div>
 </div>
-))}
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+})}
 
 {/* Past Games — detailed */}
 {(() => {
@@ -1260,17 +1616,29 @@ position:"relative"
 
 {isAdmin&&<button onClick={()=>{setEditingScheduled(null);setShowAddModal(true);}} style={{background:RED,color:WHITE,border:"none",borderRadius:20,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%",marginTop:16}}>+ Game plannen</button>}
 
-{showAddModal&&<ScheduledGameModal game={editingScheduled} onSave={onAddScheduledGame} onClose={()=>{setShowAddModal(false);setEditingScheduled(null);}}/>}
+{showAddModal&&<ScheduledGameModal game={editingScheduled} players={players} onSave={onAddScheduledGame} onClose={()=>{setShowAddModal(false);setEditingScheduled(null);}}/>}
 </div>
 );
 }
 
 // ── Scheduled Game Modal
-function ScheduledGameModal({game,onSave,onClose}){
+function ScheduledGameModal({game,players,onSave,onClose}){
 const isEdit=!!game;
-const [form,setForm]=useState(game?{...game}:{title:"",date:new Date().toISOString().slice(0,10),location:""});
+const [form,setForm]=useState(game?{...game}:{title:"",date:new Date().toISOString().slice(0,10),location:"",injuryReport:{}});
 const [saving,setSaving]=useState(false);
 const {IS,BR,BG2}=styles();
+const STATUSES=[
+{key:"active",label:"Active",color:"#27AE60",bg:"#0e2a14"},
+{key:"questionable",label:"Questionable",color:"#f5a524",bg:"#2a1f08"},
+{key:"out",label:"Out",color:RED,bg:"#2a0a0a"},
+];
+
+function setPlayerStatus(pid,status){
+setForm(f=>({...f,injuryReport:{...(f.injuryReport||{}),[pid]:{...(f.injuryReport?.[pid]||{}),status}}}));
+}
+function setPlayerReason(pid,reason){
+setForm(f=>({...f,injuryReport:{...(f.injuryReport||{}),[pid]:{...(f.injuryReport?.[pid]||{}),reason}}}));
+}
 
 async function save(){
 if(!form.title?.trim()||!form.date)return;
@@ -1279,7 +1647,8 @@ await onSave({
 id:isEdit?game.id:Date.now().toString(),
 title:form.title.trim(),
 date:form.date,
-location:form.location||""
+location:form.location||"",
+injuryReport:form.injuryReport||{}
 });
 setSaving(false);
 onClose();
@@ -1287,7 +1656,7 @@ onClose();
 
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
-<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{fontWeight:700,fontSize:20,marginBottom:16,textAlign:"center"}}>{isEdit?"Game bewerken":"Game plannen"}</div>
 <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1295,6 +1664,35 @@ return(
 <input type="date" style={IS} value={form.date||""} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
 <input placeholder="Locatie (optioneel)" style={IS} value={form.location||""} onChange={e=>setForm(f=>({...f,location:e.target.value}))}/>
 </div>
+
+{/* Injury Report */}
+{players&&players.length>0&&(
+<div style={{marginTop:18}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🩺 INJURY REPORT</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>Status per speler — niets selecteren = geen vermelding</div>
+{players.slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=>{
+const rep=form.injuryReport?.[p.id]||{};
+return(
+<div key={p.id} data-testid={`injury-row-${p.id}`} style={{background:INPUTBG,borderRadius:10,padding:"10px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<Avatar player={p} size={36}/>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,flex:1}}>{p.name}</div>
+</div>
+<div style={{display:"flex",gap:6,marginBottom:rep.status?8:0,flexWrap:"wrap"}}>
+{STATUSES.map(s=>{
+const active=rep.status===s.key;
+return(
+<button key={s.key} data-testid={`injury-status-${p.id}-${s.key}`} onClick={()=>setPlayerStatus(p.id,active?null:s.key)} style={{flex:1,minWidth:80,background:active?s.bg:"transparent",border:`1px solid ${active?s.color:"#333"}`,color:active?s.color:GREY,borderRadius:8,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>● {s.label}</button>
+);
+})}
+</div>
+{rep.status&&<input placeholder="Reden (optioneel, bv. 'enkel', 'ziek')" style={{...IS,fontSize:13}} value={rep.reason||""} onChange={e=>setPlayerReason(p.id,e.target.value)}/>}
+</div>
+);
+})}
+</div>
+)}
+
 <div style={{display:"flex",gap:10,marginTop:16}}>
 <button onClick={onClose} style={BG2}>Annuleer</button>
 <button onClick={save} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
@@ -1418,12 +1816,16 @@ const [showPerfPicker,setShowPerfPicker]=useState(false);
 const [expandedReplies,setExpandedReplies]=useState({});
 const [postAsRedactie,setPostAsRedactie]=useState(false);
 const [markOfficial,setMarkOfficial]=useState(false);
+const [pollOpts,setPollOpts]=useState([]); // array of strings; empty = no poll
 const [likedLocal,setLikedLocal]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_likes")||"{}");}catch(e){return{};}});
+const [pollVotes,setPollVotes]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_poll_votes")||"{}");}catch(e){return{};}});
 const {IS,BR}=styles();
 
 function submit(){
 const name=postAsRedactie?"Redactie 📰":tempName.trim();
-if(!name||(!text.trim()&&!selectedGif&&!selectedPerf))return;
+const validPollOpts=pollOpts.filter(o=>o&&o.trim());
+const hasPoll=validPollOpts.length>=2;
+if(!name||(!text.trim()&&!selectedGif&&!selectedPerf&&!hasPoll))return;
 onCreatePost({
 id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),
 tempName:name,
@@ -1433,9 +1835,20 @@ performanceId:selectedPerf?.id||null,
 likes:0,
 pinned:false,
 official:isAdmin&&markOfficial,
+poll:hasPoll?{options:validPollOpts.map((t,i)=>({id:`opt_${i}`,text:t.trim(),votes:0}))}:null,
 createdAt:new Date().toISOString()
 });
-setText("");setSelectedGif(null);setSelectedPerf(null);
+setText("");setSelectedGif(null);setSelectedPerf(null);setPollOpts([]);
+}
+
+function votePoll(post,optionId){
+const cur={...pollVotes};
+if(cur[post.id])return; // already voted
+cur[post.id]=optionId;
+setPollVotes(cur);
+try{localStorage.setItem("larp_poll_votes",JSON.stringify(cur));}catch(e){}
+const newOptions=(post.poll?.options||[]).map(o=>o.id===optionId?{...o,votes:(o.votes||0)+1}:o);
+onCreatePost({...post,poll:{options:newOptions}});
 }
 
 function toggleLike(p){
@@ -1478,6 +1891,28 @@ return (
 {post.text&&<div style={{color:WHITE,fontSize:15,lineHeight:1.5,marginBottom:8,whiteSpace:"pre-wrap"}}>{post.text}</div>}
 {post.gif&&<img src={post.gif} alt="" style={{maxWidth:"100%",maxHeight:280,borderRadius:10,marginBottom:8}}/>}
 {perfGame&&<PerfEmbed game={perfGame} players={players} onClick={()=>onOpenPerf&&onOpenPerf(perfGame.id)}/>}
+{post.poll&&post.poll.options&&post.poll.options.length>=2&&(() => {
+const totalVotes=post.poll.options.reduce((s,o)=>s+(o.votes||0),0);
+const votedOpt=pollVotes[post.id];
+return(
+<div data-testid={`larp-poll-${post.id}`} style={{marginTop:10}}>
+{post.poll.options.map(opt=>{
+const pct=totalVotes>0?Math.round((opt.votes||0)/totalVotes*100):0;
+const isVoted=votedOpt===opt.id;
+return(
+<button key={opt.id} data-testid={`larp-poll-opt-${post.id}-${opt.id}`} onClick={()=>!votedOpt&&votePoll(post,opt.id)} disabled={!!votedOpt} style={{position:"relative",width:"100%",background:"#0d0d0d",border:`1px solid ${isVoted?RED:"#333"}`,borderRadius:10,padding:"10px 12px",marginBottom:6,cursor:votedOpt?"default":"pointer",overflow:"hidden",textAlign:"left",color:WHITE}}>
+{votedOpt&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pct}%`,background:isVoted?`${RED}33`:"#1a1a1a",transition:"width 0.4s"}}/>}
+<div style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:13,fontWeight:600}}>
+<span>{isVoted?"✓ ":""}{opt.text}</span>
+{votedOpt&&<span style={{color:GREY,fontSize:12}}>{pct}% · {opt.votes||0}</span>}
+</div>
+</button>
+);
+})}
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{totalVotes} stem{totalVotes===1?"":"men"}{votedOpt?"":" · Klik om te stemmen"}</div>
+</div>
+);
+})()}
 <div style={{display:"flex",gap:14,marginTop:10,paddingTop:8,borderTop:`1px solid ${DIVIDER}`}}>
 <button data-testid={`larp-like-${post.id}`} onClick={()=>toggleLike(post)} style={{background:"transparent",border:"none",color:isLiked?RED:GREY,cursor:"pointer",fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:5}}>
 {isLiked?"❤️":"🤍"} {post.likes||0}
@@ -1517,11 +1952,28 @@ LBA Official ✓
 <button onClick={()=>setSelectedPerf(null)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",width:22,height:22,color:WHITE,fontSize:11,cursor:"pointer"}}>✕</button>
 </div>
 )}
+{/* Poll editor */}
+{pollOpts.length>0&&(
+<div data-testid="larp-poll-editor" style={{background:"#0a0a0a",border:`1px solid ${RED}44`,borderRadius:10,padding:"10px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",marginBottom:6}}>
+<span style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1}}>📊 POLL</span>
+<button onClick={()=>setPollOpts([])} style={{marginLeft:"auto",background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13}}>✕</button>
+</div>
+{pollOpts.map((opt,i)=>(
+<div key={i} style={{display:"flex",gap:6,marginBottom:6}}>
+<input placeholder={`Optie ${i+1}`} style={{...IS,flex:1,fontSize:13}} value={opt} onChange={e=>setPollOpts(arr=>arr.map((x,j)=>j===i?e.target.value:x))}/>
+{pollOpts.length>2&&<button onClick={()=>setPollOpts(arr=>arr.filter((_,j)=>j!==i))} style={{background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:14}}>✕</button>}
+</div>
+))}
+{pollOpts.length<4&&<button onClick={()=>setPollOpts(arr=>[...arr,""])} style={{background:"transparent",border:`1px dashed ${RED}66`,color:RED,borderRadius:8,padding:"6px",fontSize:12,fontWeight:600,cursor:"pointer",width:"100%"}}>+ Optie toevoegen</button>}
+</div>
+)}
 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
 <button onClick={()=>setShowGifPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🎬 GIF</button>
 <button onClick={()=>setShowStickerPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>✨ Sticker</button>
 <button onClick={()=>setShowPerfPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🏀 Performance</button>
-<button data-testid="larp-post-btn" onClick={submit} disabled={(!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:((!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf))?0.4:1}}>Larp 🐦</button>
+<button data-testid="larp-add-poll-btn" onClick={()=>setPollOpts(arr=>arr.length?arr:["",""])} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>📊 Poll</button>
+<button data-testid="larp-post-btn" onClick={submit} disabled={(!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:((!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2))?0.4:1}}>Larp 🐦</button>
 </div>
 </div>
 {/* Feed */}
@@ -2041,6 +2493,10 @@ const [scheduledGames,setScheduledGames]=useState([]);
 const [blogPosts,setBlogPosts]=useState([]);
 const [larpPosts,setLarpPosts]=useState([]);
 const [larpReplies,setLarpReplies]=useState([]);
+const [highlights,setHighlights]=useState([]);
+const [highlightForm,setHighlightForm]=useState(null); // {existing, defaults}
+const [highlightView,setHighlightView]=useState(null); // a highlight object
+const [highlightsList,setHighlightsList]=useState(null); // {items, title}
 const [loading,setLoading]=useState(true);
 const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
@@ -2087,11 +2543,15 @@ setLarpPosts(s.docs.map(d=>d.data()));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
+const uH=_onSnapshot(_col(_db,"highlights"),s=>{
+setHighlights(s.docs.map(d=>d.data()));
+},(err)=>console.error("Highlights listener error:",err));
+window._unsubHighlights=uH;
 }).catch(()=>{clearTimeout(timeout);setLoading(false);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
 window.addEventListener('swUpdateAvailable',onUpdate);
-return()=>{uP&&uP();uG&&uG();uC&&uC();uS&&uS();uB&&uB();uL&&uL();uLR&&uLR();window.removeEventListener('swUpdateAvailable',onUpdate);clearTimeout(timeout);};
+return()=>{uP&&uP();uG&&uG();uC&&uC();uS&&uS();uB&&uB();uL&&uL();uLR&&uLR();window._unsubHighlights&&window._unsubHighlights();window.removeEventListener('swUpdateAvailable',onUpdate);clearTimeout(timeout);};
 },[]);
 
 // ── Auto-generated LARP recaps (weekly + monthly MVP announcement)
@@ -2298,6 +2758,11 @@ catch(e){console.error(e);showError();}
 async function addLarpReply(r){setSaveStatus("saving");try{await fbSave("larp_replies",r);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteLarpReply(id){setSaveStatus("saving");try{await fbDel("larp_replies",id);showSaved();}catch(e){console.error(e);showError();}}
 
+// Highlights handlers
+async function saveHighlight(h){setSaveStatus("saving");try{await fbSave("highlights",h);showSaved();}catch(e){console.error(e);showError();}}
+async function deleteHighlight(id){setSaveStatus("saving");try{await fbDel("highlights",id);showSaved();}catch(e){console.error(e);showError();}}
+async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
+
 function getSorted(){
 let gs=[...games];
 if(filterPos!=="All positions"){const ids=players.filter(p=>p.position===filterPos).map(p=>p.id);gs=gs.filter(g=>ids.includes(g.playerId));}
@@ -2499,15 +2964,26 @@ return (
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(
-<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} isAdmin={isAdmin}
+<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} isAdmin={isAdmin}
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
-onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}/>
+onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
+onOpenHighlight={hl=>setHighlightView(hl)}
+onViewAllHighlights={(items,name)=>setHighlightsList({items,title:`Highlights · ${name}`})}/>
 )}
 {modal?.type==="perfDetail"&&detailGame&&detailPlayer&&(
-<PerfDetailModal game={detailGame} player={detailPlayer} allPlayers={players} allGames={games} comments={comments}
+<PerfDetailModal game={detailGame} player={detailPlayer} allPlayers={players} allGames={games} comments={comments} highlights={highlights}
 isAdmin={isAdmin} onClose={()=>setModal(null)} onDelete={deleteGame}
-onEdit={g=>{setEditingGame(g);setModal(null);}} onAddComment={addComment} onDeleteComment={deleteCommentAndReplies}/>
+onEdit={g=>{setEditingGame(g);setModal(null);}} onAddComment={addComment} onDeleteComment={deleteCommentAndReplies}
+onAddHighlight={defaults=>setHighlightForm({existing:null,defaults})}
+onOpenHighlight={hl=>setHighlightView(hl)}/>
 )}
+{highlightForm&&<HighlightFormModal existing={highlightForm.existing} defaults={highlightForm.defaults} players={players} onSave={saveHighlight} onClose={()=>setHighlightForm(null)}/>}
+{highlightView&&(() => {
+const pl=players.find(p=>p.id===highlightView.playerId);
+const gs=games.find(g=>g.id===highlightView.playerId+"_"+highlightView.gameId)||games.find(g=>(g.matchId||g.id)===highlightView.gameId&&g.playerId===highlightView.playerId);
+return <HighlightDetailModal hl={highlightView} player={pl} gameStats={gs} comments={comments} onAddComment={addComment} onDeleteComment={deleteCommentAndReplies} onLike={likeHighlight} isAdmin={isAdmin} onClose={()=>setHighlightView(null)} onDelete={deleteHighlight} onEdit={hl=>{setHighlightView(null);setHighlightForm({existing:hl,defaults:null});}} onTagClick={tag=>{setHighlightView(null);setHighlightsList({items:highlights,title:`Tag · ${tag}`,initialTag:tag});}}/>;
+})()}
+{highlightsList&&<HighlightsListModal highlights={highlightsList.items} players={players} games={games} title={highlightsList.title} initialTag={highlightsList.initialTag} onClose={()=>setHighlightsList(null)} onSelectHighlight={hl=>{setHighlightsList(null);setHighlightView(hl);}}/>}
 {editingPost!==null&&<BlogPostModal post={editingPost} onSave={saveBlogPost} onClose={()=>setEditingPost(null)}/>}
 {viewingPost&&<BlogPostDetail post={viewingPost} onClose={()=>setViewingPost(null)} onEdit={()=>setEditingPost(viewingPost)}/>}
 </div>
@@ -2524,6 +3000,6 @@ window.__showBootFallback && window.__showBootFallback(e && (e.stack || e.messag
 }
 </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b8d03bcb05c0f7',t:'MTc4MTQzNDYzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0bb385289ee560e',t:'MTc4MTQ1OTg3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

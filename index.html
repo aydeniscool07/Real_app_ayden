@@ -371,7 +371,7 @@ return(
 }
 
 // ── Perf Detail Modal
-function PerfDetailModal({game,player,allPlayers,allGames,comments,onClose,onDelete,onEdit,isAdmin,onAddComment}){
+function PerfDetailModal({game,player,allPlayers,allGames,comments,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment}){
 const fps=calcFps(game);
 const matchGames=game.matchId?allGames.filter(g=>g.matchId===game.matchId):[];
 const tAN=game.teamAName||"Team A",tBN=game.teamBName||"Team B";
@@ -438,7 +438,7 @@ return(
 ))}
 </div>
 )}
-<CommentSection gameId={game.id} comments={gameComments} onAddComment={onAddComment}/>
+<CommentSection gameId={game.id} comments={gameComments} onAddComment={onAddComment} onDeleteComment={onDeleteComment} isAdmin={isAdmin}/>
 <div style={{display:"flex",gap:10,marginTop:20}}>
 {isAdmin&&<button onClick={()=>{onDelete(game.id);onClose();}} style={{background:"transparent",border:"1px solid #ff453a",color:"#ff453a",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>Delete</button>}
 {isAdmin&&<button onClick={()=>onEdit(game)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>✏️ Edit</button>}
@@ -985,7 +985,7 @@ return(
 }
 
 // ── Comment Section (with nested replies)
-function CommentSection({gameId,comments,onAddComment}){
+function CommentSection({gameId,comments,onAddComment,onDeleteComment,isAdmin}){
 const [tempName,setTempName]=useState("");
 const [text,setText]=useState("");
 const [showGifPicker,setShowGifPicker]=useState(false);
@@ -1027,6 +1027,7 @@ return (
 <div style={{fontWeight:600,fontSize:13,color:WHITE}}>{c.tempName}</div>
 <div style={{color:GREY,fontSize:10}}>{new Date(c.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
 </div>
+{isAdmin&&<button data-testid={`comment-del-${c.id}`} onClick={()=>{if(confirm("Comment verwijderen? Eventuele antwoorden worden ook verwijderd."))onDeleteComment(c.id);}} style={{background:"transparent",border:"none",color:RED,cursor:"pointer",fontSize:14,padding:"0 4px",alignSelf:"flex-start"}}>🗑</button>}
 </div>
 {c.text&&<div style={{color:WHITE,fontSize:14,lineHeight:1.5,marginTop:4}}>{c.text}</div>}
 {c.gif&&<img src={c.gif} alt="" style={{maxHeight:140,borderRadius:8,marginTop:6}}/>}
@@ -1415,19 +1416,23 @@ const [showGifPicker,setShowGifPicker]=useState(false);
 const [showStickerPicker,setShowStickerPicker]=useState(false);
 const [showPerfPicker,setShowPerfPicker]=useState(false);
 const [expandedReplies,setExpandedReplies]=useState({});
+const [postAsRedactie,setPostAsRedactie]=useState(false);
+const [markOfficial,setMarkOfficial]=useState(false);
 const [likedLocal,setLikedLocal]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_likes")||"{}");}catch(e){return{};}});
 const {IS,BR}=styles();
 
 function submit(){
-if(!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf))return;
+const name=postAsRedactie?"Redactie 📰":tempName.trim();
+if(!name||(!text.trim()&&!selectedGif&&!selectedPerf))return;
 onCreatePost({
 id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),
-tempName:tempName.trim(),
+tempName:name,
 text:text.trim(),
 gif:selectedGif||null,
 performanceId:selectedPerf?.id||null,
 likes:0,
 pinned:false,
+official:isAdmin&&markOfficial,
 createdAt:new Date().toISOString()
 });
 setText("");setSelectedGif(null);setSelectedPerf(null);
@@ -1459,6 +1464,7 @@ return (
 <div style={{flex:1,minWidth:0}}>
 <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
 <span style={{fontWeight:700,fontSize:15,color:WHITE}}>{post.tempName}</span>
+{post.official&&<span data-testid={`larp-official-badge-${post.id}`} title="LBA Official" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:16,height:16,borderRadius:"50%",background:"#4FC3F7",color:"#000",fontSize:10,fontWeight:900,flexShrink:0}}>✓</span>}
 <span style={{color:GREY,fontSize:12}}>· {new Date(post.createdAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
 </div>
 </div>
@@ -1490,7 +1496,19 @@ return(
 {/* Compose box */}
 <div data-testid="larp-compose" style={{background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:16,border:`1px solid ${RED}33`}}>
 <div style={{color:RED,fontSize:10,fontWeight:800,letterSpacing:2,marginBottom:8}}>🐦 LARP</div>
-<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>
+{isAdmin&&(
+<div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+<label data-testid="larp-admin-redactie" style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:postAsRedactie?`1px solid ${RED}`:"1px solid #222"}}>
+<input type="checkbox" checked={postAsRedactie} onChange={e=>setPostAsRedactie(e.target.checked)} style={{accentColor:RED}}/>
+Posten als Redactie 📰
+</label>
+<label data-testid="larp-admin-official" style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:markOfficial?"1px solid #4FC3F7":"1px solid #222"}}>
+<input type="checkbox" checked={markOfficial} onChange={e=>setMarkOfficial(e.target.checked)} style={{accentColor:"#4FC3F7"}}/>
+LBA Official ✓
+</label>
+</div>
+)}
+{!postAsRedactie&&<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>}
 <textarea placeholder="Wat speelt er...?" style={{...IS,minHeight:60,fontFamily:"inherit",resize:"vertical",fontSize:15,marginBottom:8}} value={text} onChange={e=>setText(e.target.value)}/>
 {selectedGif&&<div style={{position:"relative",marginBottom:8,display:"inline-block"}}><img src={selectedGif} alt="" style={{maxHeight:140,borderRadius:8}}/><button onClick={()=>setSelectedGif(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",width:24,height:24,color:WHITE,fontSize:12,cursor:"pointer"}}>✕</button></div>}
 {selectedPerf&&(
@@ -1503,7 +1521,7 @@ return(
 <button onClick={()=>setShowGifPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🎬 GIF</button>
 <button onClick={()=>setShowStickerPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>✨ Sticker</button>
 <button onClick={()=>setShowPerfPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🏀 Performance</button>
-<button data-testid="larp-post-btn" onClick={submit} disabled={!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:(!tempName.trim()||(!text.trim()&&!selectedGif&&!selectedPerf))?0.4:1}}>Larp 🐦</button>
+<button data-testid="larp-post-btn" onClick={submit} disabled={(!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:((!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf))?0.4:1}}>Larp 🐦</button>
 </div>
 </div>
 {/* Feed */}
@@ -2226,6 +2244,20 @@ async function saveGames(gs){setSaveStatus("saving");try{await Promise.all(gs.ma
 async function saveGameEdit(g){setSaveStatus("saving");try{await fbSave("games",g);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteGame(gid){setSaveStatus("saving");try{await fbDel("games",gid);showSaved();}catch(e){console.error(e);showError();}}
 async function addComment(c){setSaveStatus("saving");try{await fbSave("comments",c);showSaved();}catch(e){console.error(e);showError();}}
+async function deleteCommentAndReplies(id){
+setSaveStatus("saving");
+try{
+// Find all descendants recursively
+const toDelete=new Set([id]);
+let changed=true;
+while(changed){
+changed=false;
+comments.forEach(c=>{if(c.parentId&&toDelete.has(c.parentId)&&!toDelete.has(c.id)){toDelete.add(c.id);changed=true;}});
+}
+await Promise.all([...toDelete].map(cid=>fbDel("comments",cid)));
+showSaved();
+}catch(e){console.error(e);showError();}
+}
 async function saveScheduledGame(g){setSaveStatus("saving");try{await fbSave("scheduled_games",g);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteScheduledGame(id){setSaveStatus("saving");try{await fbDel("scheduled_games",id);showSaved();}catch(e){console.error(e);showError();}}
 async function saveBlogPost(p){setSaveStatus("saving");try{await fbSave("blog_posts",p);showSaved();}catch(e){console.error(e);showError();}}
@@ -2474,7 +2506,7 @@ onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}/>
 {modal?.type==="perfDetail"&&detailGame&&detailPlayer&&(
 <PerfDetailModal game={detailGame} player={detailPlayer} allPlayers={players} allGames={games} comments={comments}
 isAdmin={isAdmin} onClose={()=>setModal(null)} onDelete={deleteGame}
-onEdit={g=>{setEditingGame(g);setModal(null);}} onAddComment={addComment}/>
+onEdit={g=>{setEditingGame(g);setModal(null);}} onAddComment={addComment} onDeleteComment={deleteCommentAndReplies}/>
 )}
 {editingPost!==null&&<BlogPostModal post={editingPost} onSave={saveBlogPost} onClose={()=>setEditingPost(null)}/>}
 {viewingPost&&<BlogPostDetail post={viewingPost} onClose={()=>setViewingPost(null)} onEdit={()=>setEditingPost(viewingPost)}/>}
@@ -2492,6 +2524,6 @@ window.__showBootFallback && window.__showBootFallback(e && (e.stack || e.messag
 }
 </script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b8c12f386919f7',t:'MTc4MTQzNDAyMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0b8d03bcb05c0f7',t:'MTc4MTQzNDYzOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7f7b0fd8732c4326aae4b9d58d5c514a","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

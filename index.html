@@ -2482,6 +2482,257 @@ return(
 }
 
 // ══════════════════════════════════════════
+// ── LINEUP EDITOR
+// ══════════════════════════════════════════
+const POSITIONS_COURT={PG:{x:50,y:75},SG:{x:82,y:55},SF:{x:18,y:55},PF:{x:70,y:30},C:{x:32,y:30}};
+
+function LineupEditor({players,games,onClose}){
+const {IS,BR,BG2}=styles();
+const [lineupA,setLineupA]=useState({PG:null,SG:null,SF:null,PF:null,C:null});
+const [lineupB,setLineupB]=useState(null); // null = not created yet
+const [activeSlot,setActiveSlot]=useState(null); // {team,pos}
+const [useChameleon,setUseChameleon]=useState(false);
+const [teamAName,setTeamAName]=useState("Mijn Team");
+const [teamBName,setTeamBName]=useState("Tegenstander");
+const [showPicker,setShowPicker]=useState(false);
+const [step,setStep]=useState("teamA"); // teamA | teamB | result
+
+// Stats calc
+function getPlayerStats(pid,chameleon=false){
+const pg=games.filter(g=>g.playerId===pid&&(chameleon?g.team==="chameleon":g.team!=="chameleon")).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+const last5=pg.slice(0,5);
+if(!last5.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0,gp:0};
+const{w,l,d}=getWinLoss(pg);
+const total=w+l+d;
+return{
+pts:avg(last5,"pts"),reb:avg(last5,"reb"),ast:avg(last5,"ast"),
+winRate:total?parseFloat(((w+d*0.5)/total*100).toFixed(1)):0,
+fps:parseFloat((last5.reduce((s,g)=>s+(+calcFps(g)),0)/last5.length).toFixed(1)),
+gp:pg.length
+};
+}
+function lineupStats(lineup,chameleon=false){
+const pids=Object.values(lineup||{}).filter(Boolean);
+if(!pids.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0};
+const stats=pids.map(pid=>getPlayerStats(pid,chameleon));
+return{
+pts:parseFloat((stats.reduce((s,x)=>s+x.pts,0)).toFixed(1)),
+reb:parseFloat((stats.reduce((s,x)=>s+x.reb,0)).toFixed(1)),
+ast:parseFloat((stats.reduce((s,x)=>s+x.ast,0)).toFixed(1)),
+winRate:parseFloat((stats.reduce((s,x)=>s+x.winRate,0)/stats.length).toFixed(1)),
+fps:parseFloat((stats.reduce((s,x)=>s+x.fps,0)).toFixed(1)),
+};
+}
+
+const statsA=lineupStats(lineupA,useChameleon);
+const statsB=lineupB?lineupStats(lineupB,false):null;
+const filledA=Object.values(lineupA).filter(Boolean).length;
+const filledB=lineupB?Object.values(lineupB).filter(Boolean).length:0;
+
+function pickPlayer(pid){
+if(!activeSlot)return;
+const {team,pos}=activeSlot;
+if(team==="A")setLineupA(l=>({...l,[pos]:pid}));
+else setLineupB(l=>({...l,[pos]:pid}));
+setShowPicker(false);setActiveSlot(null);
+}
+function removePlayer(team,pos){
+if(team==="A")setLineupA(l=>({...l,[pos]:null}));
+else setLineupB(l=>({...l,[pos]:null}));
+}
+
+// Court with 5 positions
+function CourtView({lineup,team,editable=true}){
+const courtW=280,courtH=220;
+return(
+<div style={{position:"relative",width:courtW,height:courtH,margin:"0 auto",borderRadius:12,overflow:"hidden",background:"linear-gradient(180deg,#0a2a5c 0%,#0a1a3c 100%)",border:"1px solid #1a3a6c"}}>
+{/* Court lines */}
+<svg style={{position:"absolute",inset:0}} width={courtW} height={courtH}>
+{/* 3pt arc */}
+<path d={`M 30 ${courtH} A ${courtW*0.42} ${courtH*0.9} 0 0 1 ${courtW-30} ${courtH}`} fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"/>
+{/* Paint */}
+<rect x={courtW*0.3} y={courtH*0.0} width={courtW*0.4} height={courtH*0.55} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5"/>
+{/* Free throw circle */}
+<circle cx={courtW*0.5} cy={courtH*0.55} r={courtW*0.1} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5"/>
+{/* Basket */}
+<circle cx={courtW*0.5} cy={courtH*0.08} r={8} fill="none" stroke="rgba(255,200,0,0.6)" strokeWidth="2"/>
+<line x1={courtW*0.5} y1={0} x2={courtW*0.5} y2={courtH*0.08} stroke="rgba(255,200,0,0.4)" strokeWidth="1"/>
+</svg>
+{Object.entries(POSITIONS_COURT).map(([pos,coords])=>{
+const pid=lineup[pos];
+const p=pid?players.find(x=>x.id===pid):null;
+const x=coords.x/100*courtW;
+const y=coords.y/100*courtH;
+return(
+<div key={pos} onClick={()=>{if(!editable)return;setActiveSlot({team,pos});setShowPicker(true);}} style={{position:"absolute",left:x-26,top:y-26,width:52,height:52,cursor:editable?"pointer":"default"}}>
+<div style={{width:52,height:52,borderRadius:"50%",background:p?"#1a3a6c":"#0a1a3c",border:`2px dashed ${p?RED:"rgba(255,255,255,0.3)"}`,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",overflow:"hidden",position:"relative"}}>
+{p?(
+<>
+{p.pfp?<img src={p.pfp} style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"50%"}}/>:<div style={{fontSize:14,fontWeight:700,color:WHITE}}>{p.name.slice(0,2)}</div>}
+<div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",fontSize:8,textAlign:"center",color:WHITE,fontWeight:600,padding:"1px 0"}}>{pos}</div>
+</>
+):(
+<div style={{textAlign:"center"}}>
+<div style={{color:"rgba(255,255,255,0.4)",fontSize:9,fontWeight:700}}>{pos}</div>
+<div style={{color:"rgba(255,255,255,0.2)",fontSize:16}}>+</div>
+</div>
+)}
+</div>
+{p&&editable&&<div onClick={e=>{e.stopPropagation();removePlayer(team,pos);}} style={{position:"absolute",top:-4,right:-4,background:"#ff453a",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:WHITE,cursor:"pointer",fontWeight:800}}>×</div>}
+</div>
+);
+})}
+</div>
+);
+}
+
+function StatBar({label,valA,valB,higher="A"}){
+const max=Math.max(valA,valB,1);
+const pA=valA/max*100,pB=valB/max*100;
+const aWins=higher==="A"?valA>=valB:valA<=valB;
+return(
+<div style={{marginBottom:8}}>
+<div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+<span style={{color:aWins?WHITE:GREY,fontWeight:aWins?700:400,fontSize:13}}>{valA}</span>
+<span style={{color:GREY,fontSize:11}}>{label}</span>
+<span style={{color:!aWins?WHITE:GREY,fontWeight:!aWins?700:400,fontSize:13}}>{valB}</span>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3,height:6}}>
+<div style={{borderRadius:"4px 0 0 4px",background:aWins?RED:"#333",width:`${pA}%`,marginLeft:"auto"}}/>
+<div style={{borderRadius:"0 4px 4px 0",background:!aWins?"#3388ff":"#333",width:`${pB}%`}}/>
+</div>
+</div>
+);
+}
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:300,overflowY:"auto",display:"flex",alignItems:"flex-start",justifyContent:"center",paddingBottom:40}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#0a0a0a",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,minHeight:"80vh",paddingBottom:20}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"12px auto 0"}}/>
+<div style={{padding:"14px 16px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div style={{fontWeight:900,fontSize:20}}>🏀 Lineup <span style={{color:RED}}>Editor</span></div>
+<button onClick={onClose} style={{background:"transparent",border:"none",color:GREY,fontSize:22,cursor:"pointer"}}>×</button>
+</div>
+
+{/* Team A lineup */}
+<div style={{padding:"12px 16px 6px"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<input value={teamAName} onChange={e=>setTeamAName(e.target.value)} style={{...IS,fontWeight:700,fontSize:15,padding:"8px 12px"}}/>
+<div style={{color:GREY,fontSize:12,flexShrink:0}}>{filledA} spelers</div>
+</div>
+<CourtView lineup={lineupA} team="A"/>
+<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+<label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+<div onClick={()=>setUseChameleon(v=>!v)} style={{width:34,height:20,borderRadius:10,background:useChameleon?RED:DARKGREY,position:"relative",transition:"background .2s"}}>
+<div style={{position:"absolute",top:3,left:useChameleon?16:3,width:14,height:14,borderRadius:"50%",background:WHITE,transition:"left .2s"}}/>
+</div>
+<span style={{color:GREY,fontSize:12}}>🦎 Kameleon stats gebruiken</span>
+</label>
+</div>
+{/* Team A stats */}
+<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
+{[["PTS",statsA.pts],["REB",statsA.reb],["AST",statsA.ast],["WIN%",statsA.winRate+"%"]].map(([l,v])=>(
+<div key={l} style={{background:INPUTBG,borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{v}</div>
+<div style={{color:GREY,fontSize:10}}>{l}</div>
+</div>
+))}
+</div>
+</div>
+
+{/* Create opponent or show comparison */}
+{!lineupB&&filledA>=1&&(
+<div style={{padding:"0 16px",marginTop:12}}>
+<button onClick={()=>setLineupB({PG:null,SG:null,SF:null,PF:null,C:null})} style={{...BG2,border:`1px dashed ${DARKGREY}`}}>+ Tegenstander toevoegen</button>
+</div>
+)}
+
+{lineupB&&(
+<div style={{padding:"12px 16px 0"}}>
+<div style={{borderTop:`1px solid ${DIVIDER}`,paddingTop:14,marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<input value={teamBName} onChange={e=>setTeamBName(e.target.value)} style={{...IS,fontWeight:700,fontSize:15,padding:"8px 12px"}}/>
+<div style={{color:GREY,fontSize:12,flexShrink:0}}>{filledB} spelers</div>
+</div>
+<CourtView lineup={lineupB} team="B"/>
+<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
+{[["PTS",statsB.pts],["REB",statsB.reb],["AST",statsB.ast],["WIN%",statsB.winRate+"%"]].map(([l,v])=>(
+<div key={l} style={{background:"#0a1a3c",borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
+<div style={{color:"#5599ff",fontWeight:800,fontSize:16}}>{v}</div>
+<div style={{color:GREY,fontSize:10}}>{l}</div>
+</div>
+))}
+</div>
+</div>
+
+{/* Comparison */}
+{filledA>=1&&filledB>=1&&(
+<div style={{marginTop:14,background:INPUTBG,borderRadius:14,padding:"14px"}}>
+<div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+<span style={{color:RED,fontWeight:700,fontSize:13}}>{teamAName}</span>
+<span style={{color:GREY,fontSize:11}}>Vergelijking</span>
+<span style={{color:"#5599ff",fontWeight:700,fontSize:13}}>{teamBName}</span>
+</div>
+<StatBar label="Totaal PTS" valA={statsA.pts} valB={statsB.pts}/>
+<StatBar label="Totaal REB" valA={statsA.reb} valB={statsB.reb}/>
+<StatBar label="Totaal AST" valA={statsA.ast} valB={statsB.ast}/>
+<StatBar label="Gem. Win%" valA={statsA.winRate} valB={statsB.winRate}/>
+<StatBar label="Totaal FPS" valA={statsA.fps} valB={statsB.fps}/>
+{/* Winner prediction */}
+{(()=>{
+const scoreA=statsA.pts*0.4+statsA.reb*0.2+statsA.ast*0.2+statsA.winRate*0.2;
+const scoreB=statsB.pts*0.4+statsB.reb*0.2+statsB.ast*0.2+statsB.winRate*0.2;
+const total=scoreA+scoreB||1;
+const probA=Math.round(scoreA/total*100);
+return(
+<div style={{marginTop:12,background:"#111",borderRadius:10,padding:"12px",textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11,marginBottom:6}}>VOORSPELDE WINNAAR</div>
+<div style={{fontWeight:800,fontSize:18,color:probA>50?RED:"#5599ff"}}>{probA>50?teamAName:teamBName}</div>
+<div style={{color:GREY,fontSize:12,marginTop:4}}>{probA>50?probA:100-probA}% kans op basis van stats</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,marginTop:10,height:10,borderRadius:5,overflow:"hidden"}}>
+<div style={{background:RED,opacity:probA/100}}/>
+<div style={{background:"#3388ff",opacity:(100-probA)/100}}/>
+</div>
+</div>
+);
+})()}
+</div>
+)}
+</div>
+)}
+
+{/* Player picker modal */}
+{showPicker&&(
+<div onClick={()=>{setShowPicker(false);setActiveSlot(null);}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:400,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"70vh",overflowY:"auto",padding:"16px 16px calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 12px"}}/>
+<div style={{fontWeight:700,fontSize:16,marginBottom:12}}>Kies speler — {activeSlot?.pos}</div>
+{players.map(p=>{
+const st=getPlayerStats(p.id,useChameleon&&activeSlot?.team==="A");
+return(
+<div key={p.id} onClick={()=>pickPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px",borderRadius:12,marginBottom:6,background:INPUTBG,cursor:"pointer"}}>
+<Avatar player={p} size={38}/>
+<div style={{flex:1}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p.name}</div>
+<div style={{color:GREY,fontSize:12}}>{p.position||"—"} · {st.gp}G</div>
+</div>
+<div style={{display:"flex",gap:10,textAlign:"center"}}>
+{[["PTS",st.pts],["REB",st.reb],["AST",st.ast]].map(([l,v])=>(
+<div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:14}}>{v}</div><div style={{color:GREY,fontSize:9}}>{l}</div></div>
+))}
+</div>
+</div>
+);
+})}
+</div>
+</div>
+)}
+</div>
+</div>
+);
+}
+
+// ══════════════════════════════════════════
 // ── BETTING SYSTEM
 // ══════════════════════════════════════════
 
@@ -2509,31 +2760,29 @@ if(isNaN(o))return 50;
 return o>0?Math.round(100/(o+100)*100):Math.round(Math.abs(o)/(Math.abs(o)+100)*100);
 }
 
-// Auto-generate prop odds from player stats
+// Auto-generate prop odds from player stats — all stats
 function generatePlayerProps(player,games){
 const pg=games.filter(g=>g.playerId===player.id).slice().sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
 const last5=pg.slice(0,5);
 if(!last5.length)return[];
-const avgPts=avg(last5,"pts");
-const avgReb=avg(last5,"reb");
-const avgAst=avg(last5,"ast");
 const props=[];
-// PTS line
-if(avgPts>0){
-const line=Math.round(avgPts*2)/2; // round to .5
-const variance=avgPts<10?-120:avgPts<20?-110:+100;
-props.push({type:"pts",label:`${player.name} PTS`,line,overOdds:variance,underOdds:variance>0?-130:-120,stat:"pts"});
-}
-// REB line
-if(avgReb>0){
-const line=Math.round(avgReb*2)/2;
-props.push({type:"reb",label:`${player.name} REB`,line,overOdds:-110,underOdds:-110,stat:"reb"});
-}
-// AST line
-if(avgAst>0){
-const line=Math.round(avgAst*2)/2;
-props.push({type:"ast",label:`${player.name} AST`,line,overOdds:-110,underOdds:-110,stat:"ast"});
-}
+const propDefs=[
+{key:"pts",minAvg:1},{key:"reb",minAvg:0.5},{key:"ast",minAvg:0.5},
+{key:"stl",minAvg:0.3},{key:"blk",minAvg:0.3},{key:"to",minAvg:0.3},
+{key:"pra",minAvg:1,combo:["pts","reb","ast"]},
+{key:"pr",minAvg:1,combo:["pts","reb"]},
+{key:"pa",minAvg:1,combo:["pts","ast"]},
+];
+propDefs.forEach(({key,minAvg,combo})=>{
+let a;
+if(combo){a=avg(last5.map(g=>({...g,[key]:combo.reduce((s,k)=>s+(+g[k]||0),0)})),key);}
+else{a=avg(last5,key);}
+if(a<minAvg)return;
+const line=Math.round(a*2)/2;
+const variance=a<8?-115:a<20?-110:+105;
+const label=combo?combo.map(k=>STAT_LABEL[k]).join("+"):(STAT_LABEL[key]||key.toUpperCase());
+props.push({type:key,label:`${player.name} ${label}`,line,overOdds:variance,underOdds:variance>0?-130:-120,stat:key,combo,statLabel:label});
+});
 return props;
 }
 
@@ -2821,7 +3070,7 @@ return(
 // ── Main Betting Tab
 function BettingTab({players,games,betOdds,bets,wallets,userIp,isAdmin,betSlip,setBetSlip,showBetSlip,setShowBetSlip,onSaveBet,onSaveOdds,onSaveWallet,onVoidBet}){
 const {IS,BR,BG2}=styles();
-const [section,setSection]=useState("props"); // props | futures | mybets
+const [section,setSection]=useState("pts"); // pts|reb|ast|stl|blk|to|pra|pr|pa|futures|mybets|games
 const [adminOpen,setAdminOpen]=useState(false);
 
 // My wallet — new players start with €10
@@ -2928,64 +3177,145 @@ return(
 </div>
 
 {/* Section tabs */}
-<div style={{display:"flex",padding:"12px 16px 0",gap:8}}>
-{[{id:"props",label:"📋 Props"},{id:"futures",label:"🏆 Futures"},{id:"mybets",label:`📁 Mijn bets${myBets.length?` (${myBets.length})`:""}`}].map(s=>(
-<button key={s.id} onClick={()=>setSection(s.id)} style={{background:section===s.id?RED:INPUTBG,color:WHITE,border:"none",borderRadius:20,padding:"7px 14px",fontWeight:600,fontSize:13,cursor:"pointer",flexShrink:0}}>{s.label}</button>
+<div style={{overflowX:"auto",padding:"12px 16px 0",WebkitOverflowScrolling:"touch"}}>
+<div style={{display:"flex",gap:6,width:"max-content"}}>
+{[
+{id:"pts",label:"🏀 PTS"},{id:"reb",label:"💪 REB"},{id:"ast",label:"🎯 AST"},
+{id:"stl",label:"🦅 STL"},{id:"blk",label:"🚫 BLK"},{id:"to",label:"❌ TO"},
+{id:"pra",label:"📊 P+R+A"},{id:"pr",label:"P+R"},{id:"pa",label:"P+A"},
+{id:"games",label:"🏟️ Games"},{id:"futures",label:"🏆 Futures"},
+{id:"mybets",label:`📁 Mijn${myBets.length?` (${myBets.length})`:""}`}
+].map(s=>(
+<button key={s.id} onClick={()=>setSection(s.id)} style={{background:section===s.id?RED:INPUTBG,color:WHITE,border:"none",borderRadius:20,padding:"7px 14px",fontWeight:600,fontSize:12,cursor:"pointer",flexShrink:0,whiteSpace:"nowrap"}}>{s.label}</button>
 ))}
 </div>
+</div>
 
-{/* PROPS */}
-{section==="props"&&(
+{/* STAT PROPS SECTIONS */}
+{["pts","reb","ast","stl","blk","to","pra","pr","pa"].includes(section)&&(
 <div style={{padding:"12px 16px 0"}}>
-{propMarkets.length===0&&(
+{(()=>{
+const statMarkets=propMarkets.filter(m=>m.type===section);
+if(!statMarkets.length)return(
 <div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
 <div style={{fontSize:40,marginBottom:10}}>📋</div>
-<div style={{color:WHITE,fontWeight:600,marginBottom:6}}>Geen prop markets</div>
-<div style={{fontSize:13}}>Er zijn minstens 5 games per speler nodig voor automatische odds.</div>
+<div style={{color:WHITE,fontWeight:600,marginBottom:6}}>Geen {section.toUpperCase()} markets</div>
+<div style={{fontSize:13}}>Niet genoeg data voor deze categorie.</div>
 </div>
-)}
-{players.map(p=>{
-const pp=propMarkets.filter(m=>m.playerId===p.id);
-if(!pp.length)return null;
+);
+return statMarkets.map(market=>{
+const p=players.find(x=>x.id===market.playerId);
+if(!p)return null;
 const pg=games.filter(g=>g.playerId===p.id);
-return(
-<div key={p.id} style={{marginBottom:16}}>
-<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-<Avatar player={p} size={36}/>
-<div>
-<div style={{fontWeight:700,fontSize:15,color:WHITE}}>{p.name}</div>
-<div style={{color:GREY,fontSize:12}}>
-{[["PPG",avg(pg.slice(0,5),"pts")],["RPG",avg(pg.slice(0,5),"reb")],["APG",avg(pg.slice(0,5),"ast")]].map(([l,v])=>`${v} ${l}`).join(" · ")} <span style={{color:GREY}}>(L5)</span>
-</div>
-</div>
-</div>
-{pp.map(market=>{
 const overInSlip=betSlip.find(b=>b.marketId===market.id+"_over");
 const underInSlip=betSlip.find(b=>b.marketId===market.id+"_under");
+const last5=pg.slice().sort((a,b)=>b.date?.localeCompare(a.date||"")||0).slice(0,5);
+const recentVals=last5.map(g=>market.combo?market.combo.reduce((s,k)=>s+(+g[k]||0),0):(+g[market.stat]||0));
 return(
-<div key={market.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
-<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-<div style={{fontWeight:600,fontSize:14,color:WHITE}}>{market.type.toUpperCase()} Lijn: <span style={{color:RED}}>{market.line}</span></div>
-<div style={{color:GREY,fontSize:11}}>{impliedProb(market.overOdds)}% kans over</div>
+<div key={market.id} style={{background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:10}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+<Avatar player={p} size={34}/>
+<div style={{flex:1}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p.name}</div>
+<div style={{color:GREY,fontSize:11,marginTop:1}}>L5: {recentVals.join(" · ")} <span style={{color:RED,fontWeight:600}}>Gem: {avg(last5.map((g,i)=>({v:recentVals[i]})),"v")}</span></div>
+</div>
+<div style={{color:GREY,fontSize:11,textAlign:"right"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:16}}>{market.line}</div>
+<div>Lijn</div>
+</div>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-<button onClick={()=>addToSlip(`${p.name} Over ${market.line} ${market.type.toUpperCase()}`,`${formatOdds(market.overOdds)}`,market.overOdds,market.id+"_over")} style={{background:overInSlip?"#27AE60":BG,border:`1.5px solid ${overInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}>
-<div style={{color:GREY,fontSize:11,marginBottom:4}}>OVER {market.line}</div>
+<button onClick={()=>addToSlip(`${p.name} Over ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Meer dan ${market.line}`,market.overOdds,market.id+"_over")} style={{background:overInSlip?"#27AE60":BG,border:`1.5px solid ${overInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11,marginBottom:4}}>MEER DAN {market.line}</div>
 <div style={{color:overInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.overOdds)}</div>
 </button>
-<button onClick={()=>addToSlip(`${p.name} Under ${market.line} ${market.type.toUpperCase()}`,`${formatOdds(market.underOdds)}`,market.underOdds,market.id+"_under")} style={{background:underInSlip?"#27AE60":BG,border:`1.5px solid ${underInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}>
-<div style={{color:GREY,fontSize:11,marginBottom:4}}>UNDER {market.line}</div>
+<button onClick={()=>addToSlip(`${p.name} Under ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Minder dan ${market.line}`,market.underOdds,market.id+"_under")} style={{background:underInSlip?"#27AE60":BG,border:`1.5px solid ${underInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11,marginBottom:4}}>MINDER DAN {market.line}</div>
 <div style={{color:underInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.underOdds)}</div>
 </button>
 </div>
 </div>
 );
-})}
+});
+})()}
+</div>
+)}
+
+{/* GAMES MATCHDAY BETTING */}
+{section==="games"&&(()=>{
+// Find upcoming matchday: group scheduled games by date, pick soonest future date
+const today=new Date().toISOString().slice(0,10);
+// Use played games to find next matchday by finding unique match dates sorted
+const matchDates=[...new Set(games.map(g=>g.date).filter(Boolean))].sort().reverse();
+// "Next matchday" = simulate as a concept: group all games by matchId, calculate win rates
+const matchIds=[...new Set(games.filter(g=>g.matchId).map(g=>g.matchId))];
+// Group into actual matches
+const matches=matchIds.map(mid=>{
+const mGames=games.filter(g=>g.matchId===mid);
+const date=mGames[0]?.date||"";
+const teamA=mGames.filter(g=>g.team==="A");
+const teamB=mGames.filter(g=>g.team==="B");
+if(!teamA.length||!teamB.length)return null;
+const tAN=mGames[0].teamAName||"Team A";
+const tBN=mGames[0].teamBName||"Team B";
+const tAS=parseFloat(mGames[0].teamAScore||0);
+const tBS=parseFloat(mGames[0].teamBScore||0);
+const winner=tAS>tBS?tAN:tBS>tAS?tBN:null;
+return{mid,date,tAN,tBN,tAS,tBS,winner,teamAPlayers:teamA,teamBPlayers:teamB};
+}).filter(Boolean).sort((a,b)=>b.date.localeCompare(a.date));
+
+// For "next matchday bets", show NEXT scheduled matchday based on future
+// Since we don't have scheduled games concept here, show last 3 matches as "coming up" concept
+// and allow betting on player who scores most in that match
+const recentMatches=matches.slice(0,5);
+
+// Build "game winner" odds: for each player, calculate win rate
+function playerWinRate(pid){
+const pg=games.filter(g=>g.playerId===pid&&g.team!=="chameleon");
+if(!pg.length)return 0.5;
+const{w,l,d}=getWinLoss(pg);
+const total=w+l+d;
+return total?((w+d*0.5)/total):0.5;
+}
+
+return(
+<div style={{padding:"12px 16px 0"}}>
+<div style={{background:"linear-gradient(135deg,#0a1a2a,#001a3a)",border:"1px solid #3388ff33",borderRadius:14,padding:"14px",marginBottom:16}}>
+<div style={{color:"#5599ff",fontWeight:800,fontSize:16,marginBottom:4}}>🏟️ Game Bets</div>
+<div style={{color:GREY,fontSize:13}}>Goк op welke speler zijn team wint. Odds gebaseerd op historische winratio. Meerdere wedstrijden op een dag tellen mee.</div>
+</div>
+{players.filter(p=>games.filter(g=>g.playerId===p.id&&g.team!=="chameleon").length>=2).map(p=>{
+const pg=games.filter(g=>g.playerId===p.id&&g.team!=="chameleon");
+const wr=playerWinRate(p.id);
+const{w,l,d}=getWinLoss(pg);
+const american=wr>0.5?Math.round(-(wr/(1-wr))*100):Math.round(((1-wr)/wr)*100);
+const marketId=`game_win_${p.id}`;
+const inSlip=betSlip.find(b=>b.marketId===marketId);
+return(
+<div key={p.id} style={{background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
+<Avatar player={p} size={40}/>
+<div style={{flex:1}}>
+<div style={{fontWeight:700,fontSize:15,color:WHITE}}>{p.name}</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>{w}W {l}L{d?` ${d}D`:""} · <span style={{color:wr>0.55?"#27AE60":wr<0.45?"#ff453a":GREY,fontWeight:600}}>{Math.round(wr*100)}% win</span></div>
+</div>
+<button onClick={()=>addToSlip(`${p.name} wint zijn volgende game`,`${Math.round(wr*100)}% historische winratio`,american,marketId)} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:15}}>{formatOdds(american)}</div>
+<div style={{color:"rgba(255,255,255,0.7)",fontSize:10,marginTop:2}}>{inSlip?"✓ Gekozen":"Kiezen"}</div>
+</button>
 </div>
 );
 })}
+{players.filter(p=>games.filter(g=>g.playerId===p.id&&g.team!=="chameleon").length>=2).length===0&&(
+<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
+<div style={{fontSize:40,marginBottom:10}}>🏟️</div>
+<div style={{color:WHITE,fontWeight:600,marginBottom:6}}>Niet genoeg data</div>
+<div style={{fontSize:13}}>Minimaal 2 games per speler nodig.</div>
 </div>
 )}
+</div>
+);
+})()}
+
 
 {/* FUTURES */}
 {section==="futures"&&(
@@ -3112,7 +3442,7 @@ const [showPosPicker,setShowPosPicker]=useState(false);
 const [sortBy,setSortBy]=useState("Beste");
 const [showSortPicker,setShowSortPicker]=useState(false);
 const [viewingPost,setViewingPost]=useState(null);
-const [editingPost,setEditingPost]=useState(null);
+const [showLineupEditor,setShowLineupEditor]=useState(false);
 const [bets,setBets]=useState([]);
 const [wallets,setWallets]=useState([]);
 const [betOdds,setBetOdds]=useState([]);
@@ -3535,7 +3865,10 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 <div>
 <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
 <span style={{color:GREY,fontSize:13}}>{players.length} spelers</span>
+<div style={{display:"flex",gap:8,alignItems:"center"}}>
+<button onClick={()=>setShowLineupEditor(true)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"6px 12px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏀 Lineup</button>
 {isAdmin&&<button onClick={()=>setModal("addPlayer")} style={{background:"transparent",border:"none",color:RED,fontSize:15,fontWeight:600,cursor:"pointer"}}>+ Toevoegen</button>}
+</div>
 </div>
 {players.length===0&&(
 <div style={{textAlign:"center",padding:"60px 20px",color:GREY}}>
@@ -3616,6 +3949,7 @@ return (
 </div>
 
 {/* Modals */}
+{showLineupEditor&&<LineupEditor players={players} games={games} onClose={()=>setShowLineupEditor(false)}/>}
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}

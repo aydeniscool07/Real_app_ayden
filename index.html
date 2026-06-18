@@ -1179,8 +1179,16 @@ return(
 </div>
 )}
 
-{/* Shot chart */}
-{hl.shotLocation&&(
+{/* Play animation viewer */}
+{hl.play&&hl.play.ballPath&&hl.play.ballPath.length>0&&(
+<div style={{marginBottom:14}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>🎮 PLAY</div>
+<PlayAnimator play={hl.play} onChange={()=>{}}/>
+</div>
+)}
+
+{/* Shot chart (legacy fallback if no play) */}
+{!hl.play&&hl.shotLocation&&(
 <div style={{marginBottom:14}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>SHOT CHART</div>
 <div style={{maxWidth:300,margin:"0 auto"}}><CourtShotChart shots={[{...hl.shotLocation,rating:hl.rating}]}/></div>
@@ -1188,7 +1196,7 @@ return(
 )}
 
 {/* Comments */}
-<CommentSection gameId={hl.id} comments={comments||[]} onAddComment={onAddComment} onDeleteComment={onDeleteComment} isAdmin={isAdmin}/>
+<CommentSection gameId={hl.id} comments={hlComments} onAddComment={onAddComment} onDeleteComment={onDeleteComment} isAdmin={isAdmin}/>
 
 {isAdmin&&(
 <div style={{display:"flex",gap:8,paddingTop:12,marginTop:12,borderTop:`1px solid ${DIVIDER}`}}>
@@ -1196,6 +1204,214 @@ return(
 <button data-testid={`highlight-delete-${hl.id}`} onClick={()=>{if(confirm("Highlight verwijderen?")){onDelete(hl.id);onClose();}}} style={{flex:1,background:`${RED}22`,color:RED,border:`1px solid ${RED}`,borderRadius:10,padding:"10px",cursor:"pointer",fontWeight:600,fontSize:13}}>🗑️ Verwijderen</button>
 </div>
 )}
+</div>
+</div>
+);
+}
+
+// ── Play Animator — interactive court editor for highlights
+const PLAY_MOVES=["Spin","Ankle Breaker","Crossover","Hesitation","Euro Step","Behind Back","Between Legs","Jab Step"];
+const PLAY_SHOTS=["Dunk","Layup","Floater","Pull-Up","Stepback","Fadeaway","Mid-Range","3-Pointer","Alley-Oop"];
+
+function PlayAnimator({play,onChange}){
+// play = {ballPath:[{x,y}], move:null, shot:null, defenders:[{path:[{x,y}]}], teammates:[{path:[{x,y}]}]}
+const svgRef=React.useRef(null);
+const [mode,setMode]=React.useState("ball"); // ball | defender | teammate | view
+const [animating,setAnimating]=React.useState(false);
+const animRef=React.useRef(null);
+const [animT,setAnimT]=React.useState(0);
+
+const p=play||{ballPath:[],move:null,shot:null,defenders:[],teammates:[]};
+
+function svgCoords(e){
+const svg=svgRef.current;
+if(!svg)return null;
+const rect=svg.getBoundingClientRect();
+const clientX=e.touches?e.touches[0].clientX:e.clientX;
+const clientY=e.touches?e.touches[0].clientY:e.clientY;
+return{x:Math.round(((clientX-rect.left)/rect.width)*200*10)/10,y:Math.round(((clientY-rect.top)/rect.height)*188*10)/10};
+}
+
+function handleCourtClick(e){
+const pt=svgCoords(e);
+if(!pt)return;
+if(mode==="ball"){
+onChange({...p,ballPath:[...p.ballPath,pt]});
+}else if(mode==="defender"){
+// add a new defender with first point
+const defs=[...p.defenders,{path:[pt]}];
+onChange({...p,defenders:defs});
+}else if(mode==="teammate"){
+const mates=[...p.teammates,{path:[pt]}];
+onChange({...p,teammates:mates});
+}
+}
+
+function handleDefenderClick(idx,e){
+e.stopPropagation();
+const pt=svgCoords(e);
+if(!pt)return;
+if(mode==="defender"){
+const defs=p.defenders.map((d,i)=>i===idx?{...d,path:[...d.path,pt]}:d);
+onChange({...p,defenders:defs});
+}
+}
+
+function handleTeammateClick(idx,e){
+e.stopPropagation();
+const pt=svgCoords(e);
+if(!pt)return;
+if(mode==="teammate"){
+const mates=p.teammates.map((t,i)=>i===idx?{...t,path:[...t.path,pt]}:t);
+onChange({...p,teammates:mates});
+}
+}
+
+function removeLastBallPoint(){onChange({...p,ballPath:p.ballPath.slice(0,-1)});}
+function removeLastDefender(){onChange({...p,defenders:p.defenders.slice(0,-1)});}
+function removeLastTeammate(){onChange({...p,teammates:p.teammates.slice(0,-1)});}
+
+function getPathD(pts){
+if(!pts||pts.length<1)return"";
+return pts.map((pt,i)=>`${i===0?"M":"L"}${pt.x},${pt.y}`).join(" ");
+}
+
+// animation: interpolate ball along path
+function startAnim(){
+if(p.ballPath.length<2)return;
+setAnimating(true);
+setAnimT(0);
+let start=null;
+const duration=2000;
+function step(ts){
+if(!start)start=ts;
+const t=Math.min((ts-start)/duration,1);
+setAnimT(t);
+if(t<1)animRef.current=requestAnimationFrame(step);
+else{setAnimating(false);setAnimT(0);}
+}
+animRef.current=requestAnimationFrame(step);
+}
+React.useEffect(()=>()=>{if(animRef.current)cancelAnimationFrame(animRef.current);},[]);
+
+function interpPath(pts,t){
+if(!pts||pts.length<2)return pts[0]||{x:100,y:94};
+const total=pts.length-1;
+const pos=t*total;
+const i=Math.min(Math.floor(pos),total-1);
+const f=pos-i;
+return{x:pts[i].x+(pts[i+1].x-pts[i].x)*f,y:pts[i].y+(pts[i+1].y-pts[i].y)*f};
+}
+
+const ballAnim=animating&&p.ballPath.length>=2?interpPath(p.ballPath,animT):null;
+const shotIcon={"Dunk":"💥","Layup":"🤌","Floater":"🪁","Alley-Oop":"🙌"}[p.shot]||"🏀";
+
+const btnStyle=(active,col="#E8312A")=>({background:active?col+"22":"transparent",border:`1px solid ${active?col:"#333"}`,color:active?col:GREY,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"});
+
+return(
+<div>
+{/* Mode selector */}
+<div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+{[["ball","🏀 Bal pad"],["defender","🔴 Verdediger"],["teammate","🟢 Ploegmaat"],["view","👁 Bekijk"]].map(([m,l])=>(
+<button key={m} onClick={()=>setMode(m)} style={btnStyle(mode===m,m==="defender"?"#ff4444":m==="teammate"?"#4FC3F7":"#E8312A")}>{l}</button>
+))}
+</div>
+{/* Instruction */}
+<div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
+{mode==="ball"&&"Tap de court om bal-waypoints toe te voegen"}
+{mode==="defender"&&"Tap voor nieuwe verdediger, tap opnieuw voor zijn pad"}
+{mode==="teammate"&&"Tap voor nieuwe ploegmaat, tap opnieuw voor zijn pad"}
+{mode==="view"&&"Geen edit — tik Animeer om te bekijken"}
+</div>
+{/* Court SVG */}
+<div style={{position:"relative",touchAction:"none"}}>
+<svg ref={svgRef} viewBox="0 0 200 188" preserveAspectRatio="xMidYMid meet"
+onClick={mode!=="view"?handleCourtClick:undefined}
+style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:mode!=="view"?"crosshair":"default"}}>
+{/* Court lines */}
+<rect x="70" y="0" width="60" height="76" fill="#ecd9b0"/>
+<rect x="70" y="0" width="60" height="76" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<circle cx="100" cy="76" r="24" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5" strokeDasharray="3 3"/>
+<path d="M 100 52 A 24 24 0 0 0 100 100 Z" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<line x1="84" y1="14" x2="116" y2="14" stroke="rgba(255,255,255,0.8)" strokeWidth="3"/>
+<circle cx="100" cy="20" r="6" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="1.5"/>
+<line x1="10" y1="0" x2="10" y2="44" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<line x1="190" y1="0" x2="190" y2="44" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<path d="M 10 44 Q 100 175 190 44" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+<path d="M 132 188 A 32 32 0 0 0 68 188" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+
+{/* Teammate paths */}
+{p.teammates.map((tm,i)=>(
+<g key={i} onClick={e=>handleTeammateClick(i,e)} style={{cursor:mode==="teammate"?"crosshair":"default"}}>
+{tm.path.length>1&&<path d={getPathD(tm.path)} fill="none" stroke="#4FC3F7" strokeWidth="2" strokeDasharray="5 3" opacity="0.8"/>}
+{tm.path.map((pt,j)=>(
+<circle key={j} cx={pt.x} cy={pt.y} r={j===0?8:4} fill="#4FC3F7" opacity={j===0?0.9:0.5} stroke="white" strokeWidth="1"/>
+))}
+{tm.path[0]&&<text x={tm.path[0].x} y={tm.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">{i+1}</text>}
+</g>
+))}
+
+{/* Defender paths */}
+{p.defenders.map((def,i)=>(
+<g key={i} onClick={e=>handleDefenderClick(i,e)} style={{cursor:mode==="defender"?"crosshair":"default"}}>
+{def.path.length>1&&<path d={getPathD(def.path)} fill="none" stroke="#ff4444" strokeWidth="2" strokeDasharray="5 3" opacity="0.8"/>}
+{def.path.map((pt,j)=>(
+<circle key={j} cx={pt.x} cy={pt.y} r={j===0?8:4} fill="#ff4444" opacity={j===0?0.9:0.5} stroke="white" strokeWidth="1"/>
+))}
+{def.path[0]&&<text x={def.path[0].x} y={def.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">D{i+1}</text>}
+</g>
+))}
+
+{/* Ball path */}
+{p.ballPath.length>1&&(
+<path d={getPathD(p.ballPath)} fill="none" stroke="#E8312A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+)}
+{p.ballPath.map((pt,i)=>(
+<circle key={i} cx={pt.x} cy={pt.y} r={i===0?7:4} fill={i===0?"#ff8c00":"#E8312A"} stroke="white" strokeWidth="1.5" opacity={animating?0.3:1}/>
+))}
+{/* Shot endpoint label */}
+{p.shot&&p.ballPath.length>0&&(
+<text x={p.ballPath[p.ballPath.length-1].x} y={p.ballPath[p.ballPath.length-1].y-10} textAnchor="middle" fontSize="14">{shotIcon}</text>
+)}
+{/* Animated ball */}
+{ballAnim&&(
+<circle cx={ballAnim.x} cy={ballAnim.y} r="7" fill="#ff8c00" stroke="white" strokeWidth="2"/>
+)}
+{/* Move label midpoint */}
+{p.move&&p.ballPath.length>=2&&(()=>{
+const mid=Math.floor(p.ballPath.length/2);
+const pt=p.ballPath[mid]||p.ballPath[0];
+return <text x={pt.x} y={pt.y-10} textAnchor="middle" fontSize="9" fill="#fff" fontWeight="bold" style={{textShadow:"0 0 3px #000"}}>{p.move}</text>;
+})()}
+</svg>
+</div>
+
+{/* Controls row */}
+<div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+<button onClick={removeLastBallPoint} disabled={p.ballPath.length===0} style={{...btnStyle(false),opacity:p.ballPath.length?1:0.4}}>↩ Bal</button>
+<button onClick={removeLastDefender} disabled={p.defenders.length===0} style={{...btnStyle(false,"#ff4444"),opacity:p.defenders.length?1:0.4}}>↩ Verd.</button>
+<button onClick={removeLastTeammate} disabled={p.teammates.length===0} style={{...btnStyle(false,"#4FC3F7"),opacity:p.teammates.length?1:0.4}}>↩ Ploeg</button>
+<button onClick={startAnim} disabled={p.ballPath.length<2||animating} style={{...btnStyle(animating,"#4FC3F7"),marginLeft:"auto",opacity:p.ballPath.length>=2?1:0.4}}>{animating?"▶ Speelt...":"▶ Animeer"}</button>
+</div>
+
+{/* Move + Shot pickers */}
+<div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+<div style={{flex:1,minWidth:120}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:5}}>MOVE</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+{PLAY_MOVES.map(m=>(
+<button key={m} onClick={()=>onChange({...p,move:p.move===m?null:m})} style={{...btnStyle(p.move===m),fontSize:10,padding:"4px 7px"}}>{m}</button>
+))}
+</div>
+</div>
+<div style={{flex:1,minWidth:120}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:5}}>SHOT / FINISH</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+{PLAY_SHOTS.map(s=>(
+<button key={s} onClick={()=>onChange({...p,shot:p.shot===s?null:s})} style={{...btnStyle(p.shot===s),fontSize:10,padding:"4px 7px"}}>{s}</button>
+))}
+</div>
+</div>
 </div>
 </div>
 );
@@ -1216,6 +1432,7 @@ quarter:"Q4",
 time:"",
 rating:"",
 shotLocation:null,
+play:null,
 });
 const [saving,setSaving]=useState(false);
 const {IS,BR,BG2}=styles();
@@ -1236,7 +1453,8 @@ description:form.description.trim(),
 quarter:form.quarter||"",
 time:form.time||"",
 rating:form.rating?parseFloat(form.rating):null,
-shotLocation:form.shotLocation||null,
+shotLocation:form.play?.ballPath?.length?form.play.ballPath[form.play.ballPath.length-1]:form.shotLocation||null,
+play:form.play||null,
 likes:existing?.likes||0,
 createdAt:existing?existing.createdAt:new Date().toISOString()
 });
@@ -1246,7 +1464,7 @@ onClose();
 
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:540}}>
-<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{fontWeight:700,fontSize:20,marginBottom:16,textAlign:"center"}}>{existing?"Highlight bewerken":"🎬 Highlight loggen"}</div>
 <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1254,7 +1472,7 @@ return(
 <option value="">— Kies speler —</option>
 {(players||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
 </select>
-<input data-testid="highlight-description" placeholder="Beschrijving (bv. '12' drive lead-taking floater')" style={IS} value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
+<input data-testid="highlight-description" placeholder="Beschrijving (bv. 'Ankle breaker → pull-up')" style={IS} value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))}/>
 <div style={{display:"flex",gap:8}}>
 <select style={{...IS,flex:1}} value={form.quarter} onChange={e=>setForm(f=>({...f,quarter:e.target.value}))}>
 {["Q1","Q2","Q3","Q4","OT"].map(q=><option key={q} value={q}>{q}</option>)}
@@ -1272,11 +1490,10 @@ return(
 <input placeholder="Rating (bv. 7.4 — optioneel)" type="number" step="0.1" style={IS} value={form.rating} onChange={e=>setForm(f=>({...f,rating:e.target.value}))}/>
 <input type="date" style={IS} value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
 
-{/* Shot location picker */}
+{/* Play Animator */}
 <div style={{marginTop:6}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>📍 SCHOT LOCATIE</div>
-<CourtShotPicker value={form.shotLocation} onChange={loc=>setForm(f=>({...f,shotLocation:loc}))}/>
-{form.shotLocation&&<button onClick={()=>setForm(f=>({...f,shotLocation:null}))} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",marginTop:4,textAlign:"center",width:"100%"}}>✕ Locatie wissen</button>}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>🎮 PLAY ANIMATOR</div>
+<PlayAnimator play={form.play||{ballPath:[],move:null,shot:null,defenders:[],teammates:[]}} onChange={play=>setForm(f=>({...f,play}))}/>
 </div>
 </div>
 <div style={{display:"flex",gap:10,marginTop:16}}>

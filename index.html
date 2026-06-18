@@ -1552,18 +1552,22 @@ return(
 return(
 <div>
 {/* Mode selector */}
-{!readOnly&&<div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+{!readOnly&&(
+<div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
 {[["ball","🏀 Bal"],["defender","🔴 Verd."],["teammate","🟢 Ploeg"],["pass","🟡 Pass"],["view","👁 Kijk"]].map(([m,l])=>(
 <button key={m} onClick={()=>setMode(m)} style={btnStyle(mode===m,m==="defender"?"#ff4444":m==="teammate"?"#4FC3F7":m==="pass"?"#ffe066":"#E8312A")}>{l}</button>
 ))}
-</div>}
-{!readOnly&&<div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
+</div>
+)}
+{!readOnly&&(
+<div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
 {mode==="ball"&&"Tap om bal-waypoints te zetten"}
 {mode==="defender"&&(selectedDef>=0?`D${selectedDef+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe verd. Tap D-cirkel om te selecteren")}
 {mode==="teammate"&&(selectedMate>=0?`Ploegmaat ${selectedMate+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe ploegmaat. Tap cirkel om te selecteren")}
 {mode==="pass"&&(!addingPass?"Tap 🏀 of een ploegmaat om een pass te starten":(passFrom===-1?"Van baldrager → tap ontvanger":"Ploegmaat "+(passFrom+1)+" is baldrager → tap ontvanger"))}
 {mode==="view"&&"Tap ▶ Animeer"}
-</div>}
+</div>
+)}
 {/* Court SVG */}
 <div style={{position:"relative",touchAction:"none"}}>
 <svg ref={svgRef} viewBox="0 0 200 188" preserveAspectRatio="xMidYMid meet"
@@ -1692,17 +1696,18 @@ return<circle cx={movePivot.x+off.dx} cy={movePivot.y+off.dy} r="5" fill="#ff8c0
 
 {/* Controls */}
 <div style={{display:"flex",gap:5,marginTop:8,flexWrap:"wrap"}}>
-{!readOnly&&<button onClick={removeLastBallPoint} disabled={!isEditable||!p.ballPath.length} style={{...btnStyle(false),opacity:p.ballPath.length&&isEditable?1:0.4}}>↩ Bal</button>}
-{!readOnly&&<button onClick={removeLastDefender} disabled={!isEditable||!p.defenders.length} style={{...btnStyle(false,"#ff4444"),opacity:p.defenders.length&&isEditable?1:0.4}}>↩ Verd.</button>}
-{!readOnly&&<button onClick={removeLastTeammate} disabled={!isEditable||!p.teammates.length} style={{...btnStyle(false,"#4FC3F7"),opacity:p.teammates.length&&isEditable?1:0.4}}>↩ Ploeg</button>}
-{!readOnly&&<button onClick={removeLastPass} disabled={!isEditable||!passes.length} style={{...btnStyle(false,"#ffe066"),opacity:passes.length&&isEditable?1:0.4}}>↩ Pass</button>}
+{!readOnly&&(<button onClick={removeLastBallPoint} disabled={!isEditable||!p.ballPath.length} style={{...btnStyle(false),opacity:p.ballPath.length&&isEditable?1:0.4}}>↩ Bal</button>)}
+{!readOnly&&(<button onClick={removeLastDefender} disabled={!isEditable||!p.defenders.length} style={{...btnStyle(false,"#ff4444"),opacity:p.defenders.length&&isEditable?1:0.4}}>↩ Verd.</button>)}
+{!readOnly&&(<button onClick={removeLastTeammate} disabled={!isEditable||!p.teammates.length} style={{...btnStyle(false,"#4FC3F7"),opacity:p.teammates.length&&isEditable?1:0.4}}>↩ Ploeg</button>)}
+{!readOnly&&(<button onClick={removeLastPass} disabled={!isEditable||!passes.length} style={{...btnStyle(false,"#ffe066"),opacity:passes.length&&isEditable?1:0.4}}>↩ Pass</button>)}
 <button onClick={startAnim} disabled={p.ballPath.length<2||animating} style={{...btnStyle(animating,"#4FC3F7"),marginLeft:"auto",opacity:p.ballPath.length>=2?1:0.4}}>
 {animating?(currentPhaseType==="shot"?"🏀 Schot...":currentPhaseType==="pass"?"↗ Past...":"▶ Dribbelt..."):"▶ Animeer"}
 </button>
 </div>
 
 {/* Move + Shot + moveAtT */}
-{!readOnly&&<div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+{!readOnly&&(
+<div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
 <div style={{flex:1,minWidth:120}}>
 <div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:5}}>MOVE</div>
 <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
@@ -1719,7 +1724,8 @@ return<circle cx={movePivot.x+off.dx} cy={movePivot.y+off.dy} r="5" fill="#ff8c0
 ))}
 </div>
 </div>
-</div>}
+</div>
+)}
 </div>
 );
 }

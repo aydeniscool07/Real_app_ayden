@@ -1335,8 +1335,10 @@ setAddingPass(true);
 if(idx!==passFrom){
 const newPass={from:passFrom,to:idx,atBallT:0.5};
 onChange({...p,passes:[...passes,newPass]});
-}
+setAddingPass(true);setPassFrom(idx);
+}else{
 setAddingPass(false);setPassFrom(-1);
+}
 }
 }
 }
@@ -1352,7 +1354,7 @@ e.stopPropagation();
 if(mode==="pass"&&addingPass&&idx!==passFrom){
 const newPass={from:passFrom,to:idx,atBallT:passFrom===-1?0.8:0.5};
 onChange({...p,passes:[...passes,newPass]});
-setAddingPass(false);setPassFrom(-1);
+setAddingPass(true);setPassFrom(idx);
 }
 }
 function removeLastPass(){onChange({...p,passes:passes.slice(0,-1)});}
@@ -1424,9 +1426,11 @@ const segDur=SEG_DRIBBLE_MS*(1-lastT);
 phases.push({type:"dribble",startMs:totalMs,endMs:totalMs+segDur,ballTFrom:lastT,ballTTo:1});
 totalMs+=segDur;
 }
-// shot
+// shot — if last pass went to a teammate, shoot from their position
 if(p.shot&&p.ballPath.length>0){
-const from=p.ballPath[p.ballPath.length-1];
+const lastPass=sortedPasses.length?sortedPasses[sortedPasses.length-1]:null;
+const lastPassReceiver=lastPass&&lastPass.to>=0?p.teammates[lastPass.to]:null;
+const from=lastPassReceiver?.path?.length?lastPassReceiver.path[lastPassReceiver.path.length-1]:p.ballPath[p.ballPath.length-1];
 phases.push({type:"shot",startMs:totalMs,endMs:totalMs+SEG_SHOT_MS,from,to:HOOP_SVG});
 totalMs+=SEG_SHOT_MS;
 }
@@ -1558,7 +1562,7 @@ return(
 {mode==="ball"&&"Tap om bal-waypoints te zetten"}
 {mode==="defender"&&(selectedDef>=0?`D${selectedDef+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe verd. Tap D-cirkel om te selecteren")}
 {mode==="teammate"&&(selectedMate>=0?`Ploegmaat ${selectedMate+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe ploegmaat. Tap cirkel om te selecteren")}
-{mode==="pass"&&(!addingPass?"Tap 🏀 of een ploegmaat om een pass te starten":(passFrom===-1?"Van baldrager → tap ontvanger":"Van ploegmaat → tap ontvanger"))}
+{mode==="pass"&&(!addingPass?"Tap 🏀 of een ploegmaat om een pass te starten":(passFrom===-1?"Van baldrager → tap ontvanger":"Ploegmaat "+(passFrom+1)+" is baldrager → tap ontvanger"))}
 {mode==="view"&&"Tap ▶ Animeer"}
 </div>
 {/* Court SVG */}
@@ -1642,7 +1646,9 @@ return(
 )}
 {/* Shot preview arc */}
 {p.shot&&p.ballPath.length>0&&!animating&&(()=>{
-const from=p.ballPath[p.ballPath.length-1];
+const lastPassShot=p.passes?.length?[...p.passes].sort((a,b)=>a.atBallT-b.atBallT)[p.passes.length-1]:null;
+const receiverShot=lastPassShot&&lastPassShot.to>=0?p.teammates[lastPassShot.to]:null;
+const from=receiverShot?.path?.length?receiverShot.path[receiverShot.path.length-1]:p.ballPath[p.ballPath.length-1];
 const mx=(from.x+HOOP_SVG.x)/2;
 const my=(from.y+HOOP_SVG.y)/2-45;
 return<path d={`M${from.x},${from.y} Q${mx},${my} ${HOOP_SVG.x},${HOOP_SVG.y}`} fill="none" stroke="#ff8c00" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.65"/>;
@@ -1654,8 +1660,11 @@ onClick={mode==="pass"&&i===0?startPassFromBall:undefined} style={{cursor:mode==
 ))}
 {/* Move label static */}
 {p.move&&p.ballPath.length>=2&&!animating&&(()=>{
-const mid=Math.floor(p.ballPath.length/2);
-const pt=p.ballPath[mid]||p.ballPath[0];
+const lastPassM=p.passes?.length?[...p.passes].sort((a,b)=>a.atBallT-b.atBallT)[p.passes.length-1]:null;
+const receiverM=lastPassM&&lastPassM.to>=0?p.teammates[lastPassM.to]:null;
+const movePath=receiverM?.path?.length?receiverM.path:p.ballPath;
+const mid=Math.floor(movePath.length/2);
+const pt=movePath[mid]||movePath[0];
 return<text x={pt.x} y={pt.y-11} textAnchor="middle" fontSize="8" fill="#fff" fontWeight="bold" stroke="#000" strokeWidth="2" paintOrder="stroke">{p.move}</text>;
 })()}
 {/* Animated ball */}
@@ -1742,7 +1751,8 @@ setSaving(true);
 await onSave({
 id:existing?existing.id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,6),
 gameId:form.gameId||"",
-playerId:form.playerId,
+playerId:form.finisherPlayerId||form.playerId,
+assistedBy:form.finisherPlayerId?form.playerId:null,
 date:form.date||new Date().toISOString().slice(0,10),
 teamAName:form.teamAName||"",
 teamBName:form.teamBName||"",
@@ -1793,6 +1803,7 @@ return(
 <div style={{marginTop:6}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>🎮 PLAY ANIMATOR</div>
 <PlayAnimator play={form.play||{ballPath:[],move:null,shot:null,defenders:[],teammates:[]}} onChange={play=>setForm(f=>({...f,play}))}/>
+{(()=>{const passes=form.play?.passes||[];const lastPass=passes.length?passes[passes.length-1]:null;if(!lastPass||lastPass.to===-1)return null;const receiverIdx=lastPass.to;return(<div style={{marginTop:8,background:"#1a1a2e",border:"1px solid #E8312A55",borderRadius:12,padding:"10px 14px",display:"flex",flexDirection:"column",gap:8}}><div style={{color:"#E8312A",fontSize:11,fontWeight:700,letterSpacing:1.2}}>🏀 ONTVANGER IS BALDRAGER — FINISHER?</div><div style={{color:GREY,fontSize:12}}>Ploegmaat {receiverIdx+1} heeft de bal. Kies wie de finisher is:</div><select style={IS} value={form.finisherPlayerId||""} onChange={e=>setForm(f=>({...f,finisherPlayerId:e.target.value||null}))}><option value="">— Zelfde als hoofd-speler —</option>{(players||[]).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>);})()}
 </div>
 </div>
 <div style={{display:"flex",gap:10,marginTop:16}}>

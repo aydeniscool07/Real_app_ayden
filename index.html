@@ -1217,81 +1217,127 @@ function PlayAnimator({play,onChange}){
 // play = {ballPath:[{x,y}], move:null, shot:null, defenders:[{path:[{x,y}]}], teammates:[{path:[{x,y}]}]}
 const svgRef=React.useRef(null);
 const [mode,setMode]=React.useState("ball"); // ball | defender | teammate | view
+// selectedIdx: which defender/teammate is currently being extended (-1 = none, will create new)
+const [selectedDef,setSelectedDef]=React.useState(-1);
+const [selectedMate,setSelectedMate]=React.useState(-1);
 const [animating,setAnimating]=React.useState(false);
 const animRef=React.useRef(null);
-const [animT,setAnimT]=React.useState(0);
+const [animState,setAnimState]=React.useState(null); // {t, phase:"dribble"|"shot"}
 
 const p=play||{ballPath:[],move:null,shot:null,defenders:[],teammates:[]};
+// Hoop position in SVG coords
+const HOOP={x:100,y:14};
 
 function svgCoords(e){
 const svg=svgRef.current;
 if(!svg)return null;
 const rect=svg.getBoundingClientRect();
-const clientX=e.touches?e.touches[0].clientX:e.clientX;
-const clientY=e.touches?e.touches[0].clientY:e.clientY;
+const touch=e.touches&&e.touches[0];
+const clientX=touch?touch.clientX:e.clientX;
+const clientY=touch?touch.clientY:e.clientY;
 return{x:Math.round(((clientX-rect.left)/rect.width)*200*10)/10,y:Math.round(((clientY-rect.top)/rect.height)*188*10)/10};
 }
 
-function handleCourtClick(e){
+function handleCourtTap(e){
+if(e.target!==svgRef.current&&!e.target.closest)return; // let player circles handle themselves
+// check if a player circle was the target — don't double-handle
+if(e.target.dataset&&e.target.dataset.role)return;
 const pt=svgCoords(e);
 if(!pt)return;
+
 if(mode==="ball"){
 onChange({...p,ballPath:[...p.ballPath,pt]});
 }else if(mode==="defender"){
-// add a new defender with first point
+if(selectedDef>=0&&selectedDef<p.defenders.length){
+// extend selected defender's path
+const defs=p.defenders.map((d,i)=>i===selectedDef?{...d,path:[...d.path,pt]}:d);
+onChange({...p,defenders:defs});
+}else{
+// create new defender, auto-select it
 const defs=[...p.defenders,{path:[pt]}];
 onChange({...p,defenders:defs});
+setSelectedDef(defs.length-1);
+}
 }else if(mode==="teammate"){
+if(selectedMate>=0&&selectedMate<p.teammates.length){
+const mates=p.teammates.map((t,i)=>i===selectedMate?{...t,path:[...t.path,pt]}:t);
+onChange({...p,teammates:mates});
+}else{
 const mates=[...p.teammates,{path:[pt]}];
 onChange({...p,teammates:mates});
+setSelectedMate(mates.length-1);
+}
 }
 }
 
-function handleDefenderClick(idx,e){
+function selectDefender(idx,e){
 e.stopPropagation();
-const pt=svgCoords(e);
-if(!pt)return;
 if(mode==="defender"){
-const defs=p.defenders.map((d,i)=>i===idx?{...d,path:[...d.path,pt]}:d);
-onChange({...p,defenders:defs});
+setSelectedDef(idx===selectedDef?-1:idx);
 }
 }
 
-function handleTeammateClick(idx,e){
+function selectTeammate(idx,e){
 e.stopPropagation();
-const pt=svgCoords(e);
-if(!pt)return;
 if(mode==="teammate"){
-const mates=p.teammates.map((t,i)=>i===idx?{...t,path:[...t.path,pt]}:t);
-onChange({...p,teammates:mates});
+setSelectedMate(idx===selectedMate?-1:idx);
 }
 }
+
+// Reset selection when switching modes
+React.useEffect(()=>{setSelectedDef(-1);setSelectedMate(-1);},[mode]);
 
 function removeLastBallPoint(){onChange({...p,ballPath:p.ballPath.slice(0,-1)});}
-function removeLastDefender(){onChange({...p,defenders:p.defenders.slice(0,-1)});}
-function removeLastTeammate(){onChange({...p,teammates:p.teammates.slice(0,-1)});}
+function removeLastDefender(){
+const defs=p.defenders.slice(0,-1);
+onChange({...p,defenders:defs});
+setSelectedDef(Math.min(selectedDef,defs.length-1));
+}
+function removeLastTeammate(){
+const mates=p.teammates.slice(0,-1);
+onChange({...p,teammates:mates});
+setSelectedMate(Math.min(selectedMate,mates.length-1));
+}
 
 function getPathD(pts){
 if(!pts||pts.length<1)return"";
 return pts.map((pt,i)=>`${i===0?"M":"L"}${pt.x},${pt.y}`).join(" ");
 }
 
-// animation: interpolate ball along path
+// ── Animation
+// Phase 1 (t 0→1): ball travels ballPath
+// Phase 2 (t 0→1): if shot set, ball arcs from last ballPath point → hoop with parabola
+const DRIBBLE_DUR=2200;
+const SHOT_DUR=900;
+
 function startAnim(){
 if(p.ballPath.length<2)return;
 setAnimating(true);
-setAnimT(0);
+setAnimState({t:0,phase:"dribble"});
 let start=null;
-const duration=2000;
 function step(ts){
 if(!start)start=ts;
-const t=Math.min((ts-start)/duration,1);
-setAnimT(t);
-if(t<1)animRef.current=requestAnimationFrame(step);
-else{setAnimating(false);setAnimT(0);}
+const elapsed=ts-start;
+if(elapsed<DRIBBLE_DUR){
+setAnimState({t:Math.min(elapsed/DRIBBLE_DUR,1),phase:"dribble"});
+animRef.current=requestAnimationFrame(step);
+}else if(p.shot){
+// shot phase
+const shotElapsed=elapsed-DRIBBLE_DUR;
+if(shotElapsed<SHOT_DUR){
+setAnimState({t:Math.min(shotElapsed/SHOT_DUR,1),phase:"shot"});
+animRef.current=requestAnimationFrame(step);
+}else{
+setAnimState({t:1,phase:"shot"});
+setTimeout(()=>{setAnimating(false);setAnimState(null);},400);
+}
+}else{
+setAnimating(false);setAnimState(null);
+}
 }
 animRef.current=requestAnimationFrame(step);
 }
+
 React.useEffect(()=>()=>{if(animRef.current)cancelAnimationFrame(animRef.current);},[]);
 
 function interpPath(pts,t){
@@ -1303,31 +1349,56 @@ const f=pos-i;
 return{x:pts[i].x+(pts[i+1].x-pts[i].x)*f,y:pts[i].y+(pts[i+1].y-pts[i].y)*f};
 }
 
-const ballAnim=animating&&p.ballPath.length>=2?interpPath(p.ballPath,animT):null;
-const shotIcon={"Dunk":"💥","Layup":"🤌","Floater":"🪁","Alley-Oop":"🙌"}[p.shot]||"🏀";
+// Compute animated ball position
+let animBall=null;
+let shotPhaseT=0;
+if(animState&&p.ballPath.length>=2){
+if(animState.phase==="dribble"){
+animBall=interpPath(p.ballPath,animState.t);
+}else if(animState.phase==="shot"){
+// parabolic arc from last ball point to hoop
+const from=p.ballPath[p.ballPath.length-1];
+const t2=animState.t;
+shotPhaseT=t2;
+const x=from.x+(HOOP.x-from.x)*t2;
+// parabola: rises then drops into hoop
+const arcH=50; // peak height in SVG units
+const y=from.y+(HOOP.y-from.y)*t2 - arcH*Math.sin(Math.PI*t2);
+animBall={x,y};
+}
+}
+
+// Defender/teammate animation — same t as ball dribble phase
+function interpActor(actor,t){
+if(!actor||!actor.path||actor.path.length<2)return actor&&actor.path[0]||null;
+return interpPath(actor.path,t);
+}
+const dribbleT=animState&&animState.phase==="dribble"?animState.t:(animState&&animState.phase==="shot"?1:null);
 
 const btnStyle=(active,col="#E8312A")=>({background:active?col+"22":"transparent",border:`1px solid ${active?col:"#333"}`,color:active?col:GREY,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"});
+
+const isEditable=!animating;
 
 return(
 <div>
 {/* Mode selector */}
 <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
-{[["ball","🏀 Bal pad"],["defender","🔴 Verdediger"],["teammate","🟢 Ploegmaat"],["view","👁 Bekijk"]].map(([m,l])=>(
+{[["ball","🏀 Bal"],["defender","🔴 Verd."],["teammate","🟢 Ploeg"],["view","👁 Kijk"]].map(([m,l])=>(
 <button key={m} onClick={()=>setMode(m)} style={btnStyle(mode===m,m==="defender"?"#ff4444":m==="teammate"?"#4FC3F7":"#E8312A")}>{l}</button>
 ))}
 </div>
 {/* Instruction */}
 <div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
-{mode==="ball"&&"Tap de court om bal-waypoints toe te voegen"}
-{mode==="defender"&&"Tap voor nieuwe verdediger, tap opnieuw voor zijn pad"}
-{mode==="teammate"&&"Tap voor nieuwe ploegmaat, tap opnieuw voor zijn pad"}
-{mode==="view"&&"Geen edit — tik Animeer om te bekijken"}
+{mode==="ball"&&"Tap om bal-waypoints te zetten"}
+{mode==="defender"&&(selectedDef>=0?`Verdediger D${selectedDef+1} geselecteerd — tap om pad te verlengen, of tap een andere D`:"Tap court → nieuwe verdediger. Tap een D-cirkel om te selecteren")}
+{mode==="teammate"&&(selectedMate>=0?`Ploegmaat ${selectedMate+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe ploegmaat. Tap cirkel om te selecteren")}
+{mode==="view"&&"Tap Animeer ▶"}
 </div>
 {/* Court SVG */}
 <div style={{position:"relative",touchAction:"none"}}>
 <svg ref={svgRef} viewBox="0 0 200 188" preserveAspectRatio="xMidYMid meet"
-onClick={mode!=="view"?handleCourtClick:undefined}
-style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:mode!=="view"?"crosshair":"default"}}>
+onClick={isEditable&&mode!=="view"?handleCourtTap:undefined}
+style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:isEditable&&mode!=="view"?"crosshair":"default"}}>
 {/* Court lines */}
 <rect x="70" y="0" width="60" height="76" fill="#ecd9b0"/>
 <rect x="70" y="0" width="60" height="76" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
@@ -1339,59 +1410,110 @@ style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:
 <line x1="190" y1="0" x2="190" y2="44" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
 <path d="M 10 44 Q 100 175 190 44" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
 <path d="M 132 188 A 32 32 0 0 0 68 188" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
+{/* Hoop highlight when shot is set */}
+{p.shot&&<circle cx={HOOP.x} cy={HOOP.y} r="5" fill="none" stroke="#ff8c00" strokeWidth="2" opacity="0.9"/>}
 
 {/* Teammate paths */}
-{p.teammates.map((tm,i)=>(
-<g key={i} onClick={e=>handleTeammateClick(i,e)} style={{cursor:mode==="teammate"?"crosshair":"default"}}>
-{tm.path.length>1&&<path d={getPathD(tm.path)} fill="none" stroke="#4FC3F7" strokeWidth="2" strokeDasharray="5 3" opacity="0.8"/>}
-{tm.path.map((pt,j)=>(
-<circle key={j} cx={pt.x} cy={pt.y} r={j===0?8:4} fill="#4FC3F7" opacity={j===0?0.9:0.5} stroke="white" strokeWidth="1"/>
+{p.teammates.map((tm,i)=>{
+const animPos=dribbleT!==null&&tm.path.length>=2?interpActor(tm,dribbleT):null;
+const isSel=selectedMate===i&&mode==="teammate";
+return(
+<g key={i}>
+{tm.path.length>1&&<path d={getPathD(tm.path)} fill="none" stroke="#4FC3F7" strokeWidth="2" strokeDasharray="5 3" opacity={isSel?1:0.6}/>}
+{/* static dots */}
+{!animating&&tm.path.slice(1).map((pt,j)=>(
+<circle key={j} cx={pt.x} cy={pt.y} r="3" fill="#4FC3F7" opacity="0.45"/>
 ))}
-{tm.path[0]&&<text x={tm.path[0].x} y={tm.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">{i+1}</text>}
+{/* player token — always at path[0] when not animating */}
+{!animating&&(
+<circle cx={tm.path[0].x} cy={tm.path[0].y} r="9" fill={isSel?"#4FC3F7":"#1a6a8a"} stroke={isSel?"white":"#4FC3F7"} strokeWidth={isSel?2:1.5}
+onClick={e=>selectTeammate(i,e)} style={{cursor:"pointer"}} data-role="mate"/>
+)}
+{!animating&&<text x={tm.path[0].x} y={tm.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold" style={{pointerEvents:"none"}}>{i+1}</text>}
+{/* animated token */}
+{animating&&animPos&&(
+<g>
+<circle cx={animPos.x} cy={animPos.y} r="9" fill="#1a6a8a" stroke="#4FC3F7" strokeWidth="1.5"/>
+<text x={animPos.x} y={animPos.y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">{i+1}</text>
 </g>
-))}
+)}
+</g>
+);
+})}
 
 {/* Defender paths */}
-{p.defenders.map((def,i)=>(
-<g key={i} onClick={e=>handleDefenderClick(i,e)} style={{cursor:mode==="defender"?"crosshair":"default"}}>
-{def.path.length>1&&<path d={getPathD(def.path)} fill="none" stroke="#ff4444" strokeWidth="2" strokeDasharray="5 3" opacity="0.8"/>}
-{def.path.map((pt,j)=>(
-<circle key={j} cx={pt.x} cy={pt.y} r={j===0?8:4} fill="#ff4444" opacity={j===0?0.9:0.5} stroke="white" strokeWidth="1"/>
+{p.defenders.map((def,i)=>{
+const animPos=dribbleT!==null&&def.path.length>=2?interpActor(def,dribbleT):null;
+const isSel=selectedDef===i&&mode==="defender";
+return(
+<g key={i}>
+{def.path.length>1&&<path d={getPathD(def.path)} fill="none" stroke="#ff4444" strokeWidth="2" strokeDasharray="5 3" opacity={isSel?1:0.6}/>}
+{!animating&&def.path.slice(1).map((pt,j)=>(
+<circle key={j} cx={pt.x} cy={pt.y} r="3" fill="#ff4444" opacity="0.45"/>
 ))}
-{def.path[0]&&<text x={def.path[0].x} y={def.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">D{i+1}</text>}
+{!animating&&(
+<circle cx={def.path[0].x} cy={def.path[0].y} r="9" fill={isSel?"#ff4444":"#7a1a1a"} stroke={isSel?"white":"#ff4444"} strokeWidth={isSel?2:1.5}
+onClick={e=>selectDefender(i,e)} style={{cursor:"pointer"}} data-role="def"/>
+)}
+{!animating&&<text x={def.path[0].x} y={def.path[0].y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold" style={{pointerEvents:"none"}}>D{i+1}</text>}
+{animating&&animPos&&(
+<g>
+<circle cx={animPos.x} cy={animPos.y} r="9" fill="#7a1a1a" stroke="#ff4444" strokeWidth="1.5"/>
+<text x={animPos.x} y={animPos.y+4} textAnchor="middle" fontSize="8" fill="white" fontWeight="bold">D{i+1}</text>
 </g>
-))}
+)}
+</g>
+);
+})}
 
-{/* Ball path */}
+{/* Ball dribble path */}
 {p.ballPath.length>1&&(
-<path d={getPathD(p.ballPath)} fill="none" stroke="#E8312A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+<path d={getPathD(p.ballPath)} fill="none" stroke="#E8312A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity={animating?0.25:0.85}/>
 )}
-{p.ballPath.map((pt,i)=>(
-<circle key={i} cx={pt.x} cy={pt.y} r={i===0?7:4} fill={i===0?"#ff8c00":"#E8312A"} stroke="white" strokeWidth="1.5" opacity={animating?0.3:1}/>
+{/* Ball shot arc (preview line when shot is set) */}
+{p.shot&&p.ballPath.length>0&&!animating&&(()=>{
+const from=p.ballPath[p.ballPath.length-1];
+const mx=(from.x+HOOP.x)/2;
+const my=(from.y+HOOP.y)/2-45;
+return<path d={`M${from.x},${from.y} Q${mx},${my} ${HOOP.x},${HOOP.y}`} fill="none" stroke="#ff8c00" strokeWidth="1.5" strokeDasharray="4 3" opacity="0.7"/>;
+})()}
+{/* Static ball waypoints */}
+{!animating&&p.ballPath.map((pt,i)=>(
+<circle key={i} cx={pt.x} cy={pt.y} r={i===0?7:4} fill={i===0?"#ff8c00":"#E8312A"} stroke="white" strokeWidth="1.5"/>
 ))}
-{/* Shot endpoint label */}
-{p.shot&&p.ballPath.length>0&&(
-<text x={p.ballPath[p.ballPath.length-1].x} y={p.ballPath[p.ballPath.length-1].y-10} textAnchor="middle" fontSize="14">{shotIcon}</text>
-)}
-{/* Animated ball */}
-{ballAnim&&(
-<circle cx={ballAnim.x} cy={ballAnim.y} r="7" fill="#ff8c00" stroke="white" strokeWidth="2"/>
-)}
-{/* Move label midpoint */}
-{p.move&&p.ballPath.length>=2&&(()=>{
+{/* Move label */}
+{p.move&&p.ballPath.length>=2&&!animating&&(()=>{
 const mid=Math.floor(p.ballPath.length/2);
 const pt=p.ballPath[mid]||p.ballPath[0];
-return <text x={pt.x} y={pt.y-10} textAnchor="middle" fontSize="9" fill="#fff" fontWeight="bold" style={{textShadow:"0 0 3px #000"}}>{p.move}</text>;
+return<text x={pt.x} y={pt.y-11} textAnchor="middle" fontSize="8" fill="#fff" fontWeight="bold" stroke="#000" strokeWidth="2" paintOrder="stroke">{p.move}</text>;
 })()}
+{/* Animated ball */}
+{animBall&&(
+<g>
+<circle cx={animBall.x} cy={animBall.y} r="7" fill="#ff8c00" stroke="white" strokeWidth="2"/>
+{/* spin lines on ball */}
+<line x1={animBall.x-4} y1={animBall.y} x2={animBall.x+4} y2={animBall.y} stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+<line x1={animBall.x} y1={animBall.y-4} x2={animBall.x} y2={animBall.y+4} stroke="rgba(0,0,0,0.4)" strokeWidth="1"/>
+</g>
+)}
+{/* Swoosh when ball reaches hoop */}
+{animState&&animState.phase==="shot"&&shotPhaseT>0.85&&(
+<g>
+<circle cx={HOOP.x} cy={HOOP.y} r={8+(shotPhaseT-0.85)*30} fill="none" stroke="#ff8c00" strokeWidth="2" opacity={1-shotPhaseT}/>
+<text x={HOOP.x} y={HOOP.y-14} textAnchor="middle" fontSize="12">🔥</text>
+</g>
+)}
 </svg>
 </div>
 
 {/* Controls row */}
 <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
-<button onClick={removeLastBallPoint} disabled={p.ballPath.length===0} style={{...btnStyle(false),opacity:p.ballPath.length?1:0.4}}>↩ Bal</button>
-<button onClick={removeLastDefender} disabled={p.defenders.length===0} style={{...btnStyle(false,"#ff4444"),opacity:p.defenders.length?1:0.4}}>↩ Verd.</button>
-<button onClick={removeLastTeammate} disabled={p.teammates.length===0} style={{...btnStyle(false,"#4FC3F7"),opacity:p.teammates.length?1:0.4}}>↩ Ploeg</button>
-<button onClick={startAnim} disabled={p.ballPath.length<2||animating} style={{...btnStyle(animating,"#4FC3F7"),marginLeft:"auto",opacity:p.ballPath.length>=2?1:0.4}}>{animating?"▶ Speelt...":"▶ Animeer"}</button>
+<button onClick={removeLastBallPoint} disabled={!isEditable||p.ballPath.length===0} style={{...btnStyle(false),opacity:p.ballPath.length&&isEditable?1:0.4}}>↩ Bal</button>
+<button onClick={removeLastDefender} disabled={!isEditable||p.defenders.length===0} style={{...btnStyle(false,"#ff4444"),opacity:p.defenders.length&&isEditable?1:0.4}}>↩ Verd.</button>
+<button onClick={removeLastTeammate} disabled={!isEditable||p.teammates.length===0} style={{...btnStyle(false,"#4FC3F7"),opacity:p.teammates.length&&isEditable?1:0.4}}>↩ Ploeg</button>
+<button onClick={startAnim} disabled={p.ballPath.length<2||animating} style={{...btnStyle(animating,"#4FC3F7"),marginLeft:"auto",opacity:p.ballPath.length>=2?1:0.4}}>
+{animating?(animState?.phase==="shot"?"🏀 Schot...":"▶ Dribbelt..."):"▶ Animeer"}
+</button>
 </div>
 
 {/* Move + Shot pickers */}

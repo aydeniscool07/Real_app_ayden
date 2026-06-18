@@ -1552,24 +1552,23 @@ return(
 return(
 <div>
 {/* Mode selector */}
-<div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+{!readOnly&&<div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
 {[["ball","🏀 Bal"],["defender","🔴 Verd."],["teammate","🟢 Ploeg"],["pass","🟡 Pass"],["view","👁 Kijk"]].map(([m,l])=>(
 <button key={m} onClick={()=>setMode(m)} style={btnStyle(mode===m,m==="defender"?"#ff4444":m==="teammate"?"#4FC3F7":m==="pass"?"#ffe066":"#E8312A")}>{l}</button>
 ))}
-</div>
-{/* Instruction */}
-<div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
+</div>}
+{!readOnly&&<div style={{color:GREY,fontSize:11,marginBottom:6,minHeight:16}}>
 {mode==="ball"&&"Tap om bal-waypoints te zetten"}
 {mode==="defender"&&(selectedDef>=0?`D${selectedDef+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe verd. Tap D-cirkel om te selecteren")}
 {mode==="teammate"&&(selectedMate>=0?`Ploegmaat ${selectedMate+1} geselecteerd — tap om pad te verlengen`:"Tap court → nieuwe ploegmaat. Tap cirkel om te selecteren")}
 {mode==="pass"&&(!addingPass?"Tap 🏀 of een ploegmaat om een pass te starten":(passFrom===-1?"Van baldrager → tap ontvanger":"Ploegmaat "+(passFrom+1)+" is baldrager → tap ontvanger"))}
 {mode==="view"&&"Tap ▶ Animeer"}
-</div>
+</div>}
 {/* Court SVG */}
 <div style={{position:"relative",touchAction:"none"}}>
 <svg ref={svgRef} viewBox="0 0 200 188" preserveAspectRatio="xMidYMid meet"
-onClick={isEditable&&mode!=="view"&&mode!=="pass"?handleCourtTap:undefined}
-style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:isEditable&&mode!=="view"?"crosshair":"default"}}>
+onClick={!readOnly&&isEditable&&mode!=="view"&&mode!=="pass"?handleCourtTap:undefined}
+style={{width:"100%",height:"auto",background:"#f5ecc8",borderRadius:10,display:"block",cursor:!readOnly&&isEditable&&mode!=="view"?"crosshair":"default"}}>
 {/* Court lines */}
 <rect x="70" y="0" width="60" height="76" fill="#ecd9b0"/>
 <rect x="70" y="0" width="60" height="76" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.5"/>
@@ -3945,7 +3944,7 @@ const [modal,setModal]=useState(null);
 const [editingGame,setEditingGame]=useState(null);
 const [filterPos,setFilterPos]=useState("All positions");
 const [showPosPicker,setShowPosPicker]=useState(false);
-const [sortBy,setSortBy]=useState("Beste");
+const [sortBy,setSortBy]=useState("Datum (nieuwst)");
 const [showSortPicker,setShowSortPicker]=useState(false);
 const [viewingPost,setViewingPost]=useState(null);
 const [editingPost,setEditingPost]=useState(null);

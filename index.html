@@ -474,24 +474,152 @@ function currentYearKey(){return String(new Date().getFullYear());}
 function isMonthCompleted(m){return m<currentMonthKey();}
 function isYearCompleted(y){return y<currentYearKey();}
 
-// ── Trophy Icon (actual trophy-cup visual design)
+// ── NBA-style Award Icons
+// MVP Trophy — Larry O'Brien style (round top, wide base)
 function TrophyIcon({size=28,color="#f5a524",grayed=false}){
 const c=grayed?"#5a5a5a":color;
 const shine=grayed?"rgba(255,255,255,0.06)":"rgba(255,255,255,0.22)";
-const shadow=grayed?"rgba(0,0,0,0.35)":"rgba(0,0,0,0.25)";
 return(
 <svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
-<path d="M30 18 C14 18 8 32 20 42 C24 46 29 46 30 44" stroke={c} strokeWidth="7" fill="none" strokeLinecap="round"/>
-<path d="M70 18 C86 18 92 32 80 42 C76 46 71 46 70 44" stroke={c} strokeWidth="7" fill="none" strokeLinecap="round"/>
-<path d="M27 16 H73 V32 C73 50 62 60 50 60 C38 60 27 50 27 32 Z" fill={c}/>
-<circle cx="50" cy="34" r="7" fill={shadow}/>
-<path d="M29 18 C29 24 33 26 38 26" stroke={shine} strokeWidth="3" fill="none" strokeLinecap="round"/>
-<rect x="45" y="60" width="10" height="13" fill={c}/>
-<rect x="32" y="73" width="36" height="8" rx="2" fill={c}/>
-<rect x="25" y="81" width="50" height="6" rx="2" fill={c}/>
+{/* Larry O'Brien: round ball on top, tapered body */}
+<circle cx="50" cy="28" r="18" fill={c}/>
+<path d="M32 28 C32 50 38 58 50 62 C62 58 68 50 68 28" fill={c}/>
+<path d="M48 22 C48 18 52 18 52 22" stroke={shine} strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+<ellipse cx="50" cy="28" rx="8" ry="8" fill={shine} opacity="0.4"/>
+<rect x="45" y="62" width="10" height="12" fill={c}/>
+<rect x="33" y="74" width="34" height="7" rx="2" fill={c}/>
+<rect x="27" y="81" width="46" height="6" rx="2" fill={c}/>
 </svg>
 );
 }
+
+// DPOY Trophy — Shield with hand blocking
+function DPOYIcon({size=28,color="#5B9BD5",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<path d="M50 12 L82 26 L82 52 C82 70 66 84 50 90 C34 84 18 70 18 52 L18 26 Z" fill={c}/>
+<path d="M36 50 L46 60 L66 38" stroke="#fff" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>
+</svg>
+);
+}
+
+// MIP Trophy — Arrow pointing up with a figure
+function MIPIcon({size=28,color="#27AE60",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="50" cy="20" r="10" fill={c}/>
+<path d="M50 30 L50 70" stroke={c} strokeWidth="10" strokeLinecap="round"/>
+<path d="M30 55 L50 30 L70 55" fill={c}/>
+<rect x="38" y="70" width="24" height="8" rx="4" fill={c}/>
+<path d="M38 82 L62 82" stroke={c} strokeWidth="7" strokeLinecap="round"/>
+</svg>
+);
+}
+
+// Sixth Man Trophy — Number 6 stylized
+function SixthManIcon({size=28,color="#9B59B6",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<rect x="15" y="10" width="70" height="80" rx="12" fill={c}/>
+<text x="50" y="72" textAnchor="middle" fontSize="58" fontWeight="900" fontFamily="Arial" fill="rgba(255,255,255,0.92)">6</text>
+</svg>
+);
+}
+
+// Scoring Title Trophy — Basketball with flames
+function ScoringIcon({size=28,color="#E8312A",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="50" cy="54" r="32" fill={c}/>
+<path d="M50 54 m-32,0 a32,32 0 1,0 64,0 a32,32 0 1,0 -64,0" fill="none" stroke="rgba(0,0,0,0.2)" strokeWidth="3"/>
+<path d="M32 22 C35 10 48 8 50 20 C52 10 62 6 64 18 C68 8 75 14 72 24 C76 18 82 22 80 30 C74 22 66 26 65 34 C62 26 58 24 56 32 C54 24 50 22 50 30 C50 22 46 24 44 32 C42 24 38 26 35 34 C34 26 26 22 20 30 C18 22 24 18 28 24 C25 14 32 8 32 22Z" fill="#f5a524"/>
+</svg>
+);
+}
+
+// Rebounds Title — Stat bar chart style
+function ReboundsIcon({size=28,color="#E67E22",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<rect x="12" y="55" width="18" height="35" rx="4" fill={c} opacity="0.6"/>
+<rect x="35" y="35" width="18" height="55" rx="4" fill={c} opacity="0.8"/>
+<rect x="58" y="18" width="18" height="72" rx="4" fill={c}/>
+<rect x="10" y="90" width="80" height="5" rx="2" fill={c}/>
+</svg>
+);
+}
+
+// Assists Title — Two arrows connecting players
+function AssistsIcon({size=28,color="#3498DB",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="20" cy="30" r="12" fill={c}/>
+<circle cx="80" cy="30" r="12" fill={c}/>
+<circle cx="50" cy="72" r="14" fill={c}/>
+<path d="M30 32 C40 20 60 20 70 32" stroke={c} strokeWidth="5" fill="none" strokeLinecap="round" markerEnd="url(#arr)"/>
+<path d="M35 42 L50 58" stroke={c} strokeWidth="5" strokeLinecap="round"/>
+<path d="M65 42 L50 58" stroke={c} strokeWidth="5" strokeLinecap="round"/>
+<defs><marker id="arr" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill={c}/></marker></defs>
+</svg>
+);
+}
+
+// All-LBA 1st Team — Gold star
+function AllLBA1Icon({size=28,color="#f5a524",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<polygon points="50,8 61,37 92,37 68,57 77,86 50,68 23,86 32,57 8,37 39,37" fill={c}/>
+<polygon points="50,22 57,44 80,44 62,57 69,79 50,66 31,79 38,57 20,44 43,44" fill="rgba(255,255,255,0.18)"/>
+</svg>
+);
+}
+
+// All-LBA 2nd Team — Silver star
+function AllLBA2Icon({size=28,color="#BDC3C7",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<polygon points="50,8 61,37 92,37 68,57 77,86 50,68 23,86 32,57 8,37 39,37" fill="none" stroke={c} strokeWidth="5"/>
+<polygon points="50,22 57,44 80,44 62,57 69,79 50,66 31,79 38,57 20,44 43,44" fill={c} opacity="0.5"/>
+</svg>
+);
+}
+
+// Clutch Player — Clock with basketball
+function ClutchIcon({size=28,color="#E8312A",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="50" cy="50" r="38" fill="none" stroke={c} strokeWidth="7"/>
+<line x1="50" y1="50" x2="50" y2="20" stroke={c} strokeWidth="6" strokeLinecap="round"/>
+<line x1="50" y1="50" x2="68" y2="60" stroke={c} strokeWidth="5" strokeLinecap="round"/>
+<circle cx="50" cy="50" r="4" fill={c}/>
+<path d="M70 72 C70 64 80 64 80 72 C80 80 70 84 70 84 C70 84 60 80 60 72 C60 64 70 64 70 72Z" fill={c}/>
+</svg>
+);
+}
+
+// Award type definitions — NBA-style per maand uitreiken
+const AWARD_TYPES=[
+{id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
+{id:"dpoy",         label:"Defensive Player vd Maand", color:"#5B9BD5", Icon:DPOYIcon,     desc:"Defensive Player of the Month"},
+{id:"mip",          label:"Most Improved Player",      color:"#27AE60", Icon:MIPIcon,      desc:"Grootste verbetering"},
+{id:"sixth",        label:"Sixth Man vd Maand",        color:"#9B59B6", Icon:SixthManIcon, desc:"Beste invaller"},
+{id:"scoring",      label:"Scoring Title",             color:"#E8312A", Icon:ScoringIcon,  desc:"Meeste punten gem."},
+{id:"rebounds",     label:"Rebounds Title",            color:"#E67E22", Icon:ReboundsIcon, desc:"Meeste rebounds gem."},
+{id:"assists",      label:"Assists Title",             color:"#3498DB", Icon:AssistsIcon,  desc:"Meeste assists gem."},
+{id:"clutch",       label:"Clutch Player vd Maand",    color:"#E8312A", Icon:ClutchIcon,   desc:"Beste in de slotfase"},
+{id:"alllba1",      label:"All-LBA 1e Team",           color:"#f5a524", Icon:AllLBA1Icon,  desc:"Eerste team selectie", multi:true, maxPick:2},
+{id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
+];
+function getAwardType(id){return AWARD_TYPES.find(a=>a.id===id)||AWARD_TYPES[0];}
 
 // Compute the projected (not-yet-final) MVP leader for the current, still-running month
 function computeProjectedMonthMvp(allGames,allPlayers){
@@ -509,45 +637,11 @@ const [y,mo]=m.split("-");
 return{p:stats[0].p,eff:stats[0].eff,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`};
 }
 
-function computeTrophies(player,allGames,allPlayers){
-const monthMvps=[]; // {month, lbl}
-const yearMvps=[];  // {year}
-const statLeaders=[]; // {month, lbl, stat, val}
-// Group by month — only completed months count
-const months=[...new Set(allGames.map(g=>gameYearMonth(g)).filter(Boolean))].filter(isMonthCompleted).sort();
-months.forEach(m=>{
-const mg=allGames.filter(g=>gameYearMonth(g)===m);
-const stats=allPlayers.map(p=>{
-const pg=mg.filter(g=>g.playerId===p.id);
-if(!pg.length)return null;
-const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
-return{p,eff,pg};
-}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
-if(stats[0]&&stats[0].p.id===player.id){
-const [y,mo]=m.split("-");
-monthMvps.push({month:m,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`});
-}
-["pts","reb","ast","stl","blk"].forEach(k=>{
-const best=stats.slice().sort((a,b)=>avg(b.pg,k)-avg(a.pg,k))[0];
-if(best&&best.p.id===player.id&&avg(best.pg,k)>0){
-const [y,mo]=m.split("-");
-statLeaders.push({month:m,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`,stat:STAT_LABEL[k],val:avg(best.pg,k)});
-}
-});
-});
-// Year MVPs — only completed years count
-const years=[...new Set(allGames.map(g=>g.date&&g.date.slice(0,4)).filter(Boolean))].filter(isYearCompleted).sort();
-years.forEach(y=>{
-const yg=allGames.filter(g=>g.date&&g.date.startsWith(y));
-const stats=allPlayers.map(p=>{
-const pg=yg.filter(g=>g.playerId===p.id);
-if(!pg.length)return null;
-const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
-return{p,eff};
-}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
-if(stats[0]&&stats[0].p.id===player.id) yearMvps.push({year:y});
-});
-// Special achievements (count occurrences)
+function computeTrophies(player,allGames,allPlayers,manualAwards){
+// manualAwards: [{id, month, awardId, playerIds:[...], lbl}] from Firestore
+const awards=manualAwards||[];
+const won=awards.filter(a=>Array.isArray(a.playerIds)?a.playerIds.includes(player.id):a.playerId===player.id);
+// Special achievements — still automatic
 const myGames=allGames.filter(g=>g.playerId===player.id);
 const special=[];
 const c30=myGames.filter(g=>(+g.pts||0)>=30).length;
@@ -560,27 +654,27 @@ const c5s=myGames.filter(g=>(+g.stl||0)>=5).length;
 if(c5s>0)special.push({icon:"🦅",label:`5+ steals`,count:c5s});
 const c5b=myGames.filter(g=>(+g.blk||0)>=5).length;
 if(c5b>0)special.push({icon:"🚫",label:`5+ blocks`,count:c5b});
-// Triple double = at least 3 stats with 10+
 const td=myGames.filter(g=>{
 const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=10).length;
 return ten>=3;
 }).length;
 if(td>0)special.push({icon:"💎",label:`Triple-double`,count:td});
-return{monthMvps,yearMvps,statLeaders,special};
+return{won,special};
 }
 
-// ── Trophy Case Component
-function TrophyCase({player,allGames,allPlayers}){
-const t=useMemo(()=>computeTrophies(player,allGames,allPlayers),[player,allGames,allPlayers]);
+// ── Trophy Case Component (on player profile)
+function TrophyCase({player,allGames,allPlayers,manualAwards}){
+const t=useMemo(()=>computeTrophies(player,allGames,allPlayers,manualAwards),[player,allGames,allPlayers,manualAwards]);
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,allPlayers),[allGames,allPlayers]);
 const isProjectedLeader=projected&&projected.p.id===player.id;
-const totalTrophies=t.monthMvps.length+t.yearMvps.length+t.statLeaders.length+t.special.reduce((s,x)=>s+x.count,0);
+const totalAwards=t.won.length;
+const totalTrophies=totalAwards+t.special.reduce((s,x)=>s+x.count,0);
 if(totalTrophies===0&&!isProjectedLeader)return null;
 return(
 <div data-testid="trophy-case" style={{marginBottom:20}}>
 <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:10}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5}}>🏆 TROPHY CASE</div>
-<div style={{color:"#f5a524",fontSize:11,fontWeight:700}}>{totalTrophies} prijzen</div>
+{totalTrophies>0&&<div style={{color:"#f5a524",fontSize:11,fontWeight:700}}>{totalTrophies} prijzen</div>}
 </div>
 {isProjectedLeader&&(
 <div style={{marginBottom:10}}>
@@ -594,42 +688,23 @@ return(
 </div>
 </div>
 )}
-{t.yearMvps.length>0&&(
-<div style={{marginBottom:10}}>
-<div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>👑 MVP VAN HET JAAR</div>
-<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-{t.yearMvps.map(y=>(
-<div key={y.year} style={{display:"flex",alignItems:"center",gap:8,background:"linear-gradient(135deg,#3a1500,#1a0a0a)",border:"1px solid #f5a524",borderRadius:12,padding:"6px 10px"}}>
-<TrophyIcon size={26} color="#f5a524"/>
-<span style={{fontSize:12,fontWeight:700,color:"#f5a524"}}>{y.year}</span>
-</div>
-))}
-</div>
-</div>
-)}
-{t.monthMvps.length>0&&(
-<div style={{marginBottom:10}}>
-<div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>🏆 MVP VAN DE MAAND <span style={{color:GREY,fontWeight:500}}>· {t.monthMvps.length}×</span></div>
-<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-{t.monthMvps.map(m=>(
-<div key={m.month} style={{display:"flex",alignItems:"center",gap:8,background:`${RED}1a`,border:`1px solid ${RED}`,borderRadius:12,padding:"6px 10px"}}>
-<TrophyIcon size={24} color={RED}/>
-<span style={{fontSize:11,fontWeight:700,color:WHITE}}>{m.lbl}</span>
-</div>
-))}
+{t.won.length>0&&(
+<div style={{marginBottom:12}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:8}}>🏅 AWARDS</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{t.won.map((a,i)=>{
+const at=getAwardType(a.awardId);
+const Icon=at.Icon;
+return(
+<div key={i} style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"8px 12px"}}>
+<Icon size={28} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
+<div style={{color:WHITE,fontSize:12,fontWeight:600}}>{a.lbl}</div>
 </div>
 </div>
-)}
-{t.statLeaders.length>0&&(
-<div style={{marginBottom:10}}>
-<div style={{color:"#27AE60",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>📊 STAT LEADER TITELS <span style={{color:GREY,fontWeight:500}}>· {t.statLeaders.length}×</span></div>
-<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-{t.statLeaders.map((s,i)=>(
-<div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"#0a2a0a",border:"1px solid #27AE60",borderRadius:12,padding:"6px 10px"}}>
-<TrophyIcon size={22} color="#27AE60"/>
-<span style={{fontSize:11,fontWeight:700,color:"#27AE60"}}>{s.stat} · {s.lbl}</span>
-</div>
-))}
+);
+})}
 </div>
 </div>
 )}
@@ -653,44 +728,169 @@ return(
 );
 }
 
+// ── Admin: Give Awards Modal
+function AwardGiveModal({players,manualAwards,onSave,onDelete,onClose}){
+const {IS,BR,BG2}=styles();
+const d=new Date();
+const defaultMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const [selMonth,setSelMonth]=useState(defaultMonth);
+const [selAward,setSelAward]=useState(AWARD_TYPES[0].id);
+const [selPlayers,setSelPlayers]=useState([]);
+const [saving,setSaving]=useState(false);
+const at=getAwardType(selAward);
+const Icon=at.Icon;
+
+// Build month label
+function monthLbl(m){const [y,mo]=m.split("-");return `${MONTHS[parseInt(mo)-1]} ${y}`;}
+
+// Load existing selection when month/award changes
+useEffect(()=>{
+const ex=manualAwards.find(a=>a.month===selMonth&&a.awardId===selAward);
+if(ex)setSelPlayers(Array.isArray(ex.playerIds)?ex.playerIds:ex.playerId?[ex.playerId]:[]);
+else setSelPlayers([]);
+},[selMonth,selAward,manualAwards]);
+
+function togglePlayer(pid){
+if(at.multi){
+setSelPlayers(prev=>prev.includes(pid)?prev.filter(x=>x!==pid):[...prev,pid].slice(0,at.maxPick||2));
+}else{
+setSelPlayers(prev=>prev.includes(pid)?[]:[pid]);
+}
+}
+
+async function handleSave(){
+if(!selPlayers.length)return;
+setSaving(true);
+const lbl=monthLbl(selMonth);
+const id=`award_${selMonth}_${selAward}`;
+await onSave({id,month:selMonth,awardId:selAward,playerIds:selPlayers,lbl});
+setSaving(false);
+}
+async function handleDelete(){
+const id=`award_${selMonth}_${selAward}`;
+setSaving(true);
+await onDelete(id);
+setSelPlayers([]);
+setSaving(false);
+}
+
+// Generate month options (last 24 months)
+const monthOpts=[];
+for(let i=0;i<24;i++){
+const dd=new Date(d.getFullYear(),d.getMonth()-i,1);
+const key=`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}`;
+monthOpts.push({key,lbl:monthLbl(key)});
+}
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",padding:"20px 16px calc(24px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 18px"}}/>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+<Icon size={32} color={at.color}/>
+<div style={{fontWeight:800,fontSize:18,color:WHITE}}>Award uitreiken</div>
+</div>
+
+{/* Month picker */}
+<div style={{marginBottom:14}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:6}}>MAAND</div>
+<select value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={IS}>
+{monthOpts.map(o=><option key={o.key} value={o.key}>{o.lbl}</option>)}
+</select>
+</div>
+
+{/* Award picker */}
+<div style={{marginBottom:16}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8}}>AWARD TYPE</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+{AWARD_TYPES.map(a=>{
+const Ic=a.Icon;
+const sel=selAward===a.id;
+return(
+<button key={a.id} onClick={()=>setSelAward(a.id)} style={{display:"flex",alignItems:"center",gap:8,background:sel?`${a.color}22`:INPUTBG,border:`1.5px solid ${sel?a.color:"transparent"}`,borderRadius:10,padding:"10px 10px",cursor:"pointer",textAlign:"left"}}>
+<Ic size={22} color={a.color}/>
+<div style={{minWidth:0}}>
+<div style={{color:sel?a.color:WHITE,fontWeight:700,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.label}</div>
+<div style={{color:GREY,fontSize:10}}>{a.desc}</div>
+</div>
+</button>
+);
+})}
+</div>
+</div>
+
+{/* Player picker */}
+<div style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8}}>
+SPELER{at.multi?`S (max ${at.maxPick})`:""} KIEZEN
+</div>
+{players.map(p=>{
+const sel=selPlayers.includes(p.id);
+return(
+<div key={p.id} onClick={()=>togglePlayer(p.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:12,marginBottom:6,cursor:"pointer",background:sel?`${at.color}22`:INPUTBG,border:`1.5px solid ${sel?at.color:"transparent"}`}}>
+<Avatar player={p} size={38}/>
+<div style={{flex:1,fontWeight:700,fontSize:15,color:WHITE}}>{p.name}</div>
+{sel&&<Icon size={22} color={at.color}/>}
+</div>
+);
+})}
+</div>
+
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+<button onClick={handleSave} disabled={saving||!selPlayers.length} style={{...BR,opacity:(!selPlayers.length||saving)?0.5:1}}>
+{saving?"Opslaan...":"Award uitreiken ✓"}
+</button>
+{manualAwards.some(a=>a.month===selMonth&&a.awardId===selAward)&&(
+<button onClick={handleDelete} disabled={saving} style={{...BG2,color:"#ff6b6b"}}>Award intrekken</button>
+)}
+<button onClick={onClose} style={{background:"transparent",border:"none",color:GREY,fontSize:14,cursor:"pointer",padding:"8px 0"}}>Annuleer</button>
+</div>
+</div>
+</div>
+);
+}
+
 // ── Hall of Fame / Awards Modal
-function HallOfFameModal({players,allGames,onClose,onOpenPlayer}){
-const everyone=useMemo(()=>players.map(p=>({p,t:computeTrophies(p,allGames,players)})),[players,allGames]);
+function HallOfFameModal({players,allGames,manualAwards,isAdmin,onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,players),[allGames,players]);
+const [showGiveAward,setShowGiveAward]=useState(false);
 
-const leaderboard=useMemo(()=>everyone.map(({p,t})=>({
-p,
-total:t.monthMvps.length+t.yearMvps.length+t.statLeaders.length+t.special.reduce((s,x)=>s+x.count,0),
-yearMvps:t.yearMvps.length,
-monthMvps:t.monthMvps.length,
-statLeaders:t.statLeaders.length,
-special:t.special.reduce((s,x)=>s+x.count,0)
-})).filter(r=>r.total>0).sort((a,b)=>b.total-a.total),[everyone]);
+// All-time award counts per player
+const leaderboard=useMemo(()=>{
+const counts={};
+manualAwards.forEach(a=>{
+const pids=Array.isArray(a.playerIds)?a.playerIds:a.playerId?[a.playerId]:[];
+pids.forEach(pid=>{counts[pid]=(counts[pid]||0)+1;});
+});
+return players.map(p=>({p,total:counts[p.id]||0,awards:manualAwards.filter(a=>(Array.isArray(a.playerIds)?a.playerIds.includes(p.id):a.playerId===p.id))}))
+.filter(r=>r.total>0).sort((a,b)=>b.total-a.total);
+},[players,manualAwards]);
 
-// Year-by-year MVP history
-const yearHistory=useMemo(()=>{
-const map={};
-everyone.forEach(({p,t})=>t.yearMvps.forEach(y=>{map[y.year]=p;}));
-return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
-},[everyone]);
-
-// Month-by-month MVP history
-const monthHistory=useMemo(()=>{
-const map={};
-everyone.forEach(({p,t})=>t.monthMvps.forEach(m=>{map[m.month]={p,lbl:m.lbl};}));
-return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
-},[everyone]);
+// Group awards by type for history section
+const awardHistory=useMemo(()=>{
+const byType={};
+AWARD_TYPES.forEach(at=>{
+const entries=manualAwards.filter(a=>a.awardId===at.id).sort((a,b)=>b.month.localeCompare(a.month));
+if(entries.length)byType[at.id]=entries;
+});
+return byType;
+},[manualAwards]);
 
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:360}}>
+{showGiveAward&&<AwardGiveModal players={players} manualAwards={manualAwards} onSave={async(a)=>{await onSaveAward(a);}} onDelete={async(id)=>{await onDeleteAward(id);}} onClose={()=>setShowGiveAward(false)}/>}
 <div onClick={e=>e.stopPropagation()} className="fade-in" data-testid="hall-of-fame-modal" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
-<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:4}}>
-<TrophyIcon size={30} color="#f5a524"/>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<TrophyIcon size={28} color="#f5a524"/>
 <div style={{fontWeight:800,fontSize:20,color:WHITE}}>HALL OF FAME</div>
+</div>
+{isAdmin&&<button onClick={()=>setShowGiveAward(true)} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"8px 16px",fontWeight:700,fontSize:13,cursor:"pointer"}}>+ Award uitreiken</button>}
 </div>
 <div style={{color:GREY,fontSize:12,textAlign:"center",marginBottom:20}}>Alle awards & records uit de geschiedenis</div>
 
+{/* Projected MVP */}
 {projected&&(
 <div style={{display:"flex",alignItems:"center",gap:10,background:"linear-gradient(135deg,#1c1c1c,#161616)",border:"1px dashed #555",borderRadius:12,padding:"10px 12px",marginBottom:18,opacity:0.85}}>
 <TrophyIcon size={28} grayed/>
@@ -703,62 +903,68 @@ return(
 
 {/* Leaderboard */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🏆 ALL-TIME RANGLIJST</div>
-{leaderboard.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:"20px 0"}}>Nog geen trofeeën uitgereikt</div>}
-{leaderboard.map((r,i)=>(
+{leaderboard.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:"20px 0"}}>Nog geen awards uitgereikt</div>}
+{leaderboard.map((r,i)=>{
+const awardTypes=[...new Set(r.awards.map(a=>a.awardId))];
+return(
 <div key={r.p.id} onClick={()=>onOpenPlayer(r.p.id)} data-testid={`hof-row-${r.p.id}`} style={{display:"flex",alignItems:"center",gap:12,background:i===0?"linear-gradient(135deg,#3a1500,#1a0a0a)":INPUTBG,border:i===0?"1px solid #f5a524":"none",borderRadius:12,padding:"10px 12px",marginBottom:8,cursor:"pointer"}}>
 <div style={{width:22,textAlign:"center",fontWeight:800,fontSize:14,color:i===0?"#f5a524":i===1?"#cfd2d6":i===2?"#c98a4b":GREY}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</div>
 <Avatar player={r.p} size={38}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.p.name}</div>
-<div style={{color:GREY,fontSize:11}}>
-{r.yearMvps>0&&`👑${r.yearMvps} `}{r.monthMvps>0&&`🏆${r.monthMvps} `}{r.statLeaders>0&&`📊${r.statLeaders} `}{r.special>0&&`⭐${r.special}`}
+<div style={{display:"flex",gap:4,marginTop:3,flexWrap:"wrap"}}>
+{awardTypes.map(aid=>{const at=getAwardType(aid);const Ic=at.Icon;return <Ic key={aid} size={16} color={at.color}/>;}).slice(0,6)}
 </div>
 </div>
 <div style={{textAlign:"right"}}>
 <div style={{color:"#f5a524",fontWeight:800,fontSize:18}}>{r.total}</div>
-<div style={{color:GREY,fontSize:9}}>prijzen</div>
+<div style={{color:GREY,fontSize:9}}>awards</div>
 </div>
+</div>
+);
+})}
+
+{/* Award history per type */}
+{AWARD_TYPES.map(at=>{
+const entries=awardHistory[at.id];
+if(!entries)return null;
+const Icon=at.Icon;
+return(
+<div key={at.id} style={{marginTop:22}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+<Icon size={20} color={at.color}/>
+<div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:1.5}}>{at.label.toUpperCase()} — GESCHIEDENIS</div>
+</div>
+{entries.map(entry=>{
+const pids=Array.isArray(entry.playerIds)?entry.playerIds:entry.playerId?[entry.playerId]:[];
+const ps=pids.map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+return(
+<div key={entry.id} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a1a",borderRadius:10,padding:"8px 12px",marginBottom:6,cursor:"pointer"}} onClick={()=>ps.length===1&&onOpenPlayer(ps[0].id)}>
+<Icon size={22} color={at.color}/>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,flex:1}}>{entry.lbl}</div>
+<div style={{display:"flex",gap:6,alignItems:"center"}}>
+{ps.map(p=>(
+<div key={p.id} style={{display:"flex",alignItems:"center",gap:5}}>
+<Avatar player={p} size={24}/>
+<div style={{color:GREY,fontSize:12}}>{p.name}</div>
 </div>
 ))}
-
-{/* Year MVP history */}
-{yearHistory.length>0&&(
-<>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:22,marginBottom:10}}>👑 MVP VAN HET JAAR — GESCHIEDENIS</div>
-{yearHistory.map(([year,p])=>(
-<div key={year} onClick={()=>onOpenPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a1a",borderRadius:10,padding:"8px 12px",marginBottom:6,cursor:"pointer"}}>
-<TrophyIcon size={24} color="#f5a524"/>
-<div style={{color:WHITE,fontWeight:700,fontSize:13,flex:1}}>{year}</div>
-<Avatar player={p} size={26}/>
-<div style={{color:GREY,fontSize:13}}>{p.name}</div>
 </div>
-))}
-</>
-)}
-
-{/* Month MVP history */}
-{monthHistory.length>0&&(
-<>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:22,marginBottom:10}}>🏆 MVP VAN DE MAAND — GESCHIEDENIS</div>
-{monthHistory.map(([key,{p,lbl}])=>(
-<div key={key} onClick={()=>onOpenPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a1a",borderRadius:10,padding:"8px 12px",marginBottom:6,cursor:"pointer"}}>
-<TrophyIcon size={22} color={RED}/>
-<div style={{color:WHITE,fontWeight:700,fontSize:13,flex:1}}>{lbl}</div>
-<Avatar player={p} size={26}/>
-<div style={{color:GREY,fontSize:13}}>{p.name}</div>
 </div>
-))}
-</>
-)}
+);
+})}
+</div>
+);
+})}
 
-<button onClick={onClose} style={{width:"100%",background:INPUTBG,border:"none",color:WHITE,borderRadius:14,padding:"12px",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:18}}>Sluiten</button>
+<button onClick={onClose} style={{width:"100%",background:INPUTBG,border:"none",color:WHITE,borderRadius:14,padding:"12px",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:20}}>Sluiten</button>
 </div>
 </div>
 );
 }
 
 // ── Player Profile Modal
-function PlayerProfileModal({player,allGames,allPlayers,highlights,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,isAdmin}){
+function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
 const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
@@ -801,7 +1007,7 @@ return(
 </div>
 ))}
 </div>
-<TrophyCase player={player} allGames={allGames} allPlayers={allPlayers}/>
+<TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards}/>
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
 return(
@@ -4187,6 +4393,7 @@ const [viewingPost,setViewingPost]=useState(null);
 const [editingPost,setEditingPost]=useState(null);
 const [showLineupEditor,setShowLineupEditor]=useState(false);
 const [showHallOfFame,setShowHallOfFame]=useState(false);
+const [manualAwards,setManualAwards]=useState([]);
 const [bets,setBets]=useState([]);
 const [wallets,setWallets]=useState([]);
 const [betOdds,setBetOdds]=useState([]);
@@ -4245,6 +4452,7 @@ const uH=_onSnapshot(_col(_db,"highlights"),s=>{
 setHighlights(s.docs.map(d=>d.data()));
 },(err)=>console.error("Highlights listener error:",err));
 window._unsubHighlights=uH;
+_onSnapshot(_col(_db,"awards"),s=>{setManualAwards(s.docs.map(d=>d.data()));},(err)=>console.error("Awards listener error:",err));
 }).catch(()=>{clearTimeout(timeout);setLoading(false);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
@@ -4459,6 +4667,8 @@ async function deleteLarpReply(id){setSaveStatus("saving");try{await fbDel("larp
 // Highlights handlers
 async function saveHighlight(h){setSaveStatus("saving");try{await fbSave("highlights",h);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteHighlight(id){setSaveStatus("saving");try{await fbDel("highlights",id);showSaved();}catch(e){console.error(e);showError();}}
+async function saveAward(a){setSaveStatus("saving");try{await fbSave("awards",a);showSaved();}catch(e){console.error(e);showError();}}
+async function deleteAward(id){setSaveStatus("saving");try{await fbDel("awards",id);showSaved();}catch(e){console.error(e);showError();}}
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
 async function saveBet(b){setSaveStatus("saving");try{await fbSave("bets",b);showSaved();}catch(e){console.error(e);showError();}}
 async function saveOddsOrWallet(obj,col){setSaveStatus("saving");try{await fbSave(col,obj);showSaved();}catch(e){console.error(e);showError();}}
@@ -4695,14 +4905,14 @@ return (
 
 {/* Modals */}
 {showLineupEditor&&<LineupEditor players={players} games={games} onClose={()=>setShowLineupEditor(false)}/>}
-{showHallOfFame&&<HallOfFameModal players={players} allGames={games} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}}/>}
+{showHallOfFame&&<HallOfFameModal players={players} allGames={games} manualAwards={manualAwards} isAdmin={isAdmin} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}} onSaveAward={saveAward} onDeleteAward={deleteAward}/>}
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(
-<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} isAdmin={isAdmin}
+<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin}
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
 onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
 onOpenHighlight={hl=>setHighlightView(hl)}

@@ -653,6 +653,110 @@ return(
 );
 }
 
+// ── Hall of Fame / Awards Modal
+function HallOfFameModal({players,allGames,onClose,onOpenPlayer}){
+const everyone=useMemo(()=>players.map(p=>({p,t:computeTrophies(p,allGames,players)})),[players,allGames]);
+const projected=useMemo(()=>computeProjectedMonthMvp(allGames,players),[allGames,players]);
+
+const leaderboard=useMemo(()=>everyone.map(({p,t})=>({
+p,
+total:t.monthMvps.length+t.yearMvps.length+t.statLeaders.length+t.special.reduce((s,x)=>s+x.count,0),
+yearMvps:t.yearMvps.length,
+monthMvps:t.monthMvps.length,
+statLeaders:t.statLeaders.length,
+special:t.special.reduce((s,x)=>s+x.count,0)
+})).filter(r=>r.total>0).sort((a,b)=>b.total-a.total),[everyone]);
+
+// Year-by-year MVP history
+const yearHistory=useMemo(()=>{
+const map={};
+everyone.forEach(({p,t})=>t.yearMvps.forEach(y=>{map[y.year]=p;}));
+return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
+},[everyone]);
+
+// Month-by-month MVP history
+const monthHistory=useMemo(()=>{
+const map={};
+everyone.forEach(({p,t})=>t.monthMvps.forEach(m=>{map[m.month]={p,lbl:m.lbl};}));
+return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0]));
+},[everyone]);
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:360}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" data-testid="hall-of-fame-modal" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:4}}>
+<TrophyIcon size={30} color="#f5a524"/>
+<div style={{fontWeight:800,fontSize:20,color:WHITE}}>HALL OF FAME</div>
+</div>
+<div style={{color:GREY,fontSize:12,textAlign:"center",marginBottom:20}}>Alle awards & records uit de geschiedenis</div>
+
+{projected&&(
+<div style={{display:"flex",alignItems:"center",gap:10,background:"linear-gradient(135deg,#1c1c1c,#161616)",border:"1px dashed #555",borderRadius:12,padding:"10px 12px",marginBottom:18,opacity:0.85}}>
+<TrophyIcon size={28} grayed/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#999",fontSize:11,fontWeight:700}}>PROJECTED MVP · {projected.lbl} (nog lopend)</div>
+<div onClick={()=>onOpenPlayer(projected.p.id)} style={{color:"#bbb",fontSize:13,fontWeight:700,cursor:"pointer"}}>{projected.p.name} · {projected.eff} gem. eff</div>
+</div>
+</div>
+)}
+
+{/* Leaderboard */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🏆 ALL-TIME RANGLIJST</div>
+{leaderboard.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:"20px 0"}}>Nog geen trofeeën uitgereikt</div>}
+{leaderboard.map((r,i)=>(
+<div key={r.p.id} onClick={()=>onOpenPlayer(r.p.id)} data-testid={`hof-row-${r.p.id}`} style={{display:"flex",alignItems:"center",gap:12,background:i===0?"linear-gradient(135deg,#3a1500,#1a0a0a)":INPUTBG,border:i===0?"1px solid #f5a524":"none",borderRadius:12,padding:"10px 12px",marginBottom:8,cursor:"pointer"}}>
+<div style={{width:22,textAlign:"center",fontWeight:800,fontSize:14,color:i===0?"#f5a524":i===1?"#cfd2d6":i===2?"#c98a4b":GREY}}>{i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</div>
+<Avatar player={r.p} size={38}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.p.name}</div>
+<div style={{color:GREY,fontSize:11}}>
+{r.yearMvps>0&&`👑${r.yearMvps} `}{r.monthMvps>0&&`🏆${r.monthMvps} `}{r.statLeaders>0&&`📊${r.statLeaders} `}{r.special>0&&`⭐${r.special}`}
+</div>
+</div>
+<div style={{textAlign:"right"}}>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:18}}>{r.total}</div>
+<div style={{color:GREY,fontSize:9}}>prijzen</div>
+</div>
+</div>
+))}
+
+{/* Year MVP history */}
+{yearHistory.length>0&&(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:22,marginBottom:10}}>👑 MVP VAN HET JAAR — GESCHIEDENIS</div>
+{yearHistory.map(([year,p])=>(
+<div key={year} onClick={()=>onOpenPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a1a",borderRadius:10,padding:"8px 12px",marginBottom:6,cursor:"pointer"}}>
+<TrophyIcon size={24} color="#f5a524"/>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,flex:1}}>{year}</div>
+<Avatar player={p} size={26}/>
+<div style={{color:GREY,fontSize:13}}>{p.name}</div>
+</div>
+))}
+</>
+)}
+
+{/* Month MVP history */}
+{monthHistory.length>0&&(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:22,marginBottom:10}}>🏆 MVP VAN DE MAAND — GESCHIEDENIS</div>
+{monthHistory.map(([key,{p,lbl}])=>(
+<div key={key} onClick={()=>onOpenPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:10,background:"#1a1a1a",borderRadius:10,padding:"8px 12px",marginBottom:6,cursor:"pointer"}}>
+<TrophyIcon size={22} color={RED}/>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,flex:1}}>{lbl}</div>
+<Avatar player={p} size={26}/>
+<div style={{color:GREY,fontSize:13}}>{p.name}</div>
+</div>
+))}
+</>
+)}
+
+<button onClick={onClose} style={{width:"100%",background:INPUTBG,border:"none",color:WHITE,borderRadius:14,padding:"12px",fontWeight:700,fontSize:14,cursor:"pointer",marginTop:18}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
 // ── Player Profile Modal
 function PlayerProfileModal({player,allGames,allPlayers,highlights,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
@@ -4082,6 +4186,7 @@ const [showSortPicker,setShowSortPicker]=useState(false);
 const [viewingPost,setViewingPost]=useState(null);
 const [editingPost,setEditingPost]=useState(null);
 const [showLineupEditor,setShowLineupEditor]=useState(false);
+const [showHallOfFame,setShowHallOfFame]=useState(false);
 const [bets,setBets]=useState([]);
 const [wallets,setWallets]=useState([]);
 const [betOdds,setBetOdds]=useState([]);
@@ -4505,6 +4610,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
 <span style={{color:GREY,fontSize:13}}>{players.length} spelers</span>
 <div style={{display:"flex",gap:8,alignItems:"center"}}>
+<button onClick={()=>setShowHallOfFame(true)} data-testid="open-hall-of-fame" style={{background:INPUTBG,border:"none",color:"#f5a524",borderRadius:10,padding:"6px 12px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏆 Awards</button>
 <button onClick={()=>setShowLineupEditor(true)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"6px 12px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏀 Lineup</button>
 {isAdmin&&<button onClick={()=>setModal("addPlayer")} style={{background:"transparent",border:"none",color:RED,fontSize:15,fontWeight:600,cursor:"pointer"}}>+ Toevoegen</button>}
 </div>
@@ -4589,6 +4695,7 @@ return (
 
 {/* Modals */}
 {showLineupEditor&&<LineupEditor players={players} games={games} onClose={()=>setShowLineupEditor(false)}/>}
+{showHallOfFame&&<HallOfFameModal players={players} allGames={games} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}}/>}
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}

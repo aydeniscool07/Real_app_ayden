@@ -36,6 +36,7 @@ window.location.reload();
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -66,6 +67,8 @@ select option{background:#1a1a1a;color:#fff}
 input[type="file"]{display:none}
 .fade-in{animation:fadeIn .18s ease}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.confetti-piece{position:absolute;top:-10px;will-change:transform,opacity;animation:confettiFall linear forwards}
+@keyframes confettiFall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(420px) rotate(720deg);opacity:0}}
 </style>
 <style>
 /* Boot-error fallback (shown if React fails to mount) */
@@ -662,6 +665,124 @@ if(td>0)special.push({icon:"💎",label:`Triple-double`,count:td});
 return{won,special};
 }
 
+// ── Confetti animatie (puur CSS, geen externe lib)
+function Confetti({onDone}){
+const colors=["#E8312A","#f5a524","#27AE60","#3498DB","#9B59B6","#fff"];
+const pieces=useMemo(()=>Array.from({length:60},(_,i)=>({
+id:i,left:Math.random()*100,delay:Math.random()*0.4,duration:1.6+Math.random()*1.2,
+color:colors[i%colors.length],size:6+Math.random()*6,rotate:Math.random()*360
+})),[]);
+useEffect(()=>{const t=setTimeout(()=>onDone&&onDone(),3000);return()=>clearTimeout(t);},[]);
+return(
+<div style={{position:"fixed",inset:0,pointerEvents:"none",overflow:"hidden",zIndex:9999}}>
+{pieces.map(p=>(
+<div key={p.id} className="confetti-piece" style={{left:`${p.left}%`,width:p.size,height:p.size*0.4,background:p.color,animationDelay:`${p.delay}s`,animationDuration:`${p.duration}s`,transform:`rotate(${p.rotate}deg)`}}/>
+))}
+</div>
+);
+}
+
+// ── Hot Streak: 3+ games op rij boven gemiddelde (op basis van fps)
+function computeHotStreak(playerGames){
+// playerGames moet al gesorteerd zijn nieuw→oud
+if(playerGames.length<3)return 0;
+const career=avg(playerGames,"pts")?parseFloat((playerGames.reduce((s,g)=>s+(+calcFps(g)),0)/playerGames.length).toFixed(1)):0;
+let streak=0;
+for(let i=0;i<playerGames.length;i++){
+if(+calcFps(playerGames[i])>career)streak++;
+else break;
+}
+return streak>=3?streak:0;
+}
+
+// ── Beste / slechtste matchup per speler (gegroepeerd op opponent team naam)
+function computeMatchups(playerGames){
+const byOpp={};
+playerGames.forEach(g=>{
+const opp=(g.opponent||"").trim();
+if(!opp)return;
+if(!byOpp[opp])byOpp[opp]=[];
+byOpp[opp].push(g);
+});
+const rows=Object.entries(byOpp).filter(([,gs])=>gs.length>0).map(([opp,gs])=>({
+opponent:opp,games:gs.length,
+eff:parseFloat((gs.reduce((s,g)=>s+(+calcFps(g)),0)/gs.length).toFixed(1)),
+ppg:avg(gs,"pts"),rpg:avg(gs,"reb"),apg:avg(gs,"ast")
+}));
+if(!rows.length)return{best:null,worst:null};
+const sorted=[...rows].sort((a,b)=>b.eff-a.eff);
+return{best:sorted[0],worst:sorted[sorted.length-1]};
+}
+
+// ── Head-to-head tussen twee spelers (via matchId, tegenover elkaar in andere teams)
+function computeHeadToHead(allGames,playerA,playerB){
+const aGames=allGames.filter(g=>g.playerId===playerA.id&&g.matchId);
+const bByMatch={};
+allGames.filter(g=>g.playerId===playerB.id&&g.matchId).forEach(g=>{bByMatch[g.matchId]=g;});
+const pairs=[];
+aGames.forEach(ga=>{
+const gb=bByMatch[ga.matchId];
+if(gb&&ga.team&&gb.team&&ga.team!==gb.team&&ga.team!=="chameleon"&&gb.team!=="chameleon"){
+pairs.push({matchId:ga.matchId,date:ga.date,a:ga,b:gb});
+}
+});
+if(!pairs.length)return null;
+const aGs=pairs.map(p=>p.a),bGs=pairs.map(p=>p.b);
+let aWins=0,bWins=0,ties=0;
+pairs.forEach(p=>{
+const af=+calcFps(p.a),bf=+calcFps(p.b);
+if(af>bf)aWins++;else if(bf>af)bWins++;else ties++;
+});
+return{
+meetings:pairs.length,pairs:pairs.sort((x,y)=>y.date.localeCompare(x.date)),
+aWins,bWins,ties,
+a:{ppg:avg(aGs,"pts"),rpg:avg(aGs,"reb"),apg:avg(aGs,"ast"),eff:parseFloat((aGs.reduce((s,g)=>s+(+calcFps(g)),0)/aGs.length).toFixed(1))},
+b:{ppg:avg(bGs,"pts"),rpg:avg(bGs,"reb"),apg:avg(bGs,"ast"),eff:parseFloat((bGs.reduce((s,g)=>s+(+calcFps(g)),0)/bGs.length).toFixed(1))}
+};
+}
+
+// ── Rivaliteiten: welke twee spelers het vaakst tegen elkaar (verschillend team, zelfde matchId)
+function computeRivalries(allGames,allPlayers,minMeetings=2){
+const byMatch={};
+allGames.forEach(g=>{if(!g.matchId||g.team==="chameleon")return;if(!byMatch[g.matchId])byMatch[g.matchId]=[];byMatch[g.matchId].push(g);});
+const pairCount={};
+Object.values(byMatch).forEach(gs=>{
+for(let i=0;i<gs.length;i++)for(let j=i+1;j<gs.length;j++){
+if(gs[i].playerId===gs[j].playerId)continue;
+if(gs[i].team===gs[j].team)continue;
+const key=[gs[i].playerId,gs[j].playerId].sort().join("|");
+pairCount[key]=(pairCount[key]||0)+1;
+}
+});
+return Object.entries(pairCount).filter(([,c])=>c>=minMeetings).map(([key,count])=>{
+const [id1,id2]=key.split("|");
+const p1=allPlayers.find(p=>p.id===id1),p2=allPlayers.find(p=>p.id===id2);
+return{p1,p2,meetings:count};
+}).filter(r=>r.p1&&r.p2).sort((a,b)=>b.meetings-a.meetings);
+}
+
+// ── Carrière mijlpalen: ronde getallen voor cumulatieve stats
+const MILESTONE_THRESHOLDS={pts:[50,100,250,500,1000,2500,5000],reb:[50,100,250,500,1000],ast:[25,50,100,250,500],stl:[10,25,50,100],blk:[10,25,50,100]};
+const MILESTONE_LABELS={pts:"punten",reb:"rebounds",ast:"assists",stl:"steals",blk:"blocks"};
+function computeMilestones(playerGames){
+// playerGames gesorteerd oud→nieuw nodig voor "behaald op" datum
+const asc=[...playerGames].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+const totals={pts:0,reb:0,ast:0,stl:0,blk:0};
+const achieved=[];
+asc.forEach(g=>{
+Object.keys(totals).forEach(k=>{
+const before=totals[k];
+totals[k]+=(+g[k]||0);
+(MILESTONE_THRESHOLDS[k]||[]).forEach(th=>{
+if(before<th&&totals[k]>=th){
+achieved.push({key:k,threshold:th,date:g.date,label:`${th}ste ${MILESTONE_LABELS[k]}`});
+}
+});
+});
+});
+return{achieved:achieved.sort((a,b)=>(b.date||"").localeCompare(a.date||"")),totals};
+}
+
 // ── Trophy Case Component (on player profile)
 function TrophyCase({player,allGames,allPlayers,manualAwards}){
 const t=useMemo(()=>computeTrophies(player,allGames,allPlayers,manualAwards),[player,allGames,allPlayers,manualAwards]);
@@ -851,6 +972,75 @@ return(
 }
 
 // ── Hall of Fame / Awards Modal
+// ── Vergelijk twee spelerprofielen naast elkaar + Head-to-Head
+function ComparePlayersModal({players,allGames,initialPlayer,onClose,onOpenPlayer}){
+const [pidA,setPidA]=useState(initialPlayer?initialPlayer.id:players[0]?.id);
+const [pidB,setPidB]=useState(players.find(p=>p.id!==pidA)?.id);
+const pA=players.find(p=>p.id===pidA),pB=players.find(p=>p.id===pidB);
+const gA=allGames.filter(g=>g.playerId===pidA),gB=allGames.filter(g=>g.playerId===pidB);
+const h2h=useMemo(()=>(pA&&pB&&pidA!==pidB)?computeHeadToHead(allGames,pA,pB):null,[allGames,pidA,pidB]);
+const statRows=["pts","reb","ast","stl","blk","to","fg","threept"];
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:260}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" data-testid="compare-modal" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:560,maxHeight:"94vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:800,fontSize:18,marginBottom:16,textAlign:"center",color:WHITE}}>⚖️ Vergelijk Spelers</div>
+<div style={{display:"flex",gap:10,marginBottom:18}}>
+<select style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"10px",fontSize:14}} value={pidA} onChange={e=>setPidA(e.target.value)}>
+{players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+</select>
+<select style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"10px",fontSize:14}} value={pidB} onChange={e=>setPidB(e.target.value)}>
+{players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+</select>
+</div>
+{pA&&pB&&(
+<>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-around",marginBottom:16}}>
+<div onClick={()=>onOpenPlayer&&onOpenPlayer(pA.id)} style={{textAlign:"center",cursor:onOpenPlayer?"pointer":"default"}}><Avatar player={pA} size={56}/><div style={{color:WHITE,fontWeight:700,fontSize:13,marginTop:6}}>{pA.name}</div></div>
+<div style={{color:GREY,fontWeight:800,fontSize:16}}>VS</div>
+<div onClick={()=>onOpenPlayer&&onOpenPlayer(pB.id)} style={{textAlign:"center",cursor:onOpenPlayer?"pointer":"default"}}><Avatar player={pB} size={56}/><div style={{color:WHITE,fontWeight:700,fontSize:13,marginTop:6}}>{pB.name}</div></div>
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:18}}>
+{statRows.map(k=>{
+const vA=avg(gA,k),vB=avg(gB,k);
+const aWins=vA>vB,bWins=vB>vA;
+return(
+<div key={k} style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{flex:1,textAlign:"right",color:aWins?"#27AE60":WHITE,fontWeight:aWins?800:600,fontSize:15}}>{vA}</div>
+<div style={{width:60,textAlign:"center",color:GREY,fontSize:11,fontWeight:700,letterSpacing:1}}>{STAT_LABEL[k]}</div>
+<div style={{flex:1,color:bWins?"#27AE60":WHITE,fontWeight:bWins?800:600,fontSize:15}}>{vB}</div>
+</div>
+);
+})}
+</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🆚 HEAD-TO-HEAD</div>
+{!h2h&&<div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:10,padding:"12px"}}>Deze spelers hebben nog niet tegen elkaar gespeeld.</div>}
+{h2h&&(
+<div data-testid="h2h-section" style={{background:INPUTBG,borderRadius:12,padding:"14px"}}>
+<div style={{display:"flex",justifyContent:"space-around",marginBottom:12,textAlign:"center"}}>
+<div><div style={{color:"#27AE60",fontWeight:800,fontSize:22}}>{h2h.aWins}</div><div style={{color:GREY,fontSize:10}}>{pA.name.split(" ")[0]} wint</div></div>
+<div><div style={{color:WHITE,fontWeight:800,fontSize:22}}>{h2h.meetings}</div><div style={{color:GREY,fontSize:10}}>Ontmoetingen</div></div>
+<div><div style={{color:"#27AE60",fontWeight:800,fontSize:22}}>{h2h.bWins}</div><div style={{color:GREY,fontSize:10}}>{pB.name.split(" ")[0]} wint</div></div>
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{["ppg","rpg","apg","eff"].map(k=>(
+<div key={k} style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{flex:1,textAlign:"right",color:h2h.a[k]>h2h.b[k]?"#27AE60":WHITE,fontWeight:h2h.a[k]>h2h.b[k]?800:600,fontSize:14}}>{h2h.a[k]}</div>
+<div style={{width:60,textAlign:"center",color:GREY,fontSize:10,fontWeight:700,letterSpacing:1}}>{k.toUpperCase()}</div>
+<div style={{flex:1,color:h2h.b[k]>h2h.a[k]?"#27AE60":WHITE,fontWeight:h2h.b[k]>h2h.a[k]?800:600,fontSize:14}}>{h2h.b[k]}</div>
+</div>
+))}
+</div>
+</div>
+)}
+</>
+)}
+<button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%",marginTop:18}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
 function HallOfFameModal({players,allGames,manualAwards,isAdmin,onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,players),[allGames,players]);
 const [showGiveAward,setShowGiveAward]=useState(false);
@@ -964,16 +1154,71 @@ return(
 }
 
 // ── Player Profile Modal
-function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,isAdmin}){
+// ── Radar Chart: PTS/REB/AST/STL/BLK als spin diagram
+function StatRadarChart({pg}){
+const stats=[{k:"pts",label:"PTS",max:30},{k:"reb",label:"REB",max:15},{k:"ast",label:"AST",max:10},{k:"stl",label:"STL",max:5},{k:"blk",label:"BLK",max:5}];
+const cx=110,cy=110,r=80;
+const n=stats.length;
+const angleFor=i=>(Math.PI*2*i)/n-Math.PI/2;
+const points=stats.map((s,i)=>{
+const val=avg(pg,s.k);
+const ratio=Math.min(1,val/s.max);
+const ang=angleFor(i);
+return{x:cx+Math.cos(ang)*r*ratio,y:cy+Math.sin(ang)*r*ratio,val,label:s.label,labelX:cx+Math.cos(ang)*(r+24),labelY:cy+Math.sin(ang)*(r+24)};
+});
+const gridLevels=[0.25,0.5,0.75,1];
+const polyPoints=points.map(p=>`${p.x},${p.y}`).join(" ");
+return(
+<div data-testid="radar-chart" style={{background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:20,display:"flex",flexDirection:"column",alignItems:"center"}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8,alignSelf:"flex-start"}}>📡 STAT SPREAD</div>
+<svg viewBox="0 0 220 220" width="220" height="220">
+{gridLevels.map(lvl=>{
+const gp=stats.map((s,i)=>{const ang=angleFor(i);return`${cx+Math.cos(ang)*r*lvl},${cy+Math.sin(ang)*r*lvl}`;}).join(" ");
+return <polygon key={lvl} points={gp} fill="none" stroke="#333" strokeWidth="1"/>;
+})}
+{stats.map((s,i)=>{const ang=angleFor(i);return <line key={i} x1={cx} y1={cy} x2={cx+Math.cos(ang)*r} y2={cy+Math.sin(ang)*r} stroke="#333" strokeWidth="1"/>;})}
+<polygon points={polyPoints} fill={`${RED}33`} stroke={RED} strokeWidth="2"/>
+{points.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3" fill={RED}/>)}
+{points.map((p,i)=>(
+<text key={i} x={p.labelX} y={p.labelY} fill={GREY} fontSize="11" fontWeight="700" textAnchor="middle" dominantBaseline="middle">{p.label}</text>
+))}
+</svg>
+</div>
+);
+}
+
+function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
 const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
+const hotStreak=useMemo(()=>computeHotStreak(pg),[pg]);
+const matchups=useMemo(()=>computeMatchups(pg),[pg]);
+const milestones=useMemo(()=>computeMilestones(pg),[pg]);
+const profileRef=useRef();
+const [exporting,setExporting]=useState(false);
+async function exportProfile(){
+if(!profileRef.current||!window.html2canvas)return;
+setExporting(true);
+try{
+const canvas=await window.html2canvas(profileRef.current,{backgroundColor:"#111",useCORS:true});
+const link=document.createElement("a");
+link.download=`${player.name.replace(/\s+/g,"_")}_profiel.png`;
+link.href=canvas.toDataURL("image/png");
+link.click();
+}catch(e){console.error("Export mislukt:",e);}
+setExporting(false);
+}
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:250}}>
-<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom,0px))"}}>
+<div ref={profileRef} onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom,0px))"}}>
 <div style={{position:"relative",width:"100%",height:180,borderRadius:"18px 18px 0 0",overflow:"hidden",background:"#1a1a1a"}}>
 {player.backdrop?<img src={player.backdrop} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<div style={{width:"100%",height:"100%",background:"linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)"}}/>}
 <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,transparent 30%,#111 100%)"}}/>
+{hotStreak>=3&&(
+<div style={{position:"absolute",top:12,right:12,background:"linear-gradient(135deg,#ff6b00,#E8312A)",borderRadius:20,padding:"5px 12px",display:"flex",alignItems:"center",gap:5,boxShadow:"0 2px 10px rgba(232,49,42,0.5)"}}>
+<span style={{fontSize:14}}>🔥</span><span style={{color:WHITE,fontWeight:800,fontSize:12}}>{hotStreak}-game hot streak</span>
+</div>
+)}
 <div style={{position:"absolute",bottom:14,left:16,display:"flex",alignItems:"center",gap:12}}>
 <Avatar player={player} size={56}/>
 <div>
@@ -983,6 +1228,11 @@ return(
 </div>
 </div>
 <div style={{padding:"16px 20px 0"}}>
+{player.bio&&(
+<div data-testid="player-bio" style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:16,borderLeft:`3px solid ${RED}`}}>
+<div style={{color:WHITE,fontSize:13,lineHeight:1.5,fontStyle:"italic"}}>"{player.bio}"</div>
+</div>
+)}
 {/* W/L Record */}
 {(()=>{const{w,l,d}=getWinLoss(pg);const tot=w+l+d;return tot>0&&(
 <div style={{display:"flex",gap:10,marginBottom:16}}>
@@ -1007,6 +1257,44 @@ return(
 </div>
 ))}
 </div>
+{pg.length>0&&<StatRadarChart pg={pg}/>}
+{(matchups.best||matchups.worst)&&(
+<div data-testid="matchup-section" style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>MATCHUPS</div>
+<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+{matchups.best&&(
+<div style={{background:"linear-gradient(135deg,#0a1f0a,#0d2b0d)",border:"1px solid #27AE6055",borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200}}>
+<div style={{color:"#27AE60",fontSize:11,fontWeight:700,letterSpacing:1}}>✅ BESTE MATCHUP</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginTop:4}}>vs {matchups.best.opponent}</div>
+<div style={{color:GREY,fontSize:12,marginTop:4}}>{matchups.best.ppg} PPG · {matchups.best.rpg} RPG · {matchups.best.apg} APG · {matchups.best.games}G</div>
+</div>
+)}
+{matchups.worst&&matchups.worst.opponent!==matchups.best?.opponent&&(
+<div style={{background:"linear-gradient(135deg,#1f0a0a,#2b0d0d)",border:`1px solid ${RED}55`,borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200}}>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1}}>⚠️ MOEILIJKSTE MATCHUP</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginTop:4}}>vs {matchups.worst.opponent}</div>
+<div style={{color:GREY,fontSize:12,marginTop:4}}>{matchups.worst.ppg} PPG · {matchups.worst.rpg} RPG · {matchups.worst.apg} APG · {matchups.worst.games}G</div>
+</div>
+)}
+</div>
+</div>
+)}
+{milestones.achieved.length>0&&(
+<div data-testid="milestones-section" style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🏁 CARRIÈRE MIJLPALEN</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{milestones.achieved.slice(0,6).map((m,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 12px"}}>
+<span style={{fontSize:18}}>🎉</span>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:700}}>{m.label} gescoord</div>
+<div style={{color:GREY,fontSize:11}}>{m.date}</div>
+</div>
+</div>
+))}
+</div>
+</div>
+)}
 <TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards}/>
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
@@ -1046,9 +1334,11 @@ return(
 <div style={{color:RED,fontSize:14,fontWeight:700,flexShrink:0}}>{calcFps(g)} fps</div>
 </div>
 ))}
-<div style={{display:"flex",gap:10,marginTop:20}}>
-{isAdmin&&<button onClick={onEditPlayer} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:1}}>✏️ Bewerken</button>}
-<button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:15,cursor:"pointer",flex:2}}>Sluiten</button>
+<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap"}}>
+{isAdmin&&<button onClick={onEditPlayer} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>✏️ Bewerken</button>}
+{onCompare&&<button data-testid="compare-btn" onClick={()=>onCompare(player)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>⚖️ Vergelijk</button>}
+<button data-testid="export-profile-btn" onClick={exportProfile} disabled={exporting} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px",opacity:exporting?0.6:1}}>{exporting?"...":"📸 Export"}</button>
+<button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:15,cursor:"pointer",flex:"2 1 140px"}}>Sluiten</button>
 </div>
 </div>
 </div>
@@ -1307,6 +1597,29 @@ return (
 }
 
 // ── Weekly MVP Banner (shown at top of performances tab if current week has a leader)
+// ── Rivaliteiten: spelers die het vaakst tegen elkaar spelen
+function RivalriesBar({games,players,onOpenCompare}){
+const rivalries=useMemo(()=>computeRivalries(games,players,2).slice(0,5),[games,players]);
+if(!rivalries.length)return null;
+return(
+<div data-testid="rivalries-bar" style={{padding:"0 16px 14px"}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>⚔️ RIVALITEITEN</div>
+<div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:4}}>
+{rivalries.map((r,i)=>(
+<div key={i} onClick={()=>onOpenCompare&&onOpenCompare(r.p1)} style={{flexShrink:0,background:"linear-gradient(135deg,#1a0a0a,#1c1c1e)",border:`1px solid ${RED}40`,borderRadius:14,padding:"10px 14px",cursor:"pointer",minWidth:170,display:"flex",alignItems:"center",gap:8}}>
+<Avatar player={r.p1} size={32}/>
+<span style={{color:GREY,fontSize:11,fontWeight:800}}>VS</span>
+<Avatar player={r.p2} size={32}/>
+<div style={{marginLeft:4}}>
+<div style={{color:WHITE,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{r.meetings}× gespeeld</div>
+</div>
+</div>
+))}
+</div>
+</div>
+);
+}
+
 function WeeklyMVPBanner({games,players}){
 const week=gameWeek({date:new Date().toISOString().slice(0,10)});
 const weekGames=games.filter(g=>gameWeek(g)===week);
@@ -3405,7 +3718,7 @@ const {IS,BR,BG2}=styles();
 async function handleImg(e,field,maxW,q){const file=e.target.files[0];if(!file)return;const b64=await compressImage(file,maxW,q);setForm(f=>({...f,[field]:b64}));}
 async function save(){
 if(!form.name?.trim())return;setSaving(true);
-const p={id:isEdit?player.id:Date.now().toString(),name:form.name.trim(),position:form.position||"—",jersey:form.jersey||"",favPlayer:form.favPlayer||"",pfp:form.pfp||null,backdrop:form.backdrop||null};
+const p={id:isEdit?player.id:Date.now().toString(),name:form.name.trim(),position:form.position||"—",jersey:form.jersey||"",favPlayer:form.favPlayer||"",bio:form.bio||"",pfp:form.pfp||null,backdrop:form.backdrop||null};
 await onSave(p);setSaving(false);onClose();
 }
 return(
@@ -3439,6 +3752,7 @@ return(
 </select>
 <input placeholder="Rugnummer (optioneel)" style={IS} value={form.jersey||""} onChange={e=>setForm(f=>({...f,jersey:e.target.value}))}/>
 <input placeholder="Favoriete NBA speler" style={IS} value={form.favPlayer||""} onChange={e=>setForm(f=>({...f,favPlayer:e.target.value}))}/>
+<textarea placeholder="Bio / quote (optioneel)" rows={3} style={{...IS,resize:"vertical",fontFamily:"inherit"}} value={form.bio||""} onChange={e=>setForm(f=>({...f,bio:e.target.value}))}/>
 </div>
 <div style={{display:"flex",gap:10,marginTop:16}}>
 {isEdit&&<button onClick={()=>{onDelete(player.id);onClose();}} style={{...BG2,color:"#ff453a",flex:1}}>Verwijder</button>}
@@ -4384,6 +4698,8 @@ const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
 const [tab,setTab]=useState("performances");
 const [modal,setModal]=useState(null);
+const [compareTarget,setCompareTarget]=useState(null); // {player} of null
+const [showConfetti,setShowConfetti]=useState(false);
 const [editingGame,setEditingGame]=useState(null);
 const [filterPos,setFilterPos]=useState("All positions");
 const [showPosPicker,setShowPosPicker]=useState(false);
@@ -4667,7 +4983,7 @@ async function deleteLarpReply(id){setSaveStatus("saving");try{await fbDel("larp
 // Highlights handlers
 async function saveHighlight(h){setSaveStatus("saving");try{await fbSave("highlights",h);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteHighlight(id){setSaveStatus("saving");try{await fbDel("highlights",id);showSaved();}catch(e){console.error(e);showError();}}
-async function saveAward(a){setSaveStatus("saving");try{await fbSave("awards",a);showSaved();}catch(e){console.error(e);showError();}}
+async function saveAward(a){setSaveStatus("saving");try{await fbSave("awards",a);showSaved();setShowConfetti(true);}catch(e){console.error(e);showError();}}
 async function deleteAward(id){setSaveStatus("saving");try{await fbDel("awards",id);showSaved();}catch(e){console.error(e);showError();}}
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
 async function saveBet(b){setSaveStatus("saving");try{await fbSave("bets",b);showSaved();}catch(e){console.error(e);showError();}}
@@ -4719,6 +5035,7 @@ if(loading)return(
 
 return(
 <div style={{background:BG,minHeight:"100vh",paddingBottom:80}}>
+{showConfetti&&<Confetti onDone={()=>setShowConfetti(false)}/>}
 {saveStatus&&(
 <div style={{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 8px)",right:12,zIndex:999,background:saveStatus==="error"?"#ff453a22":INPUTBG,border:`1px solid ${saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}`,borderRadius:20,padding:"5px 14px",fontSize:12,color:saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}}>
 {saveStatus==="saving"?"Opslaan...":saveStatus==="saved"?"✓ Opgeslagen":"✗ Fout bij opslaan"}
@@ -4832,6 +5149,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 {isAdmin&&<button onClick={()=>setModal("addPlayer")} style={{background:RED,color:WHITE,border:"none",borderRadius:20,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",marginTop:8}}>Toevoegen</button>}
 </div>
 )}
+<RivalriesBar games={games} players={players} onOpenCompare={p=>setCompareTarget(p)}/>
 {players.map(p=>{
 const pg=games.filter(g=>g.playerId===p.id);
 return(
@@ -4916,7 +5234,11 @@ return (
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
 onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
 onOpenHighlight={hl=>setHighlightView(hl)}
+onCompare={p=>setCompareTarget(p)}
 onViewAllHighlights={(items,name)=>setHighlightsList({items,title:`Highlights · ${name}`})}/>
+)}
+{compareTarget&&(
+<ComparePlayersModal players={players} allGames={games} initialPlayer={compareTarget} onClose={()=>setCompareTarget(null)} onOpenPlayer={pid=>{setCompareTarget(null);setModal({type:"playerProfile",pid});}}/>
 )}
 {modal?.type==="perfDetail"&&detailGame&&detailPlayer&&(
 <PerfDetailModal game={detailGame} player={detailPlayer} allPlayers={players} allGames={games} comments={comments} highlights={highlights}

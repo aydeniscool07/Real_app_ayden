@@ -647,18 +647,18 @@ const won=awards.filter(a=>Array.isArray(a.playerIds)?a.playerIds.includes(playe
 // Special achievements — still automatic
 const myGames=allGames.filter(g=>g.playerId===player.id);
 const special=[];
-const c30=myGames.filter(g=>(+g.pts||0)>=30).length;
-if(c30>0)special.push({icon:"🔥",label:`30+ punten game`,count:c30});
-const c20r=myGames.filter(g=>(+g.reb||0)>=20).length;
-if(c20r>0)special.push({icon:"💪",label:`20+ rebounds`,count:c20r});
-const c10a=myGames.filter(g=>(+g.ast||0)>=10).length;
-if(c10a>0)special.push({icon:"🎯",label:`10+ assists`,count:c10a});
-const c5s=myGames.filter(g=>(+g.stl||0)>=5).length;
-if(c5s>0)special.push({icon:"🦅",label:`5+ steals`,count:c5s});
-const c5b=myGames.filter(g=>(+g.blk||0)>=5).length;
-if(c5b>0)special.push({icon:"🚫",label:`5+ blocks`,count:c5b});
+const c30=myGames.filter(g=>(+g.pts||0)>=7).length;
+if(c30>0)special.push({icon:"🔥",label:`7+ punten game`,count:c30});
+const c20r=myGames.filter(g=>(+g.reb||0)>=8).length;
+if(c20r>0)special.push({icon:"💪",label:`8+ rebounds`,count:c20r});
+const c10a=myGames.filter(g=>(+g.ast||0)>=5).length;
+if(c10a>0)special.push({icon:"🎯",label:`5+ assists`,count:c10a});
+const c5s=myGames.filter(g=>(+g.stl||0)>=4).length;
+if(c5s>0)special.push({icon:"🦅",label:`4+ steals`,count:c5s});
+const c5b=myGames.filter(g=>(+g.blk||0)>=4).length;
+if(c5b>0)special.push({icon:"🚫",label:`4+ blocks`,count:c5b});
 const td=myGames.filter(g=>{
-const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=10).length;
+const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=5).length;
 return ten>=3;
 }).length;
 if(td>0)special.push({icon:"💎",label:`Triple-double`,count:td});
@@ -1156,7 +1156,7 @@ return(
 // ── Player Profile Modal
 // ── Radar Chart: PTS/REB/AST/STL/BLK als spin diagram
 function StatRadarChart({pg}){
-const stats=[{k:"pts",label:"PTS",max:30},{k:"reb",label:"REB",max:15},{k:"ast",label:"AST",max:10},{k:"stl",label:"STL",max:5},{k:"blk",label:"BLK",max:5}];
+const stats=[{k:"pts",label:"PTS",max:8},{k:"reb",label:"REB",max:8},{k:"ast",label:"AST",max:6},{k:"stl",label:"STL",max:4},{k:"blk",label:"BLK",max:4}];
 const cx=110,cy=110,r=80;
 const n=stats.length;
 const angleFor=i=>(Math.PI*2*i)/n-Math.PI/2;

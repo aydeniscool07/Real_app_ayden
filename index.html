@@ -715,23 +715,44 @@ return{best:sorted[0],worst:sorted[sorted.length-1]};
 }
 
 // ── Head-to-head tussen twee spelers (via matchId, tegenover elkaar in andere teams)
+// Groups by matchId into arrays (not a clobbering single-object map) so duplicate/edited
+// rows for the same match never silently drop a meeting. Pairs are deduped by id pair so
+// the same two rows can't be counted twice. Winner is decided by the actual final score
+// of the match (same rule as getWinLoss), not by fantasy points — fantasy points are only
+// used for the "eff" stat-line average, never to decide who "won" the meeting.
 function computeHeadToHead(allGames,playerA,playerB){
-const aGames=allGames.filter(g=>g.playerId===playerA.id&&g.matchId);
-const bByMatch={};
-allGames.filter(g=>g.playerId===playerB.id&&g.matchId).forEach(g=>{bByMatch[g.matchId]=g;});
+const byMatchA={},byMatchB={};
+allGames.forEach(g=>{
+if(!g.matchId)return;
+if(g.playerId===playerA.id){(byMatchA[g.matchId]=byMatchA[g.matchId]||[]).push(g);}
+else if(g.playerId===playerB.id){(byMatchB[g.matchId]=byMatchB[g.matchId]||[]).push(g);}
+});
 const pairs=[];
-aGames.forEach(ga=>{
-const gb=bByMatch[ga.matchId];
-if(gb&&ga.team&&gb.team&&ga.team!==gb.team&&ga.team!=="chameleon"&&gb.team!=="chameleon"){
-pairs.push({matchId:ga.matchId,date:ga.date,a:ga,b:gb});
-}
+const seen=new Set();
+Object.keys(byMatchA).forEach(mid=>{
+const bRows=byMatchB[mid];
+if(!bRows)return;
+byMatchA[mid].forEach(ga=>{
+if(!ga.team||ga.team==="chameleon")return;
+bRows.forEach(gb=>{
+if(!gb.team||gb.team==="chameleon")return;
+if(ga.team===gb.team)return; // must be on opposing teams
+const pairKey=ga.id+"|"+gb.id;
+if(seen.has(pairKey))return;
+seen.add(pairKey);
+pairs.push({matchId:mid,date:ga.date,a:ga,b:gb});
+});
+});
 });
 if(!pairs.length)return null;
 const aGs=pairs.map(p=>p.a),bGs=pairs.map(p=>p.b);
 let aWins=0,bWins=0,ties=0;
 pairs.forEach(p=>{
-const af=+calcFps(p.a),bf=+calcFps(p.b);
-if(af>bf)aWins++;else if(bf>af)bWins++;else ties++;
+// Decide the winner from the actual final score of the match, mirroring getWinLoss.
+const aScore=parseFloat(p.a.team==="A"?p.a.teamAScore:p.a.teamBScore);
+const bScore=parseFloat(p.b.team==="A"?p.b.teamAScore:p.b.teamBScore);
+if(isNaN(aScore)||isNaN(bScore)||(!aScore&&!bScore)){ties++;return;}
+if(aScore>bScore)aWins++;else if(bScore>aScore)bWins++;else ties++;
 });
 return{
 meetings:pairs.length,pairs:pairs.sort((x,y)=>y.date.localeCompare(x.date)),
@@ -4043,6 +4064,17 @@ if(isNaN(o))return 50;
 return o>0?Math.round(100/(o+100)*100):Math.round(Math.abs(o)/(Math.abs(o)+100)*100);
 }
 
+// An admin price/line override is only valid until the player it applies to logs a new
+// game — at that point the auto-generated line has moved on and the frozen override is
+// stale, so we ignore its price/line (but keep respecting an explicit "disabled" flag,
+// since that's a deliberate admin choice, not a stale number).
+function isOddsOverrideStale(saved,playerId,games){
+if(!saved)return false;
+if(saved.gamesCountAtSet===undefined)return false; // older overrides without a stamp: treat as still active
+const currentCount=games.filter(g=>g.playerId===playerId).length;
+return currentCount!==saved.gamesCountAtSet;
+}
+
 // Auto-generate prop odds from player stats — all stats
 function generatePlayerProps(player,games){
 const pg=games.filter(g=>g.playerId===player.id).slice().sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
@@ -4067,6 +4099,81 @@ const label=combo?combo.map(k=>STAT_LABEL[k]).join("+"):(STAT_LABEL[key]||key.to
 props.push({type:key,label:`${player.name} ${label}`,line,overOdds:variance,underOdds:variance>0?-130:-120,stat:key,combo,statLabel:label});
 });
 return props;
+}
+
+// ── Bet settlement engine ──────────────────────────────────────────────────
+// Grades a single bet selection against the live games data. Returns:
+//   "win"   — selection hit
+//   "loss"  — selection missed
+//   "push"  — selection can't be decided either way (counts as void/refund for that leg)
+//   null    — not resolvable yet (the deciding game/month hasn't happened)
+// Nothing here ever fabricates a result: if the data needed to grade a leg doesn't exist
+// yet, it stays null and the whole bet waits.
+function gradeSelection(sel,games,players){
+const info=sel.settleInfo;
+if(!info)return null; // legacy bets placed before settlement metadata existed — leave alone
+if(info.kind==="prop"){
+const pg=games.filter(g=>g.playerId===info.playerId).slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(+a.id||0)-(+b.id||0));
+const nextGame=pg[info.gamesCountAtBet]; // first game logged after the bet was placed
+if(!nextGame)return null;
+const val=info.combo?info.combo.reduce((s,k)=>s+(+nextGame[k]||0),0):(+nextGame[info.stat]||0);
+if(val===info.line)return"push";
+const hit=info.side==="over"?val>info.line:val<info.line;
+return hit?"win":"loss";
+}
+if(info.kind==="gamewin"){
+const pg=games.filter(g=>g.playerId===info.playerId&&g.team!=="chameleon").slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(+a.id||0)-(+b.id||0));
+const nextGame=pg[info.gamesCountAtBet];
+if(!nextGame)return null;
+const myScore=parseFloat(nextGame.team==="A"?nextGame.teamAScore:nextGame.teamBScore);
+const oppScore=parseFloat(nextGame.team==="A"?nextGame.teamBScore:nextGame.teamAScore);
+if(isNaN(myScore)||isNaN(oppScore)||(!myScore&&!oppScore))return null; // score not entered yet
+if(myScore===oppScore)return"push";
+return myScore>oppScore?"win":"loss";
+}
+if(info.kind==="mvp_month"){
+const now=new Date();
+const curMonthKey=now.toISOString().slice(0,7);
+if(info.monthKey>=curMonthKey)return null; // the bet's month hasn't ended yet
+const monthGames=games.filter(g=>(g.date||"").slice(0,7)===info.monthKey);
+const effByPlayer=players.map(p=>{
+const pg=monthGames.filter(g=>g.playerId===p.id);
+return{id:p.id,eff:pg.length?pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length:-Infinity,gp:pg.length};
+}).filter(x=>x.gp>0);
+if(!effByPlayer.length)return null; // no games logged for that month at all yet — can't grade
+const best=effByPlayer.reduce((a,b)=>b.eff>a.eff?b:a);
+const tiedWinners=effByPlayer.filter(x=>x.eff===best.eff);
+if(tiedWinners.length>1)return tiedWinners.some(x=>x.id===info.playerId)?"push":"loss";
+return best.id===info.playerId?"win":"loss";
+}
+return null;
+}
+
+// Looks at every open bet and decides which ones are now fully resolvable. A parlay only
+// settles once every leg has a non-null grade; a single push leg in a parlay is treated as
+// removed-from-the-parlay (its odds excluded), matching standard sportsbook rules, while a
+// single loss leg loses the whole parlay outright.
+function computeBetSettlements(bets,games,players){
+const results=[];
+bets.filter(b=>b.status==="open").forEach(bet=>{
+const grades=bet.selections.map(sel=>gradeSelection(sel,games,players));
+if(grades.some(g=>g===null))return; // still waiting on at least one leg
+if(grades.some(g=>g==="loss")){
+results.push({bet,outcome:"lost",payout:0});
+return;
+}
+// All legs are win or push.
+const activeLegs=bet.selections.filter((_,i)=>grades[i]==="win");
+if(!activeLegs.length){
+// Every leg pushed — full refund, no profit.
+results.push({bet,outcome:"push",payout:bet.stake});
+return;
+}
+const liveOdds=activeLegs.reduce((acc,sel)=>acc*oddsToDecimal(sel.odds),1);
+const payout=parseFloat((bet.stake*liveOdds).toFixed(2));
+results.push({bet,outcome:"won",payout});
+});
+return results;
 }
 
 function generateFutureOdds(players,games){
@@ -4174,30 +4281,39 @@ const [topUpAmt,setTopUpAmt]=useState("");
 const [topUpNote,setTopUpNote]=useState("");
 const [futureOdds,setFutureOdds]=useState({});
 
-// Build all props across all players, merging with saved overrides
+// Build all props across all players, merging with saved overrides (ignoring stale ones)
 const allProps=players.flatMap(p=>{
 const base=generatePlayerProps(p,games);
 return base.map(prop=>{
 const key=`${p.id}_${prop.type}`;
-const saved=betOdds.find(o=>o.id===key);
+const savedRaw=betOdds.find(o=>o.id===key);
+const stale=isOddsOverrideStale(savedRaw,p.id,games);
+const saved=stale?null:savedRaw;
 return{...prop,id:key,playerId:p.id,playerName:p.name,
 overOdds:saved?.overOdds??prop.overOdds,
 underOdds:saved?.underOdds??prop.underOdds,
 line:saved?.line??prop.line,
-disabled:saved?.disabled||false};
+disabled:savedRaw?.disabled||false,
+stale};
 });
 });
 const futureBase=generateFutureOdds(players,games);
 const mergedFutures=futureBase.map(f=>{
-const saved=betOdds.find(o=>o.id===`future_mvp_${f.playerId}`);
-return{...f,american:saved?.american??f.american,disabled:saved?.disabled||false};
+const savedRaw=betOdds.find(o=>o.id===`future_mvp_${f.playerId}`);
+const stale=isOddsOverrideStale(savedRaw,f.playerId,games);
+const saved=stale?null:savedRaw;
+return{...f,american:saved?.american??f.american,disabled:savedRaw?.disabled||false,stale};
 });
 
 async function saveOdds(){
 const entries=Object.entries(editOdds);
 for(const[id,val]of entries){
 const existing=betOdds.find(o=>o.id===id)||{id};
-await onSave({...existing,...val,id});
+// Stamp with the relevant player's current game count so this override auto-expires
+// the next time a new game is logged for them.
+const pid=val.playerId;
+const gamesCountAtSet=pid?games.filter(g=>g.playerId===pid).length:existing.gamesCountAtSet;
+await onSave({...existing,...val,id,gamesCountAtSet});
 }
 setEditOdds({});
 }
@@ -4238,21 +4354,24 @@ const disNow=cur.disabled!==undefined?cur.disabled:prop.disabled;
 return(
 <div key={prop.id} style={{background:INPUTBG,borderRadius:12,padding:"12px",marginBottom:8,opacity:disNow?0.5:1}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-<div style={{fontWeight:600,fontSize:13,color:WHITE}}>{prop.type.toUpperCase()} lijn</div>
-<button onClick={()=>setEditOdds(e=>({...e,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{}),disabled:!disNow}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{disNow?"Activeer":"Disable"}</button>
+<div style={{fontWeight:600,fontSize:13,color:WHITE,display:"flex",alignItems:"center",gap:6}}>
+{prop.type.toUpperCase()} lijn
+{prop.stale&&<span style={{background:"#f5a52422",color:"#f5a524",fontSize:10,fontWeight:700,borderRadius:6,padding:"2px 6px"}}>AUTO (nieuwe game)</span>}
+</div>
+<button onClick={()=>setEditOdds(e=>({...e,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{}),disabled:!disNow,playerId:prop.playerId}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{disNow?"Activeer":"Disable"}</button>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:4}}>LIJN</div>
-<input type="number" step="0.5" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.line} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),line:parseFloat(e.target.value)||prop.line}}))}/>
+<input type="number" step="0.5" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={prop.line} onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),line:parseFloat(e.target.value)||prop.line,playerId:prop.playerId}}))}/>
 </div>
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:4}}>OVER</div>
-<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.overOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),overOdds:decimalToAmerican(e.target.value)}}))}/>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.overOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),overOdds:decimalToAmerican(e.target.value),playerId:prop.playerId}}))}/>
 </div>
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:4}}>UNDER</div>
-<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.underOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),underOdds:decimalToAmerican(e.target.value)}}))}/>
+<input type="number" style={{...IS,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(prop.underOdds).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[prop.id]:{...cur,...(betOdds.find(o=>o.id===prop.id)||{overOdds:prop.overOdds,underOdds:prop.underOdds,line:prop.line}),underOdds:decimalToAmerican(e.target.value),playerId:prop.playerId}}))}/>
 </div>
 </div>
 </div>
@@ -4276,12 +4395,15 @@ return(
 <div key={f.playerId} style={{background:INPUTBG,borderRadius:12,padding:"12px",marginBottom:8,opacity:disNow?0.5:1}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
 <div>
-<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{f.name}</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,display:"flex",alignItems:"center",gap:6}}>
+{f.name}
+{f.stale&&<span style={{background:"#f5a52422",color:"#f5a524",fontSize:10,fontWeight:700,borderRadius:6,padding:"2px 6px"}}>AUTO (nieuwe game)</span>}
+</div>
 <div style={{color:GREY,fontSize:12}}>{f.eff} gem. eff · {f.prob}% kans</div>
 </div>
 <div style={{display:"flex",alignItems:"center",gap:8}}>
-<input type="number" style={{...IS,width:90,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(f.american).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),american:decimalToAmerican(e.target.value)}}))}/>
-<button onClick={()=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),disabled:!disNow}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>{disNow?"Aan":"Uit"}</button>
+<input type="number" style={{...IS,width:90,fontSize:14,padding:"8px 10px"}} defaultValue={oddsToDecimal(f.american).toFixed(2)} step="0.01" min="1.01" onChange={e=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),american:decimalToAmerican(e.target.value),playerId:f.playerId}}))}/>
+<button onClick={()=>setEditOdds(eo=>({...eo,[key]:{...cur,...(betOdds.find(o=>o.id===key)||{american:f.american}),disabled:!disNow,playerId:f.playerId}}))} style={{background:disNow?"#27AE6033":"#ff453a33",border:"none",color:disNow?"#27AE60":"#ff453a",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>{disNow?"Aan":"Uit"}</button>
 </div>
 </div>
 </div>
@@ -4320,7 +4442,7 @@ return(
 
 {tab2==="bets"&&(
 <div style={{padding:"14px 20px"}}>
-<div style={{color:GREY,fontSize:12,marginBottom:12}}>Alle geplaatste weddenschappen. Admin kan bets voiden (inzet teruggeven).</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>Alle geplaatste weddenschappen. Bets worden automatisch uitbetaald zodra de bijbehorende game is gelogd. Admin kan een open bet handmatig voiden (inzet teruggeven) als dat nodig is.</div>
 {bets.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:20}}>Nog geen weddenschappen</div>}
 {bets.slice().sort((a,b)=>new Date(b.placedAt)-new Date(a.placedAt)).map(bet=>(
 <div key={bet.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
@@ -4333,7 +4455,7 @@ return(
 ))}
 <div style={{display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,borderTop:`1px solid ${DIVIDER}`}}>
 <span style={{color:GREY,fontSize:12}}>{bet.walletId?.slice(0,20)}… · €{(bet.stake||0).toFixed(2)}</span>
-<span style={{color:WHITE,fontWeight:700}}>→ €{(bet.potentialPayout||0).toFixed(2)}</span>
+<span style={{color:WHITE,fontWeight:700}}>→ €{((bet.status&&bet.status!=="open"?bet.finalPayout:bet.potentialPayout)||0).toFixed(2)}</span>
 </div>
 {bet.status==="open"&&(
 <button onClick={()=>onVoid&&onVoid(bet)} style={{background:"transparent",border:"1px solid #f5a52466",color:"#f5a524",borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:600,cursor:"pointer",marginTop:6}}>Void (teruggeven)</button>
@@ -4383,11 +4505,11 @@ return(
 </div>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-<button onClick={()=>addToSlip(`${p.name} Over ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Meer dan ${market.line}`,market.overOdds,market.id+"_over")} style={{background:overInSlip?"#27AE60":BG,border:`1.5px solid ${overInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+<button onClick={()=>addToSlip(`${p.name} Over ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Meer dan ${market.line}`,market.overOdds,market.id+"_over",{kind:"prop",side:"over",playerId:p.id,stat:market.stat,combo:market.combo,line:market.line,gamesCountAtBet:pg.length})} style={{background:overInSlip?"#27AE60":BG,border:`1.5px solid ${overInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,marginBottom:4}}>MEER DAN {market.line}</div>
 <div style={{color:overInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.overOdds)}</div>
 </button>
-<button onClick={()=>addToSlip(`${p.name} Under ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Minder dan ${market.line}`,market.underOdds,market.id+"_under")} style={{background:underInSlip?"#27AE60":BG,border:`1.5px solid ${underInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+<button onClick={()=>addToSlip(`${p.name} Under ${market.line} ${market.statLabel||market.type.toUpperCase()}`,`Minder dan ${market.line}`,market.underOdds,market.id+"_under",{kind:"prop",side:"under",playerId:p.id,stat:market.stat,combo:market.combo,line:market.line,gamesCountAtBet:pg.length})} style={{background:underInSlip?"#27AE60":BG,border:`1.5px solid ${underInSlip?"#27AE60":DARKGREY}`,borderRadius:10,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,marginBottom:4}}>MINDER DAN {market.line}</div>
 <div style={{color:underInSlip?"#000":WHITE,fontWeight:800,fontSize:16}}>{formatOdds(market.underOdds)}</div>
 </button>
@@ -4435,7 +4557,7 @@ return(
 <div style={{fontWeight:700,fontSize:15,color:WHITE}}>{p.name}</div>
 <div style={{color:GREY,fontSize:12,marginTop:2}}>{w}W {l}L{d?` ${d}D`:""} · <span style={{color:wr>0.55?"#27AE60":wr<0.45?"#ff453a":GREY,fontWeight:600}}>{Math.round(wr*100)}% win</span></div>
 </div>
-<button onClick={()=>addToSlip(`${p.name} wint zijn volgende game`,`${Math.round(wr*100)}% historische winratio`,american,marketId)} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
+<button onClick={()=>addToSlip(`${p.name} wint zijn volgende game`,`${Math.round(wr*100)}% historische winratio`,american,marketId,{kind:"gamewin",playerId:p.id,gamesCountAtBet:pg.length})} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
 <div style={{color:WHITE,fontWeight:800,fontSize:15}}>{formatOdds(american)}</div>
 <div style={{color:"rgba(255,255,255,0.7)",fontSize:10,marginTop:2}}>{inSlip?"✓ Gekozen":"Kiezen"}</div>
 </button>
@@ -4456,13 +4578,15 @@ const [adminOpen,setAdminOpen]=useState(false);
 const myWallet=wallets.find(w=>w.id===userIp)||{id:userIp,balance:10,history:[{type:"signup_bonus",amount:10,note:"Startsaldo €10",date:new Date().toISOString()}]};
 const myBets=bets.filter(b=>b.walletId===userIp).sort((a,b)=>new Date(b.placedAt)-new Date(a.placedAt));
 
-// Build prop market list
+// Build prop market list. Admin overrides only apply until the player logs a new game —
+// after that the auto-generated line/odds take back over automatically.
 const propMarkets=players.flatMap(p=>{
 const base=generatePlayerProps(p,games);
 return base.map(prop=>{
 const key=`${p.id}_${prop.type}`;
-const saved=betOdds.find(o=>o.id===key);
-if(saved?.disabled)return null;
+const savedRaw=betOdds.find(o=>o.id===key);
+if(savedRaw?.disabled)return null;
+const saved=isOddsOverrideStale(savedRaw,p.id,games)?null:savedRaw;
 return{...prop,id:key,playerId:p.id,playerName:p.name,
 overOdds:saved?.overOdds??prop.overOdds,
 underOdds:saved?.underOdds??prop.underOdds,
@@ -4470,12 +4594,13 @@ line:saved?.line??prop.line};
 }).filter(Boolean);
 });
 
-// Build futures market
+// Build futures market — same auto-expiry rule as props
 const futureBase=generateFutureOdds(players,games);
 const futureMarkets=futureBase.map(f=>{
 const key=`future_mvp_${f.playerId}`;
-const saved=betOdds.find(o=>o.id===key);
-if(saved?.disabled)return null;
+const savedRaw=betOdds.find(o=>o.id===key);
+if(savedRaw?.disabled)return null;
+const saved=isOddsOverrideStale(savedRaw,f.playerId,games)?null:savedRaw;
 return{...f,id:key,american:saved?.american??f.american};
 }).filter(Boolean);
 
@@ -4495,12 +4620,12 @@ onSaveWallet({...existing,balance:newBal,history:[...(existing.history||[]),entr
 }
 },[userIp,wallets]);
 
-function addToSlip(label,sublabel,odds,marketId){
+function addToSlip(label,sublabel,odds,marketId,settleInfo){
 // Max 10 legs
 if(betSlip.length>=10)return;
 // No duplicate markets
 if(betSlip.find(b=>b.marketId===marketId))return;
-setBetSlip(s=>[...s,{label,sublabel,odds,marketId}]);
+setBetSlip(s=>[...s,{label,sublabel,odds,marketId,settleInfo:settleInfo||null}]);
 setShowBetSlip(true);
 }
 function removeFromSlip(i){setBetSlip(s=>s.filter((_,idx)=>idx!==i));}
@@ -4604,7 +4729,7 @@ return(
 <div style={{fontWeight:700,fontSize:15,color:WHITE}}>{f.name}</div>
 <div style={{color:GREY,fontSize:12,marginTop:2}}>{f.eff} gem. eff · {f.prob}% kans</div>
 </div>
-<button onClick={()=>addToSlip(`${f.name} MVP Maand`,`${formatOdds(f.american)}`,f.american,f.id)} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
+<button onClick={()=>addToSlip(`${f.name} MVP Maand`,`${formatOdds(f.american)}`,f.american,f.id,{kind:"mvp_month",playerId:f.playerId,monthKey:new Date().toISOString().slice(0,7)})} style={{background:inSlip?"#27AE60":RED,border:"none",borderRadius:10,padding:"10px 16px",cursor:"pointer",textAlign:"center",minWidth:70}}>
 <div style={{color:WHITE,fontWeight:800,fontSize:15}}>{formatOdds(f.american)}</div>
 <div style={{color:"rgba(255,255,255,0.7)",fontSize:10,marginTop:2}}>{inSlip?"✓ Gekozen":"Kiezen"}</div>
 </button>
@@ -4636,20 +4761,25 @@ return(
 </div>
 <div style={{fontWeight:700,fontSize:13,color:statusColor}}>{bet.status?.toUpperCase()||"OPEN"}</div>
 </div>
-{(bet.selections||[]).map((s,i)=>(
-<div key={i} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-<span style={{color:GREY,fontSize:13,flex:1,marginRight:8}}>{s.label}</span>
+{(bet.selections||[]).map((s,i)=>{
+const grade=bet.status==="open"?gradeSelection(s,games,players):null;
+const dot=bet.status!=="open"?null:grade==="win"?"#27AE60":grade==="loss"?"#ff453a":grade==="push"?"#f5a524":GREY;
+return(
+<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,gap:8}}>
+<span style={{color:GREY,fontSize:13,flex:1}}>{s.label}</span>
+{dot&&<span style={{width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0}}/>}
 <span style={{color:RED,fontWeight:700,fontSize:13}}>{formatOdds(s.odds)}</span>
 </div>
-))}
+);
+})}
 <div style={{borderTop:`1px solid ${DIVIDER}`,paddingTop:10,marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
 <div>
 <div style={{color:GREY,fontSize:12}}>Inzet: <span style={{color:WHITE,fontWeight:600}}>€{(bet.stake||0).toFixed(2)}</span></div>
 <div style={{color:GREY,fontSize:11,marginTop:2}}>{new Date(bet.placedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
 </div>
 <div style={{textAlign:"right"}}>
-<div style={{color:GREY,fontSize:12}}>Uitbetaling</div>
-<div style={{color:bet.status==="won"?"#27AE60":WHITE,fontWeight:800,fontSize:18}}>€{(bet.potentialPayout||0).toFixed(2)}</div>
+<div style={{color:GREY,fontSize:12}}>{bet.status==="open"||!bet.status?"Potentieel":"Uitbetaling"}</div>
+<div style={{color:bet.status==="won"?"#27AE60":WHITE,fontWeight:800,fontSize:18}}>€{((bet.status&&bet.status!=="open"?bet.finalPayout:bet.potentialPayout)||0).toFixed(2)}</div>
 </div>
 </div>
 </div>
@@ -4999,6 +5129,33 @@ await fbSave("bets",{...bet,status:"void"});
 showSaved();
 }catch(e){console.error(e);showError();}
 }
+
+// Auto-settle bets as soon as the games/results they depend on are logged. Any open tab
+// can do this — there's no backend here — so this is written to be safe if two tabs both
+// fire at once: each settlement is keyed off the bet's *current* Firestore state, and a
+// bet that's already been moved out of "open" by another tab simply won't be picked up on
+// the next snapshot, so it can't be paid out twice.
+const settlingRef=useRef(new Set());
+useEffect(()=>{
+if(!games.length||!bets.length||!players.length)return;
+const settlements=computeBetSettlements(bets,games,players);
+settlements.forEach(({bet,outcome,payout})=>{
+if(settlingRef.current.has(bet.id))return; // already in flight from this tab
+settlingRef.current.add(bet.id);
+(async()=>{
+try{
+const w=wallets.find(ww=>ww.id===bet.walletId)||{id:bet.walletId,balance:0,history:[]};
+if(payout>0){
+const newBal=parseFloat(((w.balance||0)+payout).toFixed(2));
+await fbSave("wallets",{...w,id:bet.walletId,balance:newBal,history:[...(w.history||[]),{type:outcome==="push"?"push_refund":"payout",amount:payout,betId:bet.id,date:new Date().toISOString()}]});
+}
+await fbSave("bets",{...bet,status:outcome==="push"?"void":outcome,settledAt:new Date().toISOString(),finalPayout:payout});
+}catch(e){console.error("Settlement error for bet",bet.id,e);}
+finally{settlingRef.current.delete(bet.id);}
+})();
+});
+// eslint-disable-next-line react-hooks/exhaustive-deps
+},[games,bets,players,wallets]);
 
 function getSorted(){
 let gs=[...games];

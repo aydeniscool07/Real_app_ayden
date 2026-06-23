@@ -1485,7 +1485,7 @@ return(
 }
 
 // ── Monthly Stats Tab
-function MonthlyStats({games,players,onOpenPlayer}){
+function MonthlyStats({games,players,scheduledGames=[],onOpenPlayer}){
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [cardFor,setCardFor]=useState(null); // player object or null
@@ -1672,6 +1672,151 @@ return (
 <button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
 </div>
 ))}
+
+          {/* MVP Race — what does it take? */}
+          {(() => {
+            // Only show for the current (still-running) month
+            const nowDate = new Date();
+            const curMonthKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth()+1).padStart(2,"0")}`;
+            if (selMonth !== curMonthKey) return null;
+            if (playerStats.length < 2) return null;
+
+            const todayStr = nowDate.toISOString().slice(0,10);
+
+            // Scheduled matchdays remaining this month with their play chance
+            // Each scheduled matchday = 3 games per player
+            // Expected games = sum over scheduled days of: (playChance/100) * 3
+            const scheduledThisMonthAhead = scheduledGames.filter(g => {
+              if (!g.date) return false;
+              return g.date.slice(0,7) === curMonthKey && g.date > todayStr;
+            });
+
+            // Sum expected games: if playChance set, use it; else assume 70%
+            const expectedGames = scheduledThisMonthAhead.reduce((sum, g) => {
+              const chance = (g.playChance !== undefined && g.playChance !== null && g.playChance !== "")
+                ? Number(g.playChance) / 100
+                : 0.7;
+              return sum + chance * 3; // 3 games per matchday
+            }, 0);
+
+            const gamesLeft = parseFloat(expectedGames.toFixed(1));
+            const matchdaysLeft = scheduledThisMonthAhead.length;
+
+            const leader = playerStats[0]; // current #1 by avg eff
+
+            // Helper: given current total eff sum and game count, plus extra games at a new avg eff,
+            // compute new overall avg eff
+            // avg_eff = (currentEffSum + extraGames * extraAvgEff) / (currentGames + extraGames)
+            // We want new avg eff > target → solve for extraAvgEff:
+            // extraAvgEff > (target * (n + g) - currentEffSum) / g
+
+            const leaderEffSum = leader.games.reduce((s,g)=>s+(+calcFps(g)),0);
+            const leaderN = leader.games.length;
+
+            return (
+              <div style={{marginTop:24,marginBottom:4}}>
+                <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 MVP RACE — WAT HEEFT IEDEREEN NODIG?</div>
+                <div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>
+                  {matchdaysLeft === 0 ? "Geen geplande speeldagen meer deze maand" : `${matchdaysLeft} geplande speeldag${matchdaysLeft!==1?"en":""} over · ~${gamesLeft} verwachte games/speler (op basis van speelkans)`}
+                </div>
+
+                {gamesLeft === 0 ? (
+                  <div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:12,padding:"12px 14px"}}>
+                    Geen speeldagen meer verwacht deze maand. {leader.player.name} staat op 1.
+                  </div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {playerStats.map((ps, i) => {
+                      if (i === 0) {
+                        // Leader: show how low they can drop and still win
+                        // Even if they score 0 eff in remaining games, their new avg:
+                        const worstCaseEff = parseFloat(((leaderEffSum) / (leaderN + gamesLeft)).toFixed(1));
+                        // What eff does #2 need to exactly match leader at worst case?
+                        const challenger = playerStats[1];
+                        const cEffSum = challenger.games.reduce((s,g)=>s+(+calcFps(g)),0);
+                        const cN = challenger.games.length;
+                        // target = worstCaseEff (leader's worst avg)
+                        const neededRaw = (worstCaseEff * (cN + gamesLeft) - cEffSum) / gamesLeft;
+                        const neededEff = Math.max(0, parseFloat(neededRaw.toFixed(1)));
+                        // How many pts roughly equals that eff? pts ≈ eff/1.2 (rough inverse of calcFps weight)
+                        const neededPts = Math.max(0, Math.round(neededEff / 1.2));
+
+                        return (
+                          <div key={ps.player.id} style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:12,padding:"12px 14px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                              <div style={{width:22,height:22,borderRadius:"50%",background:RED,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>1</div>
+                              <Avatar player={ps.player} size={32}/>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name} <span style={{color:RED,fontSize:11}}>· leider</span></div>
+                                <div style={{color:GREY,fontSize:11}}>{ps.games.length}G · {ps.eff} eff nu</div>
+                              </div>
+                              <div style={{textAlign:"right",flexShrink:0}}>
+                                <div style={{color:"#f5a524",fontWeight:800,fontSize:15}}>veilig</div>
+                                <div style={{color:GREY,fontSize:10}}>als {ps.eff}+ eff bijhouden</div>
+                              </div>
+                            </div>
+                            <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"8px 10px",fontSize:12,color:GREY,lineHeight:1.6}}>
+                              <span style={{color:WHITE,fontWeight:700}}>Slechtste scenario:</span> als {ps.player.name.split(" ")[0]} de rest <span style={{color:"#ff6b6b",fontWeight:700}}>niets</span> scoort → zakt naar ~<span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>. Dan heeft #{2} nog <span style={{color:RED,fontWeight:700}}>{neededEff} eff/game</span> (~{neededPts} pts) nodig om te overtreffen.
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Challengers: what do they need to overtake #1?
+                      const psEffSum = ps.games.reduce((s,g)=>s+(+calcFps(g)),0);
+                      const psN = ps.games.length;
+
+                      // Scenario A: leader plays all remaining games at their current avg eff
+                      const leaderFutureEff = parseFloat(((leaderEffSum + gamesLeft * leader.eff) / (leaderN + gamesLeft)).toFixed(1));
+                      // ps needs: (leaderFutureEff * (psN + gamesLeft) - psEffSum) / gamesLeft > neededEff to win
+                      const neededRaw = (leaderFutureEff * (psN + gamesLeft) - psEffSum) / gamesLeft;
+                      const neededEff = parseFloat(Math.max(0, neededRaw + 0.1).toFixed(1)); // +0.1 to actually beat, not just tie
+
+                      // Roughly how many pts is that? eff ≈ pts*1.2 + reb*1.1 + ast*1.5 ... assume avg reb/ast
+                      // Use player's current avg reb/ast to estimate pts needed
+                      const avgReb = ps.rpg || 0;
+                      const avgAst = ps.apg || 0;
+                      const avgStl = avg(ps.games,"stl") || 0;
+                      const avgBlk = avg(ps.games,"blk") || 0;
+                      const avgTo  = avg(ps.games,"to")  || 0;
+                      // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5
+                      // pts*1.2 = neededEff - (reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5)
+                      const nonPtsEff = avgReb*1.1 + avgAst*1.5 + avgStl*2 + avgBlk*2 - avgTo*1.5;
+                      const ptsNeeded = Math.max(0, Math.ceil((neededEff - nonPtsEff) / 1.2));
+
+                      const gap = parseFloat((neededEff - ps.eff).toFixed(1));
+                      const isRealistic = neededEff <= 20; // arbitrary "realistic" ceiling
+                      const isTooFar = neededEff > 30;
+
+                      return (
+                        <div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",opacity:isTooFar?0.6:1}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                            <div style={{width:22,height:22,borderRadius:"50%",background:INPUTBG,border:`1px solid ${GREY}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0,color:GREY}}>{i+1}</div>
+                            <Avatar player={ps.player} size={32}/>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+                              <div style={{color:GREY,fontSize:11}}>{ps.games.length}G · {ps.eff} eff nu · {gap>0?`+${gap} nodig`:"al boven leider"}</div>
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{color:isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:15}}>{neededEff} eff</div>
+                              <div style={{color:GREY,fontSize:10}}>per game nodig</div>
+                            </div>
+                          </div>
+                          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 10px",fontSize:12,color:GREY,lineHeight:1.6}}>
+                            {isTooFar ? (
+                              <span>Zou <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff/game</span> (~{ptsNeeded} pts) nodig hebben — <span style={{color:"#ff6b6b"}}>onrealistisch</span> in {gamesLeft} games.</span>
+                            ) : (
+                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig (~<span style={{color:RED,fontWeight:700}}>{ptsNeeded} pts</span> + gemiddeld reb/ast) over de komende {gamesLeft} games om #{1} te pakken.</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* MVPs van afgelopen maanden — carousel */}
           {(() => {
@@ -5441,7 +5586,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* MONTHLY TAB */}
-{tab==="monthly"&&<MonthlyStats games={games} players={players} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
+{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}

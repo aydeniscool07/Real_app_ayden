@@ -295,13 +295,18 @@ return data.daily?.precipitation_probability_max?.[0]||null;
 }
 
 // ── Avatar
-function Avatar({player,size=52}){
+function Avatar({player,size=52,streak=0}){
 const name=player?.name||"?";
 const COLS=["#1a3a5c","#3a1a5c","#1a5c3a","#5c3a1a","#5c1a3a","#1a4a4a"];
 const idx=name.charCodeAt(0)%COLS.length;
 const ini=name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
-if(player?.pfp)return <img src={player.pfp} alt={name} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"1.5px solid #2a2a2a"}}/>;
-return <div style={{width:size,height:size,borderRadius:"50%",background:COLS[idx],display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:size*0.35,color:WHITE,flexShrink:0,border:"1.5px solid #2a2a2a"}}>{ini}</div>;
+const badge=streak>=3?(
+<div style={{position:"absolute",bottom:-2,right:-2,background:"#1C1C1E",borderRadius:"50%",width:size*0.42,height:size*0.42,display:"flex",alignItems:"center",justifyContent:"center",border:"1.5px solid #000",boxShadow:"0 0 0 1px rgba(255,255,255,0.08)"}} title={`${streak}-game hot streak`}>
+<span style={{fontSize:size*0.26,lineHeight:1}}>🔥</span>
+</div>
+):null;
+if(player?.pfp)return <div style={{position:"relative",flexShrink:0,width:size,height:size}}><img src={player.pfp} alt={name} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"1.5px solid #2a2a2a"}}/>{badge}</div>;
+return <div style={{position:"relative",flexShrink:0,width:size,height:size}}><div style={{width:size,height:size,borderRadius:"50%",background:COLS[idx],display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:size*0.35,color:WHITE,flexShrink:0,border:"1.5px solid #2a2a2a"}}>{ini}</div>{badge}</div>;
 }
 
 function StatLine({game,max=3}){
@@ -1215,6 +1220,8 @@ const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.
 const hotStreak=useMemo(()=>computeHotStreak(pg),[pg]);
 const matchups=useMemo(()=>computeMatchups(pg),[pg]);
 const milestones=useMemo(()=>computeMilestones(pg),[pg]);
+const [showCard,setShowCard]=useState(false);
+const latestMonth=pg.length?gameYearMonth(pg[0]):currentMonthKey();
 const profileRef=useRef();
 const [exporting,setExporting]=useState(false);
 async function exportProfile(){
@@ -1358,10 +1365,120 @@ return(
 <div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap"}}>
 {isAdmin&&<button onClick={onEditPlayer} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>✏️ Bewerken</button>}
 {onCompare&&<button data-testid="compare-btn" onClick={()=>onCompare(player)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>⚖️ Vergelijk</button>}
+<button data-testid="open-card-btn" onClick={()=>setShowCard(true)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>🎴 Kaart</button>
 <button data-testid="export-profile-btn" onClick={exportProfile} disabled={exporting} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px",opacity:exporting?0.6:1}}>{exporting?"...":"📸 Export"}</button>
 <button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:15,cursor:"pointer",flex:"2 1 140px"}}>Sluiten</button>
 </div>
 </div>
+</div>
+{showCard&&<PlayerCardModal player={player} allGames={allGames} monthKey={latestMonth} onClose={()=>setShowCard(false)}/>}
+</div>
+);
+}
+
+// ── Player Trading Card (shareable monthly stat card)
+// Tiered purely on that month's performance — no randomness, no external assets (no live
+// GIF/sticker fetch), so the card always renders the same way for the same data and never
+// depends on a network call succeeding at export time.
+function cardTier(monthInfo,isMvp,streak){
+if(isMvp)return{label:"MVP",grad:"linear-gradient(160deg,#3a2a00,#1a0a00 60%,#000)",border:"#f5a524",glow:"rgba(245,165,36,0.45)",accent:"#f5a524"};
+if(streak>=3)return{label:"ON FIRE",grad:"linear-gradient(160deg,#3a0a00,#1a0500 60%,#000)",border:RED,glow:"rgba(232,49,42,0.4)",accent:RED};
+if(monthInfo&&monthInfo.eff>=20)return{label:"ELITE",grad:"linear-gradient(160deg,#0a1a3a,#0a0a1a 60%,#000)",border:"#5B9BD5",glow:"rgba(91,155,213,0.4)",accent:"#5B9BD5"};
+return{label:"PLAYER CARD",grad:"linear-gradient(160deg,#1a1a1a,#0d0d0d 60%,#000)",border:DARKGREY,glow:"rgba(255,255,255,0.08)",accent:GREY};
+}
+
+function PlayerCardModal({player,allGames,monthKey,onClose}){
+const [yr,mo]=monthKey.split("-");
+const monthLabel=`${MONTHS[parseInt(mo)-1]} ${yr}`;
+const pg=useMemo(()=>allGames.filter(g=>g.playerId===player.id&&gameYearMonth(g)===monthKey),[allGames,player.id,monthKey]);
+const allPgSorted=useMemo(()=>allGames.filter(g=>g.playerId===player.id).slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")),[allGames,player.id]);
+const streak=useMemo(()=>computeHotStreak(allPgSorted),[allPgSorted]);
+const eff=pg.length?parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1)):0;
+const wl=getWinLoss(pg);
+const stats=[["PTS",avg(pg,"pts")],["REB",avg(pg,"reb")],["AST",avg(pg,"ast")],["STL",avg(pg,"stl")],["BLK",avg(pg,"blk")]];
+
+// MVP that month = highest eff among players with a game that month, decided the same way
+// the monthly leaderboard decides it — recomputed here so the card never needs a prop drilled
+// in just to know "was this player MVP".
+const isMvp=useMemo(()=>{
+if(!pg.length)return false;
+const others=[...new Set(allGames.filter(g=>gameYearMonth(g)===monthKey).map(g=>g.playerId))];
+const effs=others.map(pid=>{
+const og=allGames.filter(g=>g.playerId===pid&&gameYearMonth(g)===monthKey);
+return{pid,eff:og.length?og.reduce((s,g)=>s+(+calcFps(g)),0)/og.length:-Infinity};
+});
+const best=effs.reduce((a,b)=>b.eff>a.eff?b:a,{pid:null,eff:-Infinity});
+return best.pid===player.id;
+},[allGames,monthKey,player.id,pg.length]);
+
+const tier=cardTier({eff},isMvp,streak);
+const cardRef=useRef();
+const [exporting,setExporting]=useState(false);
+
+async function exportCard(){
+if(!cardRef.current||!window.html2canvas)return;
+setExporting(true);
+try{
+const canvas=await window.html2canvas(cardRef.current,{backgroundColor:"#000",useCORS:true,scale:2});
+const link=document.createElement("a");
+link.download=`${player.name.replace(/\s+/g,"_")}_${monthKey}_kaart.png`;
+link.href=canvas.toDataURL("image/png");
+link.click();
+}catch(e){console.error("Kaart export mislukt:",e);}
+setExporting(false);
+}
+
+if(!pg.length)return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:260,padding:20}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#111",borderRadius:16,padding:24,textAlign:"center",maxWidth:320}}>
+<div style={{fontSize:36,marginBottom:10}}>🎴</div>
+<div style={{color:WHITE,fontWeight:700,marginBottom:6}}>Geen games in {monthLabel}</div>
+<div style={{color:GREY,fontSize:13,marginBottom:16}}>{player.name} heeft deze maand nog geen games gelogd, dus er is nog geen kaart om te maken.</div>
+<button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,width:"100%",cursor:"pointer"}}>Sluiten</button>
+</div>
+</div>
+);
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:260,padding:20,gap:18}}>
+<div ref={cardRef} onClick={e=>e.stopPropagation()} style={{width:300,borderRadius:20,background:tier.grad,border:`2px solid ${tier.border}`,boxShadow:`0 0 40px ${tier.glow}`,padding:18,position:"relative",overflow:"hidden"}}>
+{/* Subtle corner shine */}
+<div style={{position:"absolute",top:-60,right:-60,width:160,height:160,borderRadius:"50%",background:`radial-gradient(circle,${tier.glow},transparent 70%)`,pointerEvents:"none"}}/>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,position:"relative"}}>
+<div style={{color:tier.accent,fontSize:11,fontWeight:800,letterSpacing:2}}>{tier.label}</div>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"right"}}>{monthLabel.toUpperCase()}</div>
+</div>
+<div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:16,position:"relative"}}>
+<div style={{width:96,height:96,borderRadius:"50%",border:`3px solid ${tier.border}`,overflow:"hidden",marginBottom:10,background:"#1a1a1a",display:"flex",alignItems:"center",justifyContent:"center"}}>
+{player.pfp?<img src={player.pfp} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:30,fontWeight:800,color:WHITE}}>{player.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</span>}
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:20,textAlign:"center"}}>{player.name}</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>{player.position||"—"}{player.jersey?` · #${player.jersey}`:""}</div>
+{(isMvp||streak>=3)&&(
+<div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap",justifyContent:"center"}}>
+{isMvp&&<span style={{background:"#f5a52422",color:"#f5a524",border:"1px solid #f5a52455",borderRadius:10,padding:"3px 9px",fontSize:10,fontWeight:800}}>🏆 MVP VAN DE MAAND</span>}
+{streak>=3&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:10,padding:"3px 9px",fontSize:10,fontWeight:800}}>🔥 {streak}-STREAK</span>}
+</div>
+)}
+</div>
+<div style={{background:"rgba(255,255,255,0.05)",borderRadius:12,padding:"12px 4px",marginBottom:12,position:"relative"}}>
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4,textAlign:"center"}}>
+{stats.map(([l,v])=>(
+<div key={l}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{v}</div>
+<div style={{color:GREY,fontSize:9,fontWeight:700,marginTop:2}}>{l}</div>
+</div>
+))}
+</div>
+</div>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",position:"relative"}}>
+<div style={{color:GREY,fontSize:11}}>{pg.length} games · {wl.w}-{wl.l}{wl.d?`-${wl.d}`:""}</div>
+<div style={{color:tier.accent,fontWeight:800,fontSize:13}}>{eff} EFF</div>
+</div>
+</div>
+<div style={{display:"flex",gap:10,width:300}}>
+<button data-testid="export-card-btn" onClick={exportCard} disabled={exporting} style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer",opacity:exporting?0.6:1}}>{exporting?"...":"📸 Opslaan"}</button>
+<button onClick={onClose} style={{flex:1,background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer"}}>Sluiten</button>
 </div>
 </div>
 );
@@ -1371,6 +1488,7 @@ return(
 function MonthlyStats({games,players,onOpenPlayer}){
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
+const [cardFor,setCardFor]=useState(null); // player object or null
 
 // Build list of available months
 const availMonths=useMemo(()=>{
@@ -1497,7 +1615,7 @@ return(
 const titles=mvpCounts[mvp.player.id]||0;
 const stk=streakAt(selMonth,mvp.player.id);
 return (
-<div onClick={()=>openPlayer(mvp.player.id)} data-testid="mvp-of-month-card" style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:14,padding:"16px",marginBottom:20,cursor:"pointer",position:"relative"}}>
+<div data-testid="mvp-of-month-card" style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:14,padding:"16px",marginBottom:20,position:"relative"}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:2}}>🏆 MVP VAN DE MAAND</div>
 <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
@@ -1505,7 +1623,7 @@ return (
 {titles>=2&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🏆 {titles}× MVP</span>}
 </div>
 </div>
-<div style={{display:"flex",alignItems:"center",gap:14}}>
+<div onClick={()=>openPlayer(mvp.player.id)} style={{display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}>
 <Avatar player={mvp.player} size={56}/>
 <div style={{flex:1}}>
 <div style={{fontWeight:800,fontSize:20,color:WHITE}}>{mvp.player.name}</div>
@@ -1517,6 +1635,7 @@ return (
 </div>
 </div>
 </div>
+<button data-testid="open-card-mvp" onClick={()=>setCardFor(mvp.player)} style={{marginTop:12,width:"100%",background:"rgba(255,255,255,0.06)",border:"none",color:WHITE,borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>🎴 Maak spelerskaart</button>
 </div>
 );})()}
 
@@ -1540,8 +1659,8 @@ return (
 {playerStats.map((ps,i)=>(
 <div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
 <div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
-<Avatar player={ps.player} size={40}/>
-<div style={{flex:1,minWidth:0}}>
+<div onClick={()=>openPlayer(ps.player.id)} style={{cursor:"pointer"}}><Avatar player={ps.player} size={40}/></div>
+<div onClick={()=>openPlayer(ps.player.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
 <div style={{fontWeight:700,fontSize:15}}>{ps.player.name}</div>
 <div style={{color:GREY,fontSize:12}}>{ps.games.length}G · {ps.eff} eff</div>
 </div>
@@ -1550,6 +1669,7 @@ return (
 <div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:16}}>{v}</div><div style={{color:GREY,fontSize:10}}>{l}</div></div>
 ))}
 </div>
+<button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
 </div>
 ))}
 
@@ -1613,6 +1733,7 @@ return (
           })()}
 </>
 )}
+{cardFor&&<PlayerCardModal player={cardFor} allGames={games} monthKey={selMonth} onClose={()=>setCardFor(null)}/>}
 </div>
 );
 }
@@ -4572,6 +4693,7 @@ return(
 function BettingTab({players,games,betOdds,bets,wallets,userIp,isAdmin,betSlip,setBetSlip,showBetSlip,setShowBetSlip,onSaveBet,onSaveOdds,onSaveWallet,onVoidBet}){
 const {IS,BR,BG2}=styles();
 const [section,setSection]=useState("pts"); // pts|reb|ast|stl|blk|to|pra|pr|pa|futures|mybets|games
+const [histFilter,setHistFilter]=useState("all"); // all|open|won|lost|void — filters the "Mijn" bet history list
 const [adminOpen,setAdminOpen]=useState(false);
 
 // My wallet — new players start with €10
@@ -4740,16 +4862,51 @@ return(
 )}
 
 {/* MY BETS */}
-{section==="mybets"&&(
+{section==="mybets"&&(()=>{
+const settled=myBets.filter(b=>b.status&&b.status!=="open");
+const totalStaked=myBets.reduce((s,b)=>s+(b.stake||0),0);
+const totalReturned=settled.reduce((s,b)=>s+(b.finalPayout||0),0);
+const netPnl=parseFloat((totalReturned-settled.reduce((s,b)=>s+(b.stake||0),0)).toFixed(2));
+const wonCount=settled.filter(b=>b.status==="won").length;
+const lostCount=settled.filter(b=>b.status==="lost").length;
+const pushCount=settled.filter(b=>b.status==="void").length;
+const winRate=wonCount+lostCount>0?Math.round(wonCount/(wonCount+lostCount)*100):0;
+const filtered=histFilter==="all"?myBets:histFilter==="open"?myBets.filter(b=>!b.status||b.status==="open"):histFilter==="won"?myBets.filter(b=>b.status==="won"):histFilter==="lost"?myBets.filter(b=>b.status==="lost"):myBets.filter(b=>b.status==="void");
+return(
 <div style={{padding:"12px 16px 0"}}>
-{myBets.length===0&&(
-<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
-<div style={{fontSize:40,marginBottom:10}}>📁</div>
-<div style={{color:WHITE,fontWeight:600}}>Nog geen weddenschappen</div>
-<div style={{fontSize:13,marginTop:6}}>Selecteer props of futures en plaats je eerste weddenschap.</div>
+{myBets.length>0&&(
+<div style={{background:INPUTBG,borderRadius:14,padding:"14px 16px",marginBottom:14}}>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1}}>WIN/LOSS RESULTAAT</div>
+<div style={{color:netPnl>0?"#27AE60":netPnl<0?"#ff453a":GREY,fontWeight:800,fontSize:16}}>{netPnl>0?"+":""}€{netPnl.toFixed(2)}</div>
+</div>
+<div style={{display:"flex",gap:14}}>
+<div style={{flex:1}}><div style={{color:WHITE,fontWeight:800,fontSize:17}}>{winRate}%</div><div style={{color:GREY,fontSize:10}}>WIN RATE</div></div>
+<div style={{flex:1}}><div style={{color:"#27AE60",fontWeight:800,fontSize:17}}>{wonCount}</div><div style={{color:GREY,fontSize:10}}>GEWONNEN</div></div>
+<div style={{flex:1}}><div style={{color:"#ff453a",fontWeight:800,fontSize:17}}>{lostCount}</div><div style={{color:GREY,fontSize:10}}>VERLOREN</div></div>
+<div style={{flex:1}}><div style={{color:"#f5a524",fontWeight:800,fontSize:17}}>{pushCount}</div><div style={{color:GREY,fontSize:10}}>PUSH</div></div>
+</div>
+<div style={{display:"flex",justifyContent:"space-between",marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,fontSize:11,color:GREY}}>
+<span>Totaal ingezet: €{totalStaked.toFixed(2)}</span>
+<span>Totaal uitbetaald: €{totalReturned.toFixed(2)}</span>
+</div>
 </div>
 )}
-{myBets.map(bet=>{
+{myBets.length>0&&(
+<div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",paddingBottom:2}}>
+{[["all","Alles"],["open","Open"],["won","Gewonnen"],["lost","Verloren"],["void","Push/Void"]].map(([k,lbl])=>(
+<button key={k} data-testid={`hist-filter-${k}`} onClick={()=>setHistFilter(k)} style={{flexShrink:0,padding:"7px 13px",borderRadius:20,border:"none",cursor:"pointer",background:histFilter===k?RED:INPUTBG,color:histFilter===k?WHITE:GREY,fontWeight:histFilter===k?700:500,fontSize:12}}>{lbl}</button>
+))}
+</div>
+)}
+{filtered.length===0&&(
+<div style={{textAlign:"center",padding:"40px 20px",color:GREY}}>
+<div style={{fontSize:40,marginBottom:10}}>📁</div>
+<div style={{color:WHITE,fontWeight:600}}>{myBets.length===0?"Nog geen weddenschappen":"Geen weddenschappen in dit filter"}</div>
+{myBets.length===0&&<div style={{fontSize:13,marginTop:6}}>Selecteer props of futures en plaats je eerste weddenschap.</div>}
+</div>
+)}
+{filtered.map(bet=>{
 const isParlay=bet.isParlay;
 const statusColor=bet.status==="won"?"#27AE60":bet.status==="lost"?"#ff453a":bet.status==="void"?"#f5a524":GREY;
 return(
@@ -4762,12 +4919,15 @@ return(
 <div style={{fontWeight:700,fontSize:13,color:statusColor}}>{bet.status?.toUpperCase()||"OPEN"}</div>
 </div>
 {(bet.selections||[]).map((s,i)=>{
-const grade=bet.status==="open"?gradeSelection(s,games,players):null;
-const dot=bet.status!=="open"?null:grade==="win"?"#27AE60":grade==="loss"?"#ff453a":grade==="push"?"#f5a524":GREY;
+const isOpen=!bet.status||bet.status==="open";
+const grade=gradeSelection(s,games,players);
+const dot=isOpen?(grade==="win"?"#27AE60":grade==="loss"?"#ff453a":grade==="push"?"#f5a524":GREY):null;
+const settledLabel=isOpen?null:grade==="win"?{t:"WIN",c:"#27AE60"}:grade==="loss"?{t:"LOSS",c:"#ff453a"}:grade==="push"?{t:"PUSH",c:"#f5a524"}:null;
 return(
 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,gap:8}}>
 <span style={{color:GREY,fontSize:13,flex:1}}>{s.label}</span>
 {dot&&<span style={{width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0}}/>}
+{settledLabel&&<span style={{color:settledLabel.c,fontSize:10,fontWeight:800,flexShrink:0}}>{settledLabel.t}</span>}
 <span style={{color:RED,fontWeight:700,fontSize:13}}>{formatOdds(s.odds)}</span>
 </div>
 );
@@ -4775,7 +4935,7 @@ return(
 <div style={{borderTop:`1px solid ${DIVIDER}`,paddingTop:10,marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
 <div>
 <div style={{color:GREY,fontSize:12}}>Inzet: <span style={{color:WHITE,fontWeight:600}}>€{(bet.stake||0).toFixed(2)}</span></div>
-<div style={{color:GREY,fontSize:11,marginTop:2}}>{new Date(bet.placedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{new Date(bet.placedAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}{bet.settledAt&&bet.status!=="open"?` · uitgespeeld ${new Date(bet.settledAt).toLocaleDateString("nl-NL",{day:"numeric",month:"short"})}`:""}</div>
 </div>
 <div style={{textAlign:"right"}}>
 <div style={{color:GREY,fontSize:12}}>{bet.status==="open"||!bet.status?"Potentieel":"Uitbetaling"}</div>
@@ -4786,7 +4946,8 @@ return(
 );
 })}
 </div>
-)}
+);
+})()}
 
 {/* Bet Slip Overlay */}
 {showBetSlip&&(
@@ -5308,12 +5469,16 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 <RivalriesBar games={games} players={players} onOpenCompare={p=>setCompareTarget(p)}/>
 {players.map(p=>{
-const pg=games.filter(g=>g.playerId===p.id);
+const pg=games.filter(g=>g.playerId===p.id).slice().sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const streak=computeHotStreak(pg);
 return(
 <div key={p.id} onClick={()=>setModal({type:"playerProfile",pid:p.id})} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderBottom:`1px solid ${DIVIDER}`,cursor:"pointer"}}>
-<Avatar player={p} size={50}/>
+<Avatar player={p} size={50} streak={streak}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{fontWeight:700,fontSize:16,color:WHITE}}>{p.name}</div>
+<div style={{fontWeight:700,fontSize:16,color:WHITE,display:"flex",alignItems:"center",gap:6}}>
+{p.name}
+{streak>=3&&<span style={{background:"#E8312A22",color:"#E8312A",fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px",display:"flex",alignItems:"center",gap:2,flexShrink:0}}>🔥 {streak}</span>}
+</div>
 <div style={{color:GREY,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
 {p.position}{p.jersey?` · #${p.jersey}`:""} · {pg.length}G
 {p.favPlayer&&<span style={{color:RED}}> · ❤️ {p.favPlayer}</span>}

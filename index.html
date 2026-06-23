@@ -526,13 +526,29 @@ return(
 );
 }
 
-// Sixth Man Trophy — Number 6 stylized
-function SixthManIcon({size=28,color="#9B59B6",grayed=false}){
+// Kameleon Trophy — chameleon silhouette
+function SixthManIcon({size=28,color="#27AE60",grayed=false}){
 const c=grayed?"#5a5a5a":color;
 return(
 <svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
-<rect x="15" y="10" width="70" height="80" rx="12" fill={c}/>
-<text x="50" y="72" textAnchor="middle" fontSize="58" fontWeight="900" fontFamily="Arial" fill="rgba(255,255,255,0.92)">6</text>
+{/* body */}
+<ellipse cx="48" cy="58" rx="26" ry="16" fill={c}/>
+{/* head */}
+<ellipse cx="76" cy="48" rx="14" ry="11" fill={c}/>
+{/* eye */}
+<circle cx="82" cy="44" r="4" fill="rgba(255,255,255,0.9)"/>
+<circle cx="83" cy="43" r="2" fill="#111"/>
+{/* crest on head */}
+<path d="M70 38 C72 30 76 28 78 36" stroke={c} strokeWidth="4" fill="none" strokeLinecap="round"/>
+{/* tail curl */}
+<path d="M22 58 C10 62 6 72 14 76 C20 79 24 72 18 70" stroke={c} strokeWidth="5" fill="none" strokeLinecap="round"/>
+{/* legs */}
+<path d="M38 70 L32 84" stroke={c} strokeWidth="5" strokeLinecap="round"/>
+<path d="M54 72 L52 86" stroke={c} strokeWidth="5" strokeLinecap="round"/>
+<path d="M44 68 L40 82" stroke={c} strokeWidth="4" strokeLinecap="round"/>
+{/* tongue */}
+<path d="M88 50 L98 46" stroke="#E8312A" strokeWidth="3" strokeLinecap="round"/>
+<circle cx="98" cy="46" r="2.5" fill="#E8312A"/>
 </svg>
 );
 }
@@ -619,7 +635,7 @@ const AWARD_TYPES=[
 {id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
 {id:"dpoy",         label:"Defensive Player vd Maand", color:"#5B9BD5", Icon:DPOYIcon,     desc:"Defensive Player of the Month"},
 {id:"mip",          label:"Most Improved Player",      color:"#27AE60", Icon:MIPIcon,      desc:"Grootste verbetering"},
-{id:"sixth",        label:"Sixth Man vd Maand",        color:"#9B59B6", Icon:SixthManIcon, desc:"Beste invaller"},
+{id:"sixth",        label:"Kameleon vd Maand",         color:"#27AE60", Icon:SixthManIcon, desc:"De meest veelzijdige speler"},
 {id:"scoring",      label:"Scoring Title",             color:"#E8312A", Icon:ScoringIcon,  desc:"Meeste punten gem."},
 {id:"rebounds",     label:"Rebounds Title",            color:"#E67E22", Icon:ReboundsIcon, desc:"Meeste rebounds gem."},
 {id:"assists",      label:"Assists Title",             color:"#3498DB", Icon:AssistsIcon,  desc:"Meeste assists gem."},

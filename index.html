@@ -251,7 +251,7 @@ twitterUrl:saved.twitterUrl||"",
 twitterHandle:saved.twitterHandle||"",
 displayName:saved.displayName||"",
 avatarUrl:saved.avatarUrl||"",
-tweetSamples:Array.isArray(saved.tweetSamples)?saved.tweetSamples:[],
+tweetSamples:Array.isArray(saved.tweetSamples)?saved.tweetSamples.filter(t=>!tweetUnusableForRemix(t)):[],
 lastFetchedAt:saved.lastFetchedAt||null
 };
 });
@@ -259,13 +259,8 @@ lastFetchedAt:saved.lastFetchedAt||null
 function tweetUnusableForRemix(text){
 if(!text||text.length<8)return true;
 const t=String(text).toLowerCase();
-const block=[
-/\bbreaking\b/,\btrading\b/,\btraded\b/,\btrade for\b/,\bsources\b/,\breported\b/,\bper @/,\bvia @/,\bvia\s*\)/,
-/giannis|antetokounmpo|lebron|curry|durant|embiid|tatum|luka|doncic|shai|wembanyama/,
-/\b(nba|lakers|celtics|heat|bucks|warriors|nuggets|knicks|sixers|spurs|rockets|miami|boston|milwaukee)\b/,
-/nike concept|playoff city|centel/i
-];
-if(block.some(re=>re.test(t)))return true;
+const blockWords=["breaking","trading","traded","trade for","sources","reported","per @","via @","giannis","antetokounmpo","lebron","curry","durant","embiid","tatum","luka","doncic","shai","wembanyama","nba","lakers","celtics","heat","bucks","warriors","nuggets","knicks","sixers","spurs","rockets","miami","boston","milwaukee","nike concept","playoff city","centel"];
+if(blockWords.some(w=>t.includes(w)))return true;
 if(text.length>90)return true;
 return false;
 }

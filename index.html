@@ -225,7 +225,7 @@ if(stat.code===200&&Array.isArray(stat.results)){
 tweetSamples=stat.results
 .filter(r=>r&&r.type==="status"&&r.text&&!r.replying_to&&!/^RT @/i.test(r.text))
 .map(r=>String(r.text).replace(/https?:\/\/\S+/g,"").replace(/\s+/g," ").trim())
-.filter(t=>t.length>=8&&t.length<=280);
+.filter(t=>t.length>=8&&t.length<=280&&!tweetUnusableForRemix(t));
 }
 }
 let avatarUrl=user.avatar_url||"";
@@ -256,50 +256,126 @@ lastFetchedAt:saved.lastFetchedAt||null
 };
 });
 }
-function injectLbaStats(text,ctx){
-const v={
-topName:ctx.topName||"Someone",
-topPts:String(ctx.topPts??0),
-topEff:String(ctx.topEff??0),
-worstName:ctx.worstName||"Someone",
-worstPts:String(ctx.worstPts??0),
-margin:String(ctx.margin??0),
-winTeam:ctx.winTeam||"Team",
-loseTeam:ctx.loseTeam||"Team",
-mvpName:ctx.mvpName||ctx.topName||"Someone",
-mvpEff:String(ctx.mvpEff??0),
-topPpgName:ctx.topPpgName||ctx.topName||"Someone",
-topPpg:String(ctx.topPpg??0),
-streakName:ctx.streakName||ctx.topName||"Someone",
-streakCount:String(ctx.streakCount??0),
-targetHandle:ctx.targetHandle||"someone"
-};
-let base=String(text||"")
-.replace(/https?:\/\/\S+/g,"")
-.replace(/@\w+/g,"")
-.replace(/\s+/g," ")
-.trim();
-if(!base)return null;
-const wasCaps=base===base.toUpperCase()&&/[A-Z]{4,}/.test(base);
-const hooks=[
-()=>`${v.topName} (${v.topPts} pts): ${base}`,
-()=>`${base} — ${v.topName} had ${v.topPts} in our league tonight tho`,
-()=>`After that ${v.margin}-pt game: ${base}`,
-()=>`${v.worstName} with ${v.worstPts} and I'm thinking: ${base}`,
-()=>`${v.mvpName} at ${v.mvpEff} EFF and this is all I got: ${base}`,
-()=>`${v.streakName} on a ${v.streakCount}-game streak. ${base}`,
-()=>base.replace(/\b\d+\b/,v.topPts)
+function tweetUnusableForRemix(text){
+if(!text||text.length<8)return true;
+const t=String(text).toLowerCase();
+const block=[
+/\bbreaking\b/,\btrading\b/,\btraded\b/,\btrade for\b/,\bsources\b/,\breported\b/,\bper @/,\bvia @/,\bvia\s*\)/,
+/giannis|antetokounmpo|lebron|curry|durant|embiid|tatum|luka|doncic|shai|wembanyama/,
+/\b(nba|lakers|celtics|heat|bucks|warriors|nuggets|knicks|sixers|spurs|rockets|miami|boston|milwaukee)\b/,
+/nike concept|playoff city|centel/i
 ];
-let out=pick(hooks)();
+if(block.some(re=>re.test(t)))return true;
+if(text.length>90)return true;
+return false;
+}
+function normalizeBotCtx(ctx){
+const topName=ctx.topName||ctx.mvpName||ctx.topPpgName||null;
+const topPts=ctx.topPts??ctx.topPpg??null;
+return{
+...ctx,
+topName,
+topPts,
+topEff:ctx.topEff??ctx.mvpEff??null,
+worstName:ctx.worstName||null,
+worstPts:ctx.worstPts??null,
+margin:ctx.margin??null,
+winTeam:ctx.winTeam||null,
+loseTeam:ctx.loseTeam||null,
+mvpName:ctx.mvpName||topName||null,
+mvpEff:ctx.mvpEff??ctx.topEff??null,
+topPpgName:ctx.topPpgName||topName||null,
+topPpg:ctx.topPpg??topPts??null,
+streakName:ctx.streakName||topName||null,
+streakCount:ctx.streakCount??null,
+targetHandle:(ctx.targetHandle||"someone").replace(/^@/,"")
+};
+}
+function buildLeagueBotCtx(games,players){
+if(!players?.length||!games?.length)return null;
+const now=new Date();const cutoff=new Date(now);cutoff.setDate(now.getDate()-30);
+const recent=games.filter(g=>g.date&&new Date(g.date)>=cutoff);
+const stats=players.map(p=>{
+const pg=recent.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,ppg:parseFloat(avg(pg,"pts").toFixed(1))};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+if(!stats.length)return null;
+const mvp=stats[0];
+const worst=stats[stats.length-1];
+const topScorer=stats.slice().sort((a,b)=>b.ppg-a.ppg)[0];
+let streakName="",streakCount=0;
+players.forEach(p=>{
+const pg=games.filter(g=>g.playerId===p.id&&g.team!=="chameleon").slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+let streak=0;
+for(let i=pg.length-1;i>=0;i--){
+const g=pg[i];
+const myS=parseFloat(g.team==="A"?g.teamAScore:g.teamBScore),oppS=parseFloat(g.team==="A"?g.teamBScore:g.teamAScore);
+if(isNaN(myS)||isNaN(oppS))break;
+if(myS>oppS)streak++;else break;
+}
+if(streak>streakCount){streakCount=streak;streakName=p.name;}
+});
+return{
+topName:mvp.p.name,topPts:Math.round(mvp.ppg),topEff:mvp.eff,
+worstName:worst.p.name,worstPts:Math.round(worst.ppg),
+mvpName:mvp.p.name,mvpEff:mvp.eff,
+topPpgName:topScorer.p.name,topPpg:topScorer.ppg,
+streakName:streakName||mvp.p.name,streakCount:streakCount||1
+};
+}
+function extractReplyHandle(displayName,persona){
+if(persona?.twitterHandle)return persona.twitterHandle.replace(/^@/,"");
+const m=String(displayName||"").match(/@([A-Za-z0-9_]+)/);
+if(m)return m[1];
+const first=String(displayName||"").trim().split(/\s+/)[0];
+return first?first.replace(/[^A-Za-z0-9_]/g,""):"someone";
+}
+function lbaStatLine(ctx,kind){
+const v=normalizeBotCtx(ctx);
+const name=v.topName||v.mvpName;
+const pts=v.topPts??v.topPpg;
+if(!name||pts==null)return null;
+const gameLines=[
+`${name} with ${pts} pts in our league tonight${v.margin?` (${v.margin}-pt game)`:v.worstName?` — ${v.worstName} had ${v.worstPts}`:""}`,
+`${v.winTeam||"Team"} wins${v.margin?` by ${v.margin}`:""} and ${name} dropped ${pts}`,
+`${name} at ${v.topEff||pts} EFF and people still got takes`,
+];
+const idleLines=[
+`${v.mvpName} leading our league at ${v.mvpEff} EFF rn`,
+`${v.topPpgName} averaging ${v.topPpg} PPG in LBA — respect for now`,
+`${v.streakName} on a ${v.streakCount}-game W streak in our group`,
+];
+const pool=kind==="idle"?idleLines:kind==="reply"?[]:gameLines;
+if(!pool.length)return null;
+return pick(pool);
+}
+function injectLbaStats(text,ctx,kind){
+const stat=lbaStatLine(ctx,kind);
+if(!stat)return null;
+if(tweetUnusableForRemix(text)){
+return stat;
+}
+let frag=String(text).replace(/https?:\/\/\S+/g,"").replace(/@\w+/g,"").replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+)+\b/g,"").replace(/\s+/g," ").trim();
+if(frag.length<6||tweetUnusableForRemix(frag))return stat;
+const wasCaps=text===text.toUpperCase()&&/[A-Z]{4,}/.test(text);
+const outs=[
+`${stat}. ${frag.charAt(0).toUpperCase()+frag.slice(1)}`,
+`${frag} — ${stat}`,
+stat
+];
+let out=pick(outs);
 if(wasCaps)out=out.toUpperCase();
 return out.slice(0,280);
 }
-function generateFromTweetSamples(samples,ctx,toxicity){
+function generateFromTweetSamples(samples,ctx,toxicity,kind){
 if(!samples?.length)return null;
-const pool=[...samples];
+const pool=samples.filter(t=>!tweetUnusableForRemix(t));
+if(!pool.length)return null;
 for(let i=0;i<Math.min(5,pool.length);i++){
 const idx=Math.floor(Math.random()*pool.length);
-const remixed=injectLbaStats(pool.splice(idx,1)[0],ctx);
+const remixed=injectLbaStats(pool.splice(idx,1)[0],ctx,kind);
 if(remixed&&remixed.length>=12)return softenText(remixed,toxicity);
 }
 return null;
@@ -345,7 +421,7 @@ return out;
 // Game-reaction post, built from real stats of the match just logged
 function generateBotGamePost(persona,ctx,toxicity=3){
 if(persona.tweetSamples?.length){
-const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity);
+const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity,"game");
 if(fromTweet)return fromTweet;
 }
 const {topName,topPts,topEff,worstName,worstPts,margin,winTeam,loseTeam}=ctx;
@@ -406,7 +482,7 @@ return softenText(pick(banks[persona.style]||banks.washed),toxicity);
 // Unprompted hot take, not tied to one specific game
 function generateBotIdlePost(persona,ctx,toxicity=3){
 if(persona.tweetSamples?.length){
-const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity);
+const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity,"idle");
 if(fromTweet)return fromTweet;
 }
 const {mvpName,mvpEff,topPpgName,topPpg,streakName,streakCount}=ctx;
@@ -431,26 +507,26 @@ if(style==="oldhead")return "Back in my day this wouldn't fly, but anyway — "+
 return text;
 }
 function generateBotReply(persona,ctx,toxicity=3){
-if(persona.tweetSamples?.length){
-const fromTweet=generateFromTweetSamples(persona.tweetSamples,{...ctx,targetHandle:ctx.targetHandle},toxicity);
-if(fromTweet){
 const handle=(ctx.targetHandle||"someone").replace(/^@/,"");
-return softenText(`@${handle} ${fromTweet}`,toxicity);
-}
-}
-const {targetHandle}=ctx;
+const v=normalizeBotCtx(ctx);
+const name=v.mvpName||v.topName;
+const pts=v.topPts??v.topPpg;
 const disagree=[
-`@${targetHandle} you watched the same game I did?`,
-`@${targetHandle} stop it. Just stop. This isn't it.`,
-`@${targetHandle} you say this every single week lol, get some new material.`,
-`@${targetHandle} ratio + you're wrong + the numbers say otherwise.`,
-`@${targetHandle} this take aged badly the second you posted it.`
+`@${handle} you watched the same game I did?`,
+`@${handle} stop it. Just stop. This isn't it.`,
+`@${handle} you say this every single week lol, get some new material.`,
+`@${handle} ratio + you're wrong + the numbers say otherwise.`,
+`@${handle} this take aged badly the second you posted it.`
 ];
 const agree=[
-`@${targetHandle} FACTS. People are not ready for this conversation.`,
-`@${targetHandle} 100%, and I'll go further: it's worse than you think.`,
-`@${targetHandle} this is the only correct take ITT, everybody else is coping.`
+`@${handle} FACTS. People are not ready for this conversation.`,
+`@${handle} 100%, and I'll go further: it's worse than you think.`,
+`@${handle} this is the only correct take ITT, everybody else is coping.`
 ];
+if(name&&pts!=null){
+disagree.push(`@${handle} ${name} had ${pts} pts and you still posted that`);
+agree.push(`@${handle} ${name} at ${v.mvpEff||v.topEff||pts} EFF — facts`);
+}
 const text=Math.random()<0.65?pick(disagree):pick(agree);
 return softenText(flavorReply(persona.style,text),toxicity);
 }
@@ -5802,38 +5878,15 @@ const personas=effectivePersonas(botSettings);
 const toxicity=botSettings?.toxicity||3;
 const freq=freqConfig(botSettings?.postFrequency||2);
 function tryIdlePost(){
-if(!players.length||!games.length)return;
+const leagueCtx=buildLeagueBotCtx(games,players);
+if(!leagueCtx)return;
 const bucket=Math.floor(Date.now()/freq.idleBucketMs);
 const id=`auto-bot-idle-${bucket}`;
 if(larpPosts.find(p=>p.id===id))return;
-if(Math.random()>freq.idleChance)return; // natural stagger, avoids every client posting same bucket
-const now=new Date();const cutoff=new Date(now);cutoff.setDate(now.getDate()-30);
-const recent=games.filter(g=>g.date&&new Date(g.date)>=cutoff);
-const stats=players.map(p=>{
-const pg=recent.filter(g=>g.playerId===p.id);
-if(!pg.length)return null;
-const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
-return{p,eff,ppg:avg(pg,"pts")};
-}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
-if(!stats.length)return;
-const mvp=stats[0];
-const topScorer=stats.slice().sort((a,b)=>b.ppg-a.ppg)[0];
-let streakName="",streakCount=0;
-players.forEach(p=>{
-const pg=games.filter(g=>g.playerId===p.id&&g.team!=="chameleon").slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-let streak=0;
-for(let i=pg.length-1;i>=0;i--){
-const g=pg[i];
-const myS=parseFloat(g.team==="A"?g.teamAScore:g.teamBScore),oppS=parseFloat(g.team==="A"?g.teamBScore:g.teamAScore);
-if(isNaN(myS)||isNaN(oppS))break;
-if(myS>oppS)streak++;else break;
-}
-if(streak>streakCount){streakCount=streak;streakName=p.name;}
-});
-const ctx={mvpName:mvp.p.name,mvpEff:mvp.eff,topPpgName:topScorer.p.name,topPpg:topScorer.ppg,streakName:streakName||mvp.p.name,streakCount:streakCount||1};
+if(Math.random()>freq.idleChance)return;
 const persona=pick(personas);
 fbSave("larp_posts",{
-id,tempName:persona.handle,botId:persona.id,text:generateBotIdlePost(persona,ctx,toxicity),gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+id,tempName:persona.handle,botId:persona.id,text:generateBotIdlePost(persona,leagueCtx,toxicity),gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("Idle bot error:",e));
 }
@@ -5861,24 +5914,27 @@ if(Math.random()>chance)return;
 botReplyRanRef.current.add(post.id);
 const n=1+Math.floor(Math.random()*3); // 1-3 reply legs
 const candidates=randomBots(personas,n,originalPersona?[originalPersona.id]:[]);
+const leagueCtx=buildLeagueBotCtx(games,players)||{};
 let lastHandle=post.tempName||"someone";
+let lastPersona=originalPersona;
 candidates.forEach((persona,i)=>{
 setTimeout(()=>{
-const targetHandle=(lastHandle.match(/^[A-Za-z0-9_]+/)||[lastHandle])[0];
+const targetHandle=extractReplyHandle(lastHandle,lastPersona);
 fbSave("larp_replies",{
 id:`auto-bot-reply-${post.id}-${i}`,
 postId:post.id,
 tempName:persona.handle,
 botId:persona.id,
-text:generateBotReply(persona,{targetHandle},toxicity),
+text:generateBotReply(persona,{...leagueCtx,targetHandle},toxicity),
 gif:null,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("Bot reply error:",e));
 lastHandle=persona.handle;
+lastPersona=persona;
 },2000+i*(5000+Math.random()*8000));
 });
 });
-},[larpPosts,larpReplies,loading,botSettings]);
+},[larpPosts,larpReplies,loading,botSettings,games,players]);
 
 // ── LARP Bots: weekly refresh of cached X/Twitter tweets (FxTwitter, free)
 const botTwitterRefreshRef=useRef(false);

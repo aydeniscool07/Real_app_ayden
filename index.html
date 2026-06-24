@@ -178,6 +178,76 @@ const BOT_PERSONAS=[
 {id:"soft",handle:"SoftLabelSam 🧈",style:"soft"},
 {id:"washedwatch",handle:"WashedWatch 📉",style:"decline"}
 ];
+// ── LBAcentel — parody breaking news account (separate from BOT_PERSONAS roster)
+const LBACENTEL={
+id:"lbacentel",
+handle:"LBAcentel 🏀",
+style:"lbacentel",
+isMediaAccount:true
+};
+const LBACENTEL_SOURCES=["@LBAInsider","@TheAthletic_LBA","@LBAHQ","@WorldstarLBA","@TMZ_LBA","@LBABreaking","@ScoopsByLBA"];
+function lbaSource(){return pick(LBACENTEL_SOURCES);}
+function generateLBAcentelGamePost(ctx){
+const{topName,worstName,topPts,topEff,worstPts,margin,winTeam,loseTeam}=ctx;
+const n=topName||"A player";
+const w=worstName||"Another player";
+const sources=LBACENTEL_SOURCES;
+const templates=[
+// Under investigation
+`${w} under investigation for impersonating a basketball player during the game.`,
+`${n} under investigation for scoring ${topPts} points without a valid license.\n\n(Via ${lbaSource()})`,
+`${w} under investigation for making eye contact with a referee.\n\n(Via ${lbaSource()})`,
+`${w} under investigation for attempting to pass the ball.\n\n(Via ${lbaSource()})`,
+`${n} under investigation for celebrating a basket before it went in.\n\n(Via ${lbaSource()})`,
+// Fake insider
+`SOURCES: ${w} has requested a trade out of every team simultaneously.\n\n(Via ${lbaSource()})`,
+`SOURCES: The LBA is considering suspending ${w} for having a bad game.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${w} has officially been placed on the "Not That Guy" list.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${n} leaves the court visibly frustrated after ${w} missed another shot.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${w} posts ${worstPts} points and is now being referred to as a "role player" by sources close to the team.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${n} scores ${topPts} points. Doctors confirm he is built different.\n\n(Via ${lbaSource()})`,
+`BREAKING: The LBA is reviewing whether ${margin} points counts as a blowout.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${loseTeam} blown out by ${margin}. Commissioner has been notified.\n\n(Via ${lbaSource()})`,
+// Caps chaos
+`${w.toUpperCase()} JUST BLEW A ${margin}-POINT LEAD 😭😭😭`,
+`${w.toUpperCase()} DROPPED ${worstPts} POINTS AND LEFT THE COURT VISIBLY ALIVE 😭😭`,
+`${winTeam.toUpperCase()} WON BY ${margin} AND STILL LOOKED SCARED 😭😭😭`,
+// Deadpan absurd
+`${w} scored ${worstPts} points tonight. His family could not be reached for comment.`,
+`${n} had ${topPts} points and ${topEff} efficiency. He has since been escorted from the premises.`,
+`${w} turned the ball over and looked directly into the camera.`,
+`Sources say ${w} showed up to the game believing it was a different day.`,
+`${n} is currently averaging more points than ${w}. Authorities are aware.`,
+`${loseTeam} down ${margin}. The building has been evacuated as a precaution.\n\n(Via ${lbaSource()})`,
+`${w} did not score in the final minutes. This has been confirmed by multiple witnesses.`
+];
+return pick(templates);
+}
+function generateLBAcentelIdlePost(ctx){
+const{mvpName,topPpgName,topPpg,streakName,streakCount,mvpEff}=ctx;
+const n=mvpName||topPpgName||"A player";
+const s=streakName||topPpgName||n;
+const templates=[
+// Idle slander
+`${n} under investigation for being too comfortable at the top of the standings.\n\n(Via ${lbaSource()})`,
+`SOURCES: ${n} has been averaging ${mvpEff||"high"} efficiency. League officials are monitoring the situation.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${s} currently on a ${streakCount||3}-game win streak. A press conference has been scheduled for no reason.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${topPpgName} is averaging ${topPpg} points per game. His neighbors have been informed.\n\n(Via ${lbaSource()})`,
+`${n} seen at practice looking suspicious.\n\n(Via ${lbaSource()})`,
+`Sources say ${n} arrived at the gym before it opened. Investigation ongoing.\n\n(Via ${lbaSource()})`,
+`${n} is currently the best player in the LBA. He has not commented.`,
+`${s} is on a ${streakCount||3}-game streak and has been placed on a watchlist out of caution.\n\n(Via ${lbaSource()})`,
+`BREAKING: ${n} named Player of the Month by mistake. The error has not been corrected.\n\n(Via ${lbaSource()})`,
+`${n.toUpperCase()} IS THE BEST PLAYER IN THE LBA AND NOBODY WILL SAY IT 😭😭`,
+`${s.toUpperCase()} ON A ${streakCount||3}-GAME WIN STREAK. COMMISSIONER NOTIFIED. 😭😭😭`,
+`Multiple sources confirm ${topPpgName} is "that guy." Rival players yet to respond.\n\n(Via ${lbaSource()})`,
+`${n} averaging ${topPpg||"elite numbers"} per game. The math has been reported to the authorities.`,
+`${n} was asked about his efficiency and responded by staring blankly. Full press conference below.\n\n(Via ${lbaSource()})`,
+`The LBA has not officially commented on ${n}'s recent performances. Experts believe this is suspicious.`
+];
+return pick(templates);
+}
+
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
 function randomBots(list,n,exclude=[]){
 const pool=list.filter(b=>!exclude.includes(b.id));
@@ -3890,7 +3960,7 @@ return(
 {postReplies.length===0&&<div style={{color:GREY,fontSize:12,textAlign:"center",padding:10}}>Wees de eerste die reageert</div>}
 {postReplies.map(r=>(
 <div key={r.id} data-testid={`larp-reply-${r.id}`} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:`1px solid ${DIVIDER}`}}>
-<LarpAvatar name={r.tempName} avatarUrl={r.botId&&personaMap?personaMap[r.botId]?.avatarUrl:null} size={28}/>
+<LarpAvatar name={r.tempName} avatarUrl={r.botId&&personaMap?personaMap[r.botId]?.avatarUrl:null} size={28} botId={r.botId}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:2}}>
 <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{r.tempName}</span>
@@ -3909,13 +3979,16 @@ return(
 }
 
 // ── LARP Section (Twitter-like feed)
-function LarpAvatar({name,avatarUrl,size=40}){
+function LarpAvatar({name,avatarUrl,size=40,botId}){
 const initials=(name||"?").replace(/^@/,"").slice(0,2).toUpperCase();
 const [broken,setBroken]=useState(false);
 if(avatarUrl&&!broken){
 return <img src={avatarUrl} alt="" onError={()=>setBroken(true)} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",flexShrink:0,background:"#2a2a2a"}}/>;
 }
-return <div style={{width:size,height:size,borderRadius:"50%",background:`linear-gradient(135deg,${RED},#7a0000)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:Math.max(10,Math.round(size*0.35)),color:WHITE,flexShrink:0}}>{initials}</div>;
+const isLBAcentel=botId==="lbacentel"||(name||"").startsWith("LBAcentel");
+const bg=isLBAcentel?"linear-gradient(135deg,#e85d04,#9d0208)":`linear-gradient(135deg,${RED},#7a0000)`;
+const label=isLBAcentel?"🏀":initials;
+return <div style={{width:size,height:size,borderRadius:"50%",background:bg,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:isLBAcentel?Math.max(10,Math.round(size*0.45)):Math.max(10,Math.round(size*0.35)),color:WHITE,flexShrink:0}}>{label}</div>;
 }
 
 function BotSettingsModal({settings,onSave,onClose}){
@@ -4039,6 +4112,7 @@ const [pollVotes,setPollVotes]=useState(()=>{try{return JSON.parse(localStorage.
 const personaMap=useMemo(()=>{
 const m={};
 effectivePersonas(botSettings).forEach(p=>{m[p.id]=p;});
+m[LBACENTEL.id]={...LBACENTEL,avatarUrl:"",tweetSamples:[]};
 return m;
 },[botSettings]);
 const {IS,BR}=styles();
@@ -4095,7 +4169,7 @@ return (
 <div key={post.id} data-testid={`larp-post-${post.id}`} style={{background:post.pinned?"linear-gradient(135deg,#1a0a0a,#150505)":INPUTBG,borderRadius:14,padding:"14px",marginBottom:12,border:post.pinned?`1px solid ${RED}55`:"none"}}>
 {post.pinned&&<div style={{color:RED,fontSize:9,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>📌 GEPIIND</div>}
 <div style={{display:"flex",gap:10,marginBottom:8}}>
-<LarpAvatar name={post.tempName} avatarUrl={post.botId?personaMap[post.botId]?.avatarUrl:null} size={40}/>
+<LarpAvatar name={post.tempName} avatarUrl={post.botId?personaMap[post.botId]?.avatarUrl:null} size={40} botId={post.botId}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
 <span style={{fontWeight:700,fontSize:15,color:WHITE}}>{post.tempName}</span>
@@ -6205,6 +6279,64 @@ lastComment={...lastComment,id:`auto-bot-cmtreply-${parentCmt.id}-${i}`,tempName
 });
 });
 },[comments,games,players,loading,botSettings]);
+
+// ── LBAcentel: posts on game log (fake breaking news about that match)
+const lbacentelGameRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!games.length||!players.length)return;
+const eligible=games.filter(g=>{
+if(g.team==="chameleon")return false;
+const createdAfterLaunch=g.createdAt&&new Date(g.createdAt).getTime()>BOT_LAUNCH_EPOCH;
+const playedOnBackfill=g.date&&g.date>=BOT_BACKFILL_DATE;
+return createdAfterLaunch||playedOnBackfill;
+});
+// Group by matchId so we post once per match, not once per player
+const byMatch={};
+eligible.forEach(g=>{const mid=g.matchId||g.id;if(!byMatch[mid])byMatch[mid]=[];byMatch[mid].push(g);});
+Object.entries(byMatch).forEach(([mid,entries])=>{
+const postId=`auto-lbacentel-game-${mid}`;
+if(larpPosts.find(p=>p.id===postId))return;
+if(lbacentelGameRanRef.current.has(mid))return;
+lbacentelGameRanRef.current.add(mid);
+const ctx=buildLeagueBotCtx(games,players,mid)||{};
+// 1-2 posts per game with a delay between them
+const count=1+Math.floor(Math.random()*2);
+for(let i=0;i<count;i++){
+setTimeout(()=>{
+fbSave("larp_posts",{
+id:i===0?postId:`auto-lbacentel-game-${mid}-${i}`,
+tempName:LBACENTEL.handle,
+botId:LBACENTEL.id,
+text:generateLBAcentelGamePost(ctx),
+gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("LBAcentel game post error:",e));
+},1000+i*(6000+Math.random()*8000));
+}
+});
+},[games,players,larpPosts,loading]);
+
+// ── LBAcentel: idle posts (unprompted fake news throughout the day)
+useEffect(()=>{
+if(loading)return;
+function tryLBAcentelIdle(){
+const leagueCtx=buildLeagueBotCtx(games,players);
+if(!leagueCtx)return;
+const bucket=Math.floor(Date.now()/(55*60*1000)); // every ~55 min bucket
+const id=`auto-lbacentel-idle-${bucket}`;
+if(larpPosts.find(p=>p.id===id))return;
+if(Math.random()>0.65)return; // ~65% chance per check
+fbSave("larp_posts",{
+id,tempName:LBACENTEL.handle,botId:LBACENTEL.id,
+text:generateLBAcentelIdlePost(leagueCtx),
+gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("LBAcentel idle error:",e));
+}
+tryLBAcentelIdle();
+const interval=setInterval(tryLBAcentelIdle,4*60*1000);
+return()=>clearInterval(interval);
+},[loading,players,games,larpPosts]);
 
 // ── LARP Bots: weekly refresh of cached X/Twitter tweets (FxTwitter, free)
 const botTwitterRefreshRef=useRef(false);

@@ -162,9 +162,10 @@ const GIPHY_API_KEY="N5fhvGzKg3xVZvmEkmvkvZKeZyuXt6de";
 // TikTok-style stickers
 const STICKERS=["🔥","💯","👑","🏀","💪","🎯","⚡","🚀","💯","👀","😤","🤯","🔝","🏆","💎","🌟","✨","🎉","👏","💪"];
 
-// ── LARP Bots (fictional NBA-Twitter archetypes, not modeled on real accounts)
+// ── LARP Bots (linked to real X/Twitter accounts; voice remixed from cached tweets)
 const BOT_LAUNCH_EPOCH=1782252461995; // only react to games/posts created after this feature shipped
 const BOT_BACKFILL_DATE="2026-06-23"; // also react to matches actually played on this date, regardless of when logged
+const BOT_TWITTER_REFRESH_MS=7*24*60*60*1000;
 const BOT_PERSONAS=[
 {id:"coldtakes",handle:"ColdTakesKevin 🥶",style:"washed"},
 {id:"parlaypete",handle:"ParlayPete 🎟️",style:"parlay"},
@@ -187,12 +188,121 @@ out.push(pool.splice(i,1)[0]);
 }
 return out;
 }
-// Merge admin-saved handle overrides onto the base persona roster (style/id never change, only display name)
+function parseTwitterHandle(url){
+if(!url||typeof url!=="string")return null;
+const s=url.trim();
+if(!s)return null;
+if(/^@?[A-Za-z0-9_]{1,15}$/.test(s))return s.replace(/^@/,"");
+try{
+const u=new URL(s.startsWith("http")?s:"https://"+s);
+const host=u.hostname.replace(/^www\./,"");
+if(!["x.com","twitter.com","mobile.twitter.com"].includes(host))return null;
+const seg=u.pathname.split("/").filter(Boolean)[0];
+if(!seg||["home","search","i","intent","share"].includes(seg))return null;
+return seg;
+}catch(e){return null;}
+}
+function personaDisplayName(saved,base){
+if(saved?.displayName&&saved?.twitterHandle)return `${saved.displayName} @${saved.twitterHandle.replace(/^@/,"")}`;
+if(saved?.displayName)return saved.displayName;
+if(saved?.twitterHandle)return `@${saved.twitterHandle.replace(/^@/,"")}`;
+if(saved?.handle?.trim())return saved.handle.trim();
+return base.handle;
+}
+async function fetchTwitterBotData(handle){
+const h=encodeURIComponent(handle.replace(/^@/,""));
+const [profRes,statusRes]=await Promise.all([
+fetch(`https://api.fxtwitter.com/2/profile/${h}`),
+fetch(`https://api.fxtwitter.com/2/profile/${h}/statuses?count=30`)
+]);
+const prof=await profRes.json();
+if(!profRes.ok||prof.code!==200||!prof.user)throw new Error(prof.message||prof.reason||"Profiel niet gevonden");
+const user=prof.user;
+let tweetSamples=[];
+if(statusRes.ok){
+const stat=await statusRes.json();
+if(stat.code===200&&Array.isArray(stat.results)){
+tweetSamples=stat.results
+.filter(r=>r&&r.type==="status"&&r.text&&!r.replying_to&&!/^RT @/i.test(r.text))
+.map(r=>String(r.text).replace(/https?:\/\/\S+/g,"").replace(/\s+/g," ").trim())
+.filter(t=>t.length>=8&&t.length<=280);
+}
+}
+let avatarUrl=user.avatar_url||"";
+if(avatarUrl)avatarUrl=avatarUrl.replace("_normal.","_200x200.");
+return{
+twitterHandle:(user.screen_name||handle).replace(/^@/,""),
+displayName:user.name||user.screen_name||handle,
+avatarUrl,
+bio:user.description||"",
+tweetSamples:[...new Set(tweetSamples)].slice(0,25),
+lastFetchedAt:new Date().toISOString()
+};
+}
+// Merge admin-saved X account data onto the base persona roster (style/id never change)
 function effectivePersonas(settings){
 return BOT_PERSONAS.map(b=>{
 const saved=(settings?.personas||[]).find(p=>p.id===b.id);
-return(saved&&saved.handle&&saved.handle.trim())?{...b,handle:saved.handle.trim()}:b;
+if(!saved)return b;
+return{
+...b,
+handle:personaDisplayName(saved,b),
+twitterUrl:saved.twitterUrl||"",
+twitterHandle:saved.twitterHandle||"",
+displayName:saved.displayName||"",
+avatarUrl:saved.avatarUrl||"",
+tweetSamples:Array.isArray(saved.tweetSamples)?saved.tweetSamples:[],
+lastFetchedAt:saved.lastFetchedAt||null
+};
 });
+}
+function injectLbaStats(text,ctx){
+const v={
+topName:ctx.topName||"Someone",
+topPts:String(ctx.topPts??0),
+topEff:String(ctx.topEff??0),
+worstName:ctx.worstName||"Someone",
+worstPts:String(ctx.worstPts??0),
+margin:String(ctx.margin??0),
+winTeam:ctx.winTeam||"Team",
+loseTeam:ctx.loseTeam||"Team",
+mvpName:ctx.mvpName||ctx.topName||"Someone",
+mvpEff:String(ctx.mvpEff??0),
+topPpgName:ctx.topPpgName||ctx.topName||"Someone",
+topPpg:String(ctx.topPpg??0),
+streakName:ctx.streakName||ctx.topName||"Someone",
+streakCount:String(ctx.streakCount??0),
+targetHandle:ctx.targetHandle||"someone"
+};
+let base=String(text||"")
+.replace(/https?:\/\/\S+/g,"")
+.replace(/@\w+/g,"")
+.replace(/\s+/g," ")
+.trim();
+if(!base)return null;
+const wasCaps=base===base.toUpperCase()&&/[A-Z]{4,}/.test(base);
+const hooks=[
+()=>`${v.topName} (${v.topPts} pts): ${base}`,
+()=>`${base} — ${v.topName} had ${v.topPts} in our league tonight tho`,
+()=>`After that ${v.margin}-pt game: ${base}`,
+()=>`${v.worstName} with ${v.worstPts} and I'm thinking: ${base}`,
+()=>`${v.mvpName} at ${v.mvpEff} EFF and this is all I got: ${base}`,
+()=>`${v.streakName} on a ${v.streakCount}-game streak. ${base}`,
+()=>base.replace(/\b\d+\b/,v.topPts)
+];
+let out=pick(hooks)();
+if(wasCaps)out=out.toUpperCase();
+return out.slice(0,280);
+}
+function generateFromTweetSamples(samples,ctx,toxicity){
+if(!samples?.length)return null;
+const pool=[...samples];
+for(let i=0;i<Math.min(5,pool.length);i++){
+const idx=Math.floor(Math.random()*pool.length);
+const remixed=injectLbaStats(pool.splice(idx,1)[0],ctx);
+if(remixed&&remixed.length>=12)return softenText(remixed,toxicity);
+}
+return null;
 }
 // Posting-frequency presets admin can pick between (1=low,2=medium,3=high)
 function freqConfig(level){
@@ -234,6 +344,10 @@ return out;
 }
 // Game-reaction post, built from real stats of the match just logged
 function generateBotGamePost(persona,ctx,toxicity=3){
+if(persona.tweetSamples?.length){
+const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity);
+if(fromTweet)return fromTweet;
+}
 const {topName,topPts,topEff,worstName,worstPts,margin,winTeam,loseTeam}=ctx;
 const banks={
 washed:[
@@ -291,6 +405,10 @@ return softenText(pick(banks[persona.style]||banks.washed),toxicity);
 }
 // Unprompted hot take, not tied to one specific game
 function generateBotIdlePost(persona,ctx,toxicity=3){
+if(persona.tweetSamples?.length){
+const fromTweet=generateFromTweetSamples(persona.tweetSamples,ctx,toxicity);
+if(fromTweet)return fromTweet;
+}
 const {mvpName,mvpEff,topPpgName,topPpg,streakName,streakCount}=ctx;
 const banks={
 washed:[`${mvpName} leading in efficiency right now but we've seen this before. Hot start, cold finish. He's gonna fall off.`,`Don't get used to ${topPpgName} averaging ${topPpg} a game. It's a mirage.`],
@@ -313,6 +431,13 @@ if(style==="oldhead")return "Back in my day this wouldn't fly, but anyway — "+
 return text;
 }
 function generateBotReply(persona,ctx,toxicity=3){
+if(persona.tweetSamples?.length){
+const fromTweet=generateFromTweetSamples(persona.tweetSamples,{...ctx,targetHandle:ctx.targetHandle},toxicity);
+if(fromTweet){
+const handle=(ctx.targetHandle||"someone").replace(/^@/,"");
+return softenText(`@${handle} ${fromTweet}`,toxicity);
+}
+}
 const {targetHandle}=ctx;
 const disagree=[
 `@${targetHandle} you watched the same game I did?`,
@@ -3511,7 +3636,7 @@ return(
 }
 
 // ── LARP Replies (one-level nested would be okay; keeping flat per post)
-function LarpReplies({postId,replies,onAddReply,onDeleteReply,isAdmin}){
+function LarpReplies({postId,replies,onAddReply,onDeleteReply,isAdmin,personaMap}){
 const [tempName,setTempName]=useState("");
 const [text,setText]=useState("");
 const [selectedGif,setSelectedGif]=useState(null);
@@ -3539,7 +3664,7 @@ return(
 {postReplies.length===0&&<div style={{color:GREY,fontSize:12,textAlign:"center",padding:10}}>Wees de eerste die reageert</div>}
 {postReplies.map(r=>(
 <div key={r.id} data-testid={`larp-reply-${r.id}`} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:`1px solid ${DIVIDER}`}}>
-<div style={{width:28,height:28,borderRadius:"50%",background:"#2a2a2a",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,color:WHITE,flexShrink:0}}>{(r.tempName||"?").slice(0,2).toUpperCase()}</div>
+<LarpAvatar name={r.tempName} avatarUrl={r.botId&&personaMap?personaMap[r.botId]?.avatarUrl:null} size={28}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:2}}>
 <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{r.tempName}</span>
@@ -3558,20 +3683,77 @@ return(
 }
 
 // ── LARP Section (Twitter-like feed)
+function LarpAvatar({name,avatarUrl,size=40}){
+const initials=(name||"?").replace(/^@/,"").slice(0,2).toUpperCase();
+const [broken,setBroken]=useState(false);
+if(avatarUrl&&!broken){
+return <img src={avatarUrl} alt="" onError={()=>setBroken(true)} style={{width:size,height:size,borderRadius:"50%",objectFit:"cover",flexShrink:0,background:"#2a2a2a"}}/>;
+}
+return <div style={{width:size,height:size,borderRadius:"50%",background:`linear-gradient(135deg,${RED},#7a0000)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:Math.max(10,Math.round(size*0.35)),color:WHITE,flexShrink:0}}>{initials}</div>;
+}
+
 function BotSettingsModal({settings,onSave,onClose}){
-const base=effectivePersonas(settings);
 const [form,setForm]=useState({
 toxicity:settings?.toxicity||3,
 postFrequency:settings?.postFrequency||2,
-personas:base.map(b=>({id:b.id,handle:b.handle}))
+personas:BOT_PERSONAS.map(b=>{
+const saved=(settings?.personas||[]).find(p=>p.id===b.id)||{};
+return{
+id:b.id,
+styleLabel:b.handle,
+twitterUrl:saved.twitterUrl||"",
+displayName:saved.displayName||"",
+twitterHandle:saved.twitterHandle||"",
+avatarUrl:saved.avatarUrl||"",
+tweetSamples:Array.isArray(saved.tweetSamples)?saved.tweetSamples:[],
+lastFetchedAt:saved.lastFetchedAt||null
+};
+})
 });
+const [fetching,setFetching]=useState({});
+const [fetchErr,setFetchErr]=useState({});
+const [saving,setSaving]=useState(false);
 const {IS,BR,BG2}=styles();
-function setHandle(id,val){setForm(f=>({...f,personas:f.personas.map(p=>p.id===id?{...p,handle:val}:p)}));}
+function setTwitterUrl(id,val){setForm(f=>({...f,personas:f.personas.map(p=>p.id===id?{...p,twitterUrl:val}:p)}));}
+async function fetchOne(id){
+const p=form.personas.find(x=>x.id===id);
+const handle=parseTwitterHandle(p?.twitterUrl||"");
+if(!handle){setFetchErr(e=>({...e,[id]:"Geen geldige X/Twitter link"}));return;}
+setFetching(f=>({...f,[id]:true}));
+setFetchErr(e=>({...e,[id]:""}));
+try{
+const data=await fetchTwitterBotData(handle);
+setForm(f=>({...f,personas:f.personas.map(x=>x.id===id?{...x,...data,twitterUrl:p.twitterUrl}:x)}));
+}catch(err){
+setFetchErr(e=>({...e,[id]:err.message||"Fetch mislukt"}));
+}finally{
+setFetching(f=>({...f,[id]:false}));
+}
+}
+async function handleSave(){
+setSaving(true);
+let personas=[...form.personas];
+for(const p of personas){
+if(!p.twitterUrl)continue;
+const handle=parseTwitterHandle(p.twitterUrl);
+if(!handle)continue;
+if(!p.lastFetchedAt||!p.tweetSamples?.length){
+try{
+const data=await fetchTwitterBotData(handle);
+const i=personas.findIndex(x=>x.id===p.id);
+personas[i]={...personas[i],...data,twitterUrl:p.twitterUrl};
+}catch(e){console.warn("Auto-fetch on save failed:",handle,e);}
+}
+}
+onSave({toxicity:form.toxicity,postFrequency:form.postFrequency,personas:personas.map(({id,twitterUrl,displayName,twitterHandle,avatarUrl,tweetSamples,lastFetchedAt})=>({id,twitterUrl,displayName,twitterHandle,avatarUrl,tweetSamples,lastFetchedAt}))});
+setSaving(false);
+}
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
-<div style={{fontWeight:700,fontSize:18,marginBottom:16,textAlign:"center",color:WHITE}}>🤖 LARP Bot Instellingen</div>
+<div style={{fontWeight:700,fontSize:18,marginBottom:8,textAlign:"center",color:WHITE}}>🤖 LARP Bot Instellingen</div>
+<div style={{color:GREY,fontSize:12,textAlign:"center",marginBottom:16,lineHeight:1.4}}>Plak een X/Twitter link per bot. We halen profielfoto + recente tweets op (gratis, geen API key) en remixen die met LBA stats.</div>
 
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>TOXICITEIT</div>
 <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -3587,14 +3769,26 @@ return(
 ))}
 </div>
 
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>BOT NAMEN</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>X / TWITTER ACCOUNTS</div>
 {form.personas.map(p=>(
-<input key={p.id} style={{...IS,marginBottom:8}} value={p.handle} onChange={e=>setHandle(p.id,e.target.value)}/>
+<div key={p.id} style={{background:"#0a0a0a",borderRadius:12,padding:"10px 12px",marginBottom:10,border:"1px solid #222"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<LarpAvatar name={p.displayName||p.twitterHandle||p.styleLabel} avatarUrl={p.avatarUrl} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:13,color:WHITE}}>{p.displayName||p.styleLabel}</div>
+<div style={{color:GREY,fontSize:11}}>{p.twitterHandle?`@${p.twitterHandle.replace(/^@/,"")}`:"Nog geen account gekoppeld"}</div>
+{p.tweetSamples?.length>0&&<div style={{color:"#4ade80",fontSize:10,marginTop:2}}>{p.tweetSamples.length} tweets gecached{p.lastFetchedAt?` · ${new Date(p.lastFetchedAt).toLocaleDateString("nl-NL")}`:""}</div>}
+</div>
+<button onClick={()=>fetchOne(p.id)} disabled={!!fetching[p.id]||!parseTwitterHandle(p.twitterUrl||"")} style={{background:INPUTBG,color:WHITE,border:"1px solid #333",borderRadius:8,padding:"6px 10px",fontSize:11,cursor:"pointer",opacity:(!!fetching[p.id]||!parseTwitterHandle(p.twitterUrl||""))?0.5:1}}>{fetching[p.id]?"…":"Fetch"}</button>
+</div>
+<input placeholder="https://x.com/gebruikersnaam" style={{...IS,marginBottom:4,fontSize:13}} value={p.twitterUrl} onChange={e=>setTwitterUrl(p.id,e.target.value)}/>
+{fetchErr[p.id]&&<div style={{color:RED,fontSize:11,marginTop:2}}>{fetchErr[p.id]}</div>}
+</div>
 ))}
 
 <div style={{display:"flex",gap:10,marginTop:14}}>
 <button onClick={onClose} style={BG2}>Annuleer</button>
-<button onClick={()=>onSave(form)} style={BR}>💾 Opslaan</button>
+<button onClick={handleSave} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Bezig…":"💾 Opslaan"}</button>
 </div>
 </div>
 </div>
@@ -3616,6 +3810,11 @@ const [showBotSettings,setShowBotSettings]=useState(false);
 const [pollOpts,setPollOpts]=useState([]); // array of strings; empty = no poll
 const [likedLocal,setLikedLocal]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_likes")||"{}");}catch(e){return{};}});
 const [pollVotes,setPollVotes]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_poll_votes")||"{}");}catch(e){return{};}});
+const personaMap=useMemo(()=>{
+const m={};
+effectivePersonas(botSettings).forEach(p=>{m[p.id]=p;});
+return m;
+},[botSettings]);
 const {IS,BR}=styles();
 
 function submit(){
@@ -3670,7 +3869,7 @@ return (
 <div key={post.id} data-testid={`larp-post-${post.id}`} style={{background:post.pinned?"linear-gradient(135deg,#1a0a0a,#150505)":INPUTBG,borderRadius:14,padding:"14px",marginBottom:12,border:post.pinned?`1px solid ${RED}55`:"none"}}>
 {post.pinned&&<div style={{color:RED,fontSize:9,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>📌 GEPIIND</div>}
 <div style={{display:"flex",gap:10,marginBottom:8}}>
-<div style={{width:40,height:40,borderRadius:"50%",background:`linear-gradient(135deg,${RED},#7a0000)`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,color:WHITE,flexShrink:0}}>{(post.tempName||"?").slice(0,2).toUpperCase()}</div>
+<LarpAvatar name={post.tempName} avatarUrl={post.botId?personaMap[post.botId]?.avatarUrl:null} size={40}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap"}}>
 <span style={{fontWeight:700,fontSize:15,color:WHITE}}>{post.tempName}</span>
@@ -3718,7 +3917,7 @@ return(
 💬 {replyCount}
 </button>
 </div>
-{expanded&&<LarpReplies postId={post.id} replies={replies} onAddReply={onAddReply} onDeleteReply={onDeleteReply} isAdmin={isAdmin}/>}
+{expanded&&<LarpReplies postId={post.id} replies={replies} onAddReply={onAddReply} onDeleteReply={onDeleteReply} isAdmin={isAdmin} personaMap={personaMap}/>}
 </div>
 );
 };
@@ -5680,6 +5879,44 @@ lastHandle=persona.handle;
 });
 });
 },[larpPosts,larpReplies,loading,botSettings]);
+
+// ── LARP Bots: weekly refresh of cached X/Twitter tweets (FxTwitter, free)
+const botTwitterRefreshRef=useRef(false);
+useEffect(()=>{
+if(loading||!botSettings?.personas?.length)return;
+let cancelled=false;
+async function refreshStaleTwitter(){
+const now=Date.now();
+let personas=[...botSettings.personas];
+let changed=false;
+for(let i=0;i<personas.length;i++){
+const p=personas[i];
+if(!p.twitterUrl)continue;
+const handle=parseTwitterHandle(p.twitterUrl);
+if(!handle)continue;
+const last=p.lastFetchedAt?new Date(p.lastFetchedAt).getTime():0;
+if(last&&now-last<BOT_TWITTER_REFRESH_MS)continue;
+try{
+const data=await fetchTwitterBotData(handle);
+if(cancelled)return;
+personas[i]={...p,...data,twitterUrl:p.twitterUrl,id:p.id};
+changed=true;
+}catch(e){console.warn("Weekly Twitter refresh failed:",handle,e);}
+}
+if(changed&&!cancelled){
+try{
+await fbSave("bot_settings",{...botSettings,id:"config",personas});
+}catch(e){console.error("Bot settings refresh save error:",e);}
+}
+}
+if(!botTwitterRefreshRef.current){
+botTwitterRefreshRef.current=true;
+refreshStaleTwitter();
+}
+const interval=setInterval(refreshStaleTwitter,6*60*60*1000);
+return()=>{cancelled=true;clearInterval(interval);};
+},[loading,botSettings]);
+
 const migrationRanRef=useRef(false);
 useEffect(()=>{
 if(migrationRanRef.current||loading)return;

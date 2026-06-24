@@ -526,6 +526,161 @@ const text=Math.random()<0.65?pick(disagree):pick(agree);
 return softenText(flavorReply(persona.style,text),toxicity);
 }
 
+// ── Bot comment generators (performances + highlights)
+function generateBotPerfComment(persona,game,player,toxicity=3){
+const name=player?.name||"Someone";
+const pts=+game.pts||0,reb=+game.reb||0,ast=+game.ast||0,stl=+game.stl||0,blk=+game.blk||0,to=+game.to||0;
+const eff=parseFloat(calcFps(game));
+if(persona.tweetSamples?.length){
+const ctx={topName:name,topPts:pts,topEff:eff,worstName:name,worstPts:pts,margin:0,winTeam:"",loseTeam:""};
+const fromTweet=generateFromTweetSamples([...persona.tweetSamples],ctx,toxicity,"game");
+if(fromTweet)return fromTweet;
+}
+const banks={
+washed:[
+`${name} with ${pts}/${reb}/${ast}? I've seen better from guys who haven't played in a month. Washed behavior.`,
+`${eff} EFF. That's it? That's the line? ${name} is coasting and nobody's calling it out.`,
+`${pts} points and ${to} turnovers. Classic ${name}. All flash, no substance.`
+],
+parlay:[
+`Had ${name} OVER ${pts} on my parlay. He goes exactly ${pts}. Unbelievable. I hate this league.`,
+`${eff} EFF for ${name}... my model had him at ${Math.round(eff+3.5)}. Parlay Pete takes another L.`,
+`${ast} assists, ${to} turnovers. ${name} is literally gambling my money away for me.`
+],
+oldhead:[
+`${pts}/${reb}/${ast} back in my day was a quiet game. ${name} would've been benched for this.`,
+`${stl||0} steals, ${blk||0} blocks. Where's the defense? Old school ${name} would've had 5 steals easy.`,
+`Kids call ${eff} EFF a good game nowadays. We expected that every night, smh.`
+],
+statnerd:[
+`${name}'s ${eff} EFF tonight is ${eff>15?"above":"below"} his rolling average per my model. ${eff>15?"Trending up.":"Regression incoming."}`,
+`${pts} pts on what FG%? The raw numbers flatter him. True impact players post ${eff>18?"this":"better than this"}.`,
+`Assist-to-turnover ratio of ${ast}:${to} for ${name}. ${ast>to?"Positive.":"That's a problem. My model hates it."}`
+],
+caps:[
+`${(name).toUpperCase()} WITH ${pts}/${reb}/${ast} ARE WE SERIOUS RIGHT NOW`,
+`${eff} EFF??? ${(name).toUpperCase()} IS ${eff>15?"BUILT DIFFERENT":"A FRAUD AND THE NUMBERS CONFIRM IT"}`,
+`${pts} POINTS AND ${to} TURNOVERS FROM ${(name).toUpperCase()} I CANNOT`
+],
+ratio:[
+`${name} really posted ${pts}/${reb}/${ast} and thought that was enough. Ratio.`,
+`${eff} EFF. This you? Ratio.`,
+`${to} turnovers, ${pts} points. ${name} cooked himself. Ratio incoming.`
+],
+contrarian:[
+`Unpopular take: ${name}'s ${pts} points tonight actually hurt the team. The ball-stopping was real.`,
+`Everyone's praising ${name} for ${eff} EFF but the eye test says something different. Hot take but I stand on it.`,
+`${ast} assists sounds nice until you realize half were unforced. ${name} gets too much credit.`
+],
+rigged:[
+`${name} drops ${pts}/${reb}/${ast} exactly when it matters. Convenient. This league has some explaining to do.`,
+`${eff} EFF for ${name}. I'm not saying the matchups are rigged... but I'm not not saying it either.`,
+`${to} turnovers and ${name} still ends up looking good on the sheet? Something's off here.`
+],
+soft:[
+`${pts} points and ${name} still found a way to disappear when it got physical. Soft game.`,
+`${reb} rebounds for ${name}. In ${game.min||"??"} minutes. Soft effort on the glass.`,
+`${eff} EFF wrapped in a soft performance. ${name} needs to want it more.`
+],
+decline:[
+`Decline Watch — ${name}: ${pts} pts, ${eff} EFF. This is the third straight dip. Tracker says it's real.`,
+`Adding this ${name} line to the regression model. ${pts}/${reb}/${ast} doesn't look right for someone at his level.`,
+`${name} at ${eff} EFF tonight. For context, he was posting ${Math.round(eff+4.5)} earlier this season. Decline is real.`
+]
+};
+return softenText(pick(banks[persona.style]||banks.washed),toxicity);
+}
+
+function generateBotHighlightComment(persona,hl,player,toxicity=3){
+const name=player?.name||"Someone";
+const desc=hl.description||"that clip";
+const tags=(hl.tags||[]).join(", ");
+if(persona.tweetSamples?.length){
+const ctx={topName:name,topPts:0,topEff:0,worstName:name,worstPts:0,margin:0,winTeam:"",loseTeam:""};
+const fromTweet=generateFromTweetSamples([...persona.tweetSamples],ctx,toxicity,"idle");
+if(fromTweet)return fromTweet;
+}
+const banks={
+washed:[
+`${name} posting highlights now? Save it for when you're actually consistent.`,
+`Cool clip but I've seen ${name} go quiet for 3 straight games after a highlight. Just saying.`,
+`"${desc}" — cute. Wake me up when ${name} does this every week.`
+],
+parlay:[
+`Every time ${name} has a highlight like this I put money on him and he disappears. Every time.`,
+`Saw this clip and immediately built a parlay around ${name}. Already regretting it.`,
+`"${desc}" — this is exactly the ${name} performance I needed LAST game, not now.`
+],
+oldhead:[
+`Back in my day you didn't post the highlight, you just did it again next game. ${name} take notes.`,
+`I'll be impressed when ${name} strings these together. One clip means nothing.`,
+`Old school players made highlights every night. This shouldn't be a special occasion.`
+],
+statnerd:[
+`Interesting clip but highlights are a biased sample. What's ${name}'s sustainable efficiency behind this?`,
+`"${desc}" is visually impressive but one play doesn't move the needle statistically. Per my model.`,
+`${name} highlight noted. I'll update the tracker when there's a sample size worth analyzing.`
+],
+caps:[
+`"${desc.toUpperCase()}" ${(name).toUpperCase()} ARE YOU SERIOUS RIGHT NOW`,
+`THIS ${(name).toUpperCase()} HIGHLIGHT JUST BROKE MY BRAIN`,
+`${(name).toUpperCase()} SAID "${desc.toUpperCase()}" AND WALKED AWAY`
+],
+ratio:[
+`${name} posting this clip like it wasn't a one-time thing. Ratio.`,
+`"${desc}" — okay but the full game stats though? Ratio.`,
+`${name} highlight reel > ${name} actual consistency. Ratio.`
+],
+contrarian:[
+`Hot take: "${desc}" is getting too much hype. ${name} has done this before and disappeared.`,
+`I'm the only one who's gonna say it — this ${name} highlight was lucky positioning, not skill.`,
+`Everyone's going crazy over this clip but ${name}'s fundamentals still need work. Fight me.`
+],
+rigged:[
+`${name} always has a highlight clip right before a big game. Suspicious timing honestly.`,
+`"${desc}" — I want to see the 10 seconds before this clip. Something doesn't add up.`,
+`${name}'s highlights always look clean. A little too clean. Just saying.`
+],
+soft:[
+`One good play doesn't fix ${name}'s soft stretches. Nice clip though.`,
+`${name} posts a highlight and people forget he was invisible for two games straight. Soft memory.`,
+`"${desc}" — great. Now let's see ${name} do that when someone's actually pressing him.`
+],
+decline:[
+`Decline Watch: ${name} posting highlights to distract from the trend line. I see you.`,
+`Good clip but the tracker shows ${name}'s highlights are getting rarer. Regression is real.`,
+`"${desc}" is exactly the kind of thing ${name} used to do every game. Now it's a special occasion.`
+]
+};
+return softenText(pick(banks[persona.style]||banks.washed),toxicity);
+}
+
+function generateBotCommentReply(persona,parentComment,ctx,toxicity=3){
+const handle=(parentComment.tempName||"someone").replace(/\s+@.*/,"").trim();
+const name=ctx.topName||ctx.mvpName||"them";
+const disagree=[
+`@${handle} bro what are you watching lmao`,
+`@${handle} this is the worst take in this thread and that's saying something`,
+`@${handle} you say this every single time and you're wrong every single time`,
+`@${handle} ratio + you need to rewatch that clip`,
+`@${handle} I don't know what game you saw but it wasn't this one`
+];
+const agree=[
+`@${handle} EXACTLY. Nobody else is saying this but it's true`,
+`@${handle} finally someone with eyes in this comment section`,
+`@${handle} 100% and I'll go further — it's even worse than you think`,
+`@${handle} this is the only correct take here, everyone else is coping`
+];
+const neutral=[
+`@${handle} interesting take but the numbers tell a different story`,
+`@${handle} I partially agree but you're missing the bigger picture`,
+`@${handle} valid point, still think ${name} can bounce back though`
+];
+if(name){disagree.push(`@${handle} ${name}'s numbers literally contradict everything you just said`);agree.push(`@${handle} yes and ${name} at that efficiency proves it`);}
+const pool=Math.random()<0.5?disagree:Math.random()<0.6?agree:neutral;
+return softenText(flavorReply(persona.style,pick(pool)),toxicity);
+}
+
 // ── Helpers
 function compressImage(file,maxW=400,q=0.6){
 return new Promise(res=>{
@@ -5930,6 +6085,126 @@ lastPersona=persona;
 });
 });
 },[larpPosts,larpReplies,loading,botSettings,games,players]);
+
+// ── LARP Bots: comment under individual performances (per game entry)
+const botPerfCommentRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!games.length||!players.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+// Eligible games: logged after launch epoch OR played on/after backfill date
+const eligible=games.filter(g=>{
+if(g.team==="chameleon")return false;
+const createdAfterLaunch=g.createdAt&&new Date(g.createdAt).getTime()>BOT_LAUNCH_EPOCH;
+const playedOnBackfill=g.date&&g.date>=BOT_BACKFILL_DATE;
+return createdAfterLaunch||playedOnBackfill;
+});
+eligible.forEach(g=>{
+const baseId=`auto-bot-perfcmt-${g.id}-0`;
+if(comments.find(c=>c.id===baseId))return;
+if(botPerfCommentRanRef.current.has(g.id))return;
+botPerfCommentRanRef.current.add(g.id);
+const player=players.find(p=>p.id===g.playerId);
+const n=freq.gameBotsMin+Math.floor(Math.random()*(freq.gameBotsMax-freq.gameBotsMin+1));
+const bots=randomBots(personas,n);
+bots.forEach((persona,i)=>{
+setTimeout(()=>{
+fbSave("comments",{
+id:`auto-bot-perfcmt-${g.id}-${i}`,
+gameId:g.id,
+parentId:null,
+tempName:persona.handle,
+botId:persona.id,
+isBot:true,
+text:generateBotPerfComment(persona,g,player,toxicity),
+gif:null,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Bot perf comment error:",e));
+},2000+i*(4000+Math.random()*5000));
+});
+});
+},[games,players,comments,loading,botSettings]);
+
+// ── LARP Bots: comment under highlights
+const botHlCommentRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!highlights.length||!players.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+// Eligible highlights: created after launch epoch OR linked to a game on/after backfill date
+const eligible=highlights.filter(hl=>{
+const createdAfterLaunch=hl.createdAt&&new Date(hl.createdAt).getTime()>BOT_LAUNCH_EPOCH;
+const linkedGame=games.find(g=>(g.matchId||g.id)===hl.gameId||g.id===hl.gameId);
+const playedOnBackfill=linkedGame?linkedGame.date>=BOT_BACKFILL_DATE:false;
+return createdAfterLaunch||playedOnBackfill;
+});
+eligible.forEach(hl=>{
+const baseId=`auto-bot-hlcmt-${hl.id}-0`;
+if(comments.find(c=>c.id===baseId))return;
+if(botHlCommentRanRef.current.has(hl.id))return;
+botHlCommentRanRef.current.add(hl.id);
+const player=players.find(p=>p.id===hl.playerId);
+const n=1+Math.floor(Math.random()*(freq.gameBotsMax));
+const bots=randomBots(personas,n);
+bots.forEach((persona,i)=>{
+setTimeout(()=>{
+fbSave("comments",{
+id:`auto-bot-hlcmt-${hl.id}-${i}`,
+gameId:hl.id,
+parentId:null,
+tempName:persona.handle,
+botId:persona.id,
+isBot:true,
+text:generateBotHighlightComment(persona,hl,player,toxicity),
+gif:null,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Bot highlight comment error:",e));
+},2500+i*(4000+Math.random()*5000));
+});
+});
+},[highlights,games,players,comments,loading,botSettings]);
+
+// ── LARP Bots: reply to each other inside performance & highlight comment sections
+const botCommentReplyRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!comments.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+// Only reply to top-level bot comments under perfs/highlights (not larp replies)
+const botTopLevel=comments.filter(c=>c.isBot&&!c.parentId&&c.id.startsWith("auto-bot-"));
+botTopLevel.forEach(parentCmt=>{
+const replyBaseId=`auto-bot-cmtreply-${parentCmt.id}-0`;
+if(comments.find(c=>c.id===replyBaseId))return;
+if(botCommentReplyRanRef.current.has(parentCmt.id))return;
+const originalPersona=parentCmt.botId?personas.find(b=>b.id===parentCmt.botId):null;
+const chance=freq.replyChanceBot*0.7; // slightly less chatty than LARP
+if(Math.random()>chance)return;
+botCommentReplyRanRef.current.add(parentCmt.id);
+const n=1+Math.floor(Math.random()*2); // 1-2 reply legs
+const candidates=randomBots(personas,n,originalPersona?[originalPersona.id]:[]);
+const leagueCtx=buildLeagueBotCtx(games,players)||{};
+let lastComment=parentCmt;
+candidates.forEach((persona,i)=>{
+setTimeout(()=>{
+fbSave("comments",{
+id:`auto-bot-cmtreply-${parentCmt.id}-${i}`,
+gameId:parentCmt.gameId,
+parentId:lastComment.id,
+tempName:persona.handle,
+botId:persona.id,
+isBot:true,
+text:generateBotCommentReply(persona,lastComment,leagueCtx,toxicity),
+gif:null,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Bot comment reply error:",e));
+lastComment={...lastComment,id:`auto-bot-cmtreply-${parentCmt.id}-${i}`,tempName:persona.handle};
+},3000+i*(5000+Math.random()*7000));
+});
+});
+},[comments,games,players,loading,botSettings]);
 
 // ── LARP Bots: weekly refresh of cached X/Twitter tweets (FxTwitter, free)
 const botTwitterRefreshRef=useRef(false);

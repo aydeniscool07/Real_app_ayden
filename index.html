@@ -162,6 +162,174 @@ const GIPHY_API_KEY="N5fhvGzKg3xVZvmEkmvkvZKeZyuXt6de";
 // TikTok-style stickers
 const STICKERS=["🔥","💯","👑","🏀","💪","🎯","⚡","🚀","💯","👀","😤","🤯","🔝","🏆","💎","🌟","✨","🎉","👏","💪"];
 
+// ── LARP Bots (fictional NBA-Twitter archetypes, not modeled on real accounts)
+const BOT_LAUNCH_EPOCH=1782252461995; // only react to games/posts created after this feature shipped
+const BOT_BACKFILL_DATE="2026-06-23"; // also react to matches actually played on this date, regardless of when logged
+const BOT_PERSONAS=[
+{id:"coldtakes",handle:"ColdTakesKevin 🥶",style:"washed"},
+{id:"parlaypete",handle:"ParlayPete 🎟️",style:"parlay"},
+{id:"oldhead",handle:"OldHeadHoops94 👴",style:"oldhead"},
+{id:"statnerd",handle:"StatNerdSteph 🤓",style:"statnerd"},
+{id:"capslock",handle:"CAPSLOCKCARL 📢",style:"caps"},
+{id:"ratio",handle:"RatioRyan 💀",style:"ratio"},
+{id:"hottake",handle:"HotTakeHavoc 🌶️",style:"contrarian"},
+{id:"conspiracy",handle:"ConspiracyCourtney 👁️",style:"rigged"},
+{id:"soft",handle:"SoftLabelSam 🧈",style:"soft"},
+{id:"washedwatch",handle:"WashedWatch 📉",style:"decline"}
+];
+function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+function randomBots(list,n,exclude=[]){
+const pool=list.filter(b=>!exclude.includes(b.id));
+const out=[];
+while(out.length<n&&pool.length){
+const i=Math.floor(Math.random()*pool.length);
+out.push(pool.splice(i,1)[0]);
+}
+return out;
+}
+// Merge admin-saved handle overrides onto the base persona roster (style/id never change, only display name)
+function effectivePersonas(settings){
+return BOT_PERSONAS.map(b=>{
+const saved=(settings?.personas||[]).find(p=>p.id===b.id);
+return(saved&&saved.handle&&saved.handle.trim())?{...b,handle:saved.handle.trim()}:b;
+});
+}
+// Posting-frequency presets admin can pick between (1=low,2=medium,3=high)
+function freqConfig(level){
+const cfg={
+1:{idleBucketMs:180*60*1000,idleChance:0.2,gameBotsMin:1,gameBotsMax:2,replyChanceBot:0.5,replyChanceHuman:0.1},
+2:{idleBucketMs:90*60*1000,idleChance:0.35,gameBotsMin:2,gameBotsMax:3,replyChanceBot:0.85,replyChanceHuman:0.3},
+3:{idleBucketMs:45*60*1000,idleChance:0.55,gameBotsMin:3,gameBotsMax:4,replyChanceBot:0.95,replyChanceHuman:0.5}
+};
+return cfg[level]||cfg[2];
+}
+// Tone down generated text for lower toxicity settings (3=spicy/unhinged, as originally written; 2=medium; 1=mild)
+function softenText(text,toxicity){
+if(toxicity>=3||!text)return text;
+const swaps=[
+[/officially washed/gi,"maybe cooling off a bit"],
+[/\bwashed\b/gi,"a little inconsistent lately"],
+[/\bcooked\b/gi,"had a tough night"],
+[/\bdone\b\.?/gi,"out of rhythm."],
+[/Stick a fork in it\.?/gi,"hope he bounces back."],
+[/\bSoft\.?\s*Always been soft\.?/gi,"Not the most physical tonight."],
+[/\bsoft\b/gi,"a bit passive"],
+[/[Rr]atio\.?/g,"just saying."],
+[/\brigged\b/gi,"a bit suspicious"],
+[/\bembarrassed\b/gi,"outplayed"],
+[/\bfolded\b/gi,"settled down"],
+[/cannot be trusted/gi,"wasn't at his best"],
+[/Told y'all\.?/gi,"saw it coming a little."],
+[/disappear(s)?/gi,"quiet$1"]
+];
+let out=text;
+swaps.forEach(([re,rep])=>{out=out.replace(re,rep);});
+if(toxicity===1){
+out=out.replace(/!{2,}/g,".").replace(/\?{2,}/g,"?");
+if(out===out.toUpperCase()&&/[A-Z]{4,}/.test(out)){
+out=out.charAt(0)+out.slice(1).toLowerCase();
+}
+}
+return out;
+}
+// Game-reaction post, built from real stats of the match just logged
+function generateBotGamePost(persona,ctx,toxicity=3){
+const {topName,topPts,topEff,worstName,worstPts,margin,winTeam,loseTeam}=ctx;
+const banks={
+washed:[
+`${worstName} is officially washed. ${worstPts} points and looked done out there. Stick a fork in it.`,
+`Called it weeks ago. ${worstName} doesn't have it anymore.`,
+`${topName} cooked tonight but let's be honest, ${worstName} looked finished.`
+],
+parlay:[
+`My parlay needed ${topName} UNDER tonight and he drops ${topPts}. This league is not for me.`,
+`Hit because of ${topName}'s ${topEff} EFF game. PARLAY PETE IS BACK BABY.`,
+`Lost another leg because ${worstName} couldn't put the ball in the basket. Done betting on this group fr.`
+],
+oldhead:[
+`Back in my day a ${margin}-point blowout never happened, nobody plays defense anymore smh.`,
+`${topName} dropping ${topPts}? Cute. We used to do that with a hand in our face every possession.`,
+`This generation has no fundamentals. ${loseTeam} got cooked by ${margin} and nobody's surprised.`
+],
+statnerd:[
+`Per my model ${topName}'s ${topEff} EFF tonight is statistically elite for this group. Most of you wouldn't understand advanced metrics though.`,
+`${worstName} finished with a negative-impact game per my numbers. I don't make the stats, I just report them.`,
+`People are sleeping on how good ${topName}'s game was. The numbers don't lie, even if your eyes do.`
+],
+caps:[
+`${(topName||"").toUpperCase()} WENT OFF TONIGHT NO CAP ${topPts} POINTS THIS IS CRAZY`,
+`${margin}-POINT BLOWOUT??? SOMEBODY CHECK ON ${(loseTeam||"").toUpperCase()} THEY GOT EMBARRASSED`,
+`I DON'T CARE WHAT ANYBODY SAYS ${(worstName||"").toUpperCase()} CANNOT BE TRUSTED IN BIG MOMENTS`
+],
+ratio:[
+`${worstName} really thought ${worstPts} points was a good game huh. Ratio.`,
+`This you, ${worstName}? Lost by ${margin} and still smiling in the group chat.`,
+`Nobody asked but ${topName} popping off vs this competition isn't that impressive. Ratio incoming.`
+],
+contrarian:[
+`Unpopular opinion: ${topName}'s ${topPts}-point game was actually bad for the team. Hot take but I don't care.`,
+`Everyone's hyping ${topName} but ${worstName} was the real MVP tonight defensively. Fight me.`,
+`${margin}-point blowout and I still think ${loseTeam} were the better team. Don't @ me.`
+],
+rigged:[
+`Score was ${margin} apart and y'all really think that was legit? Sure.`,
+`Somebody explain how ${topName} gets every call. This whole league is rigged I swear.`,
+`${loseTeam} got cooked by ${margin} and nobody wants to talk about it. Curious.`
+],
+soft:[
+`${worstName} folded the second things got physical. Soft. Always been soft.`,
+`A ${margin}-point loss? Soft team, soft effort, soft everything.`,
+`${topName} can score but the second somebody bumps him he disappears. Soft game wrapped in a good box score.`
+],
+decline:[
+`Adding ${worstName} to the decline tracker. Game 3 of him not looking right. Told y'all.`,
+`${topName} still got it for now but the tracker says regression is coming. Write it down.`,
+`Decline Watch update: ${worstName}'s numbers have been trending down and tonight confirmed it.`
+]
+};
+return softenText(pick(banks[persona.style]||banks.washed),toxicity);
+}
+// Unprompted hot take, not tied to one specific game
+function generateBotIdlePost(persona,ctx,toxicity=3){
+const {mvpName,mvpEff,topPpgName,topPpg,streakName,streakCount}=ctx;
+const banks={
+washed:[`${mvpName} leading in efficiency right now but we've seen this before. Hot start, cold finish. He's gonna fall off.`,`Don't get used to ${topPpgName} averaging ${topPpg} a game. It's a mirage.`],
+parlay:[`Building a same-game parlay around ${mvpName} again. Last time I did this I lost my whole wallet. Doing it anyway.`,`${streakName} on a ${streakCount}-game streak so naturally I'm betting against it. Never learn.`],
+oldhead:[`${mvpEff} EFF leading the league? Back in my day that wouldn't even crack the top 5. Standards have dropped.`,`${streakName} on a heater but heaters didn't used to last this long, just saying.`],
+statnerd:[`${mvpName}'s ${mvpEff} EFF this month is actually elite when you adjust for competition level. Most of you are sleeping on it.`,`Did the math: ${topPpgName}'s ${topPpg} PPG is unsustainable long term. Regression incoming per my model.`],
+caps:[`${(mvpName||"").toUpperCase()} IS RUNNING THIS WHOLE LEAGUE RIGHT NOW AND NOBODY IS TALKING ABOUT IT`,`${(streakName||"").toUpperCase()} ON A ${streakCount}-GAME STREAK THIS IS ACTUALLY UNREAL`],
+ratio:[`${mvpName} leading the eff race rn. Cool. Ratio still applies.`,`${topPpgName} averaging ${topPpg}. Mid honestly. Ratio.`],
+contrarian:[`Everybody loves ${mvpName} right now but I think he's the most overrated guy in the group. There, I said it.`,`${streakName}'s streak means nothing, the schedule's been soft. Don't @ me.`],
+rigged:[`${mvpName} leading efficiency every single month? Suspicious. Just saying.`,`${streakName} on a ${streakCount}-game streak and somehow it's always against the same teams. Curious.`],
+soft:[`${mvpName} leads in efficiency but I've seen him disappear in the games that matter. Soft.`,`${streakName}'s streak is against soft competition. Means nothing.`],
+decline:[`Decline Watch: keeping an eye on ${topPpgName}, ${topPpg} PPG won't last. Tracker says drop coming.`,`${mvpName} on top now but the tracker has seen this story before. Regression loading.`]
+};
+return softenText(pick(banks[persona.style]||banks.washed),toxicity);
+}
+function flavorReply(style,text){
+if(style==="caps")return text.toUpperCase();
+if(style==="statnerd")return text+" (per my model)";
+if(style==="oldhead")return "Back in my day this wouldn't fly, but anyway — "+text;
+return text;
+}
+function generateBotReply(persona,ctx,toxicity=3){
+const {targetHandle}=ctx;
+const disagree=[
+`@${targetHandle} you watched the same game I did?`,
+`@${targetHandle} stop it. Just stop. This isn't it.`,
+`@${targetHandle} you say this every single week lol, get some new material.`,
+`@${targetHandle} ratio + you're wrong + the numbers say otherwise.`,
+`@${targetHandle} this take aged badly the second you posted it.`
+];
+const agree=[
+`@${targetHandle} FACTS. People are not ready for this conversation.`,
+`@${targetHandle} 100%, and I'll go further: it's worse than you think.`,
+`@${targetHandle} this is the only correct take ITT, everybody else is coping.`
+];
+const text=Math.random()<0.65?pick(disagree):pick(agree);
+return softenText(flavorReply(persona.style,text),toxicity);
+}
+
 // ── Helpers
 function compressImage(file,maxW=400,q=0.6){
 return new Promise(res=>{
@@ -3390,7 +3558,50 @@ return(
 }
 
 // ── LARP Section (Twitter-like feed)
-function LarpSection({posts,replies,games,players,onCreatePost,onDeletePost,onPinPost,onLikePost,onAddReply,onDeleteReply,isAdmin,onOpenPerf}){
+function BotSettingsModal({settings,onSave,onClose}){
+const base=effectivePersonas(settings);
+const [form,setForm]=useState({
+toxicity:settings?.toxicity||3,
+postFrequency:settings?.postFrequency||2,
+personas:base.map(b=>({id:b.id,handle:b.handle}))
+});
+const {IS,BR,BG2}=styles();
+function setHandle(id,val){setForm(f=>({...f,personas:f.personas.map(p=>p.id===id?{...p,handle:val}:p)}));}
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:16,textAlign:"center",color:WHITE}}>🤖 LARP Bot Instellingen</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>TOXICITEIT</div>
+<div style={{display:"flex",gap:8,marginBottom:18}}>
+{[{v:1,l:"Mild"},{v:2,l:"Medium"},{v:3,l:"Spicy 🌶️"}].map(o=>(
+<button key={o.v} onClick={()=>setForm(f=>({...f,toxicity:o.v}))} style={{flex:1,padding:"10px 0",borderRadius:10,border:form.toxicity===o.v?`1.5px solid ${RED}`:"1px solid #333",background:form.toxicity===o.v?RED:"transparent",color:WHITE,fontWeight:700,fontSize:13,cursor:"pointer"}}>{o.l}</button>
+))}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>POST FREQUENTIE</div>
+<div style={{display:"flex",gap:8,marginBottom:20}}>
+{[{v:1,l:"Laag"},{v:2,l:"Medium"},{v:3,l:"Hoog"}].map(o=>(
+<button key={o.v} onClick={()=>setForm(f=>({...f,postFrequency:o.v}))} style={{flex:1,padding:"10px 0",borderRadius:10,border:form.postFrequency===o.v?`1.5px solid ${RED}`:"1px solid #333",background:form.postFrequency===o.v?RED:"transparent",color:WHITE,fontWeight:700,fontSize:13,cursor:"pointer"}}>{o.l}</button>
+))}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>BOT NAMEN</div>
+{form.personas.map(p=>(
+<input key={p.id} style={{...IS,marginBottom:8}} value={p.handle} onChange={e=>setHandle(p.id,e.target.value)}/>
+))}
+
+<div style={{display:"flex",gap:10,marginTop:14}}>
+<button onClick={onClose} style={BG2}>Annuleer</button>
+<button onClick={()=>onSave(form)} style={BR}>💾 Opslaan</button>
+</div>
+</div>
+</div>
+);
+}
+
+function LarpSection({posts,replies,games,players,onCreatePost,onDeletePost,onPinPost,onLikePost,onAddReply,onDeleteReply,isAdmin,onOpenPerf,botSettings,onSaveBotSettings}){
 const [tempName,setTempName]=useState("");
 const [text,setText]=useState("");
 const [selectedGif,setSelectedGif]=useState(null);
@@ -3401,6 +3612,7 @@ const [showPerfPicker,setShowPerfPicker]=useState(false);
 const [expandedReplies,setExpandedReplies]=useState({});
 const [postAsRedactie,setPostAsRedactie]=useState(false);
 const [markOfficial,setMarkOfficial]=useState(false);
+const [showBotSettings,setShowBotSettings]=useState(false);
 const [pollOpts,setPollOpts]=useState([]); // array of strings; empty = no poll
 const [likedLocal,setLikedLocal]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_likes")||"{}");}catch(e){return{};}});
 const [pollVotes,setPollVotes]=useState(()=>{try{return JSON.parse(localStorage.getItem("larp_poll_votes")||"{}");}catch(e){return{};}});
@@ -3526,6 +3738,9 @@ Posten als Redactie 📰
 <input type="checkbox" checked={markOfficial} onChange={e=>setMarkOfficial(e.target.checked)} style={{accentColor:"#4FC3F7"}}/>
 LBA Official ✓
 </label>
+<button data-testid="larp-bot-settings-btn" onClick={()=>setShowBotSettings(true)} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:"1px solid #222"}}>
+🤖 Bot instellingen
+</button>
 </div>
 )}
 {!postAsRedactie&&<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>}
@@ -3567,6 +3782,7 @@ LBA Official ✓
 {showGifPicker&&<GifPicker onSelect={url=>{setSelectedGif(url);setShowGifPicker(false);}} onClose={()=>setShowGifPicker(false)}/>}
 {showStickerPicker&&<StickerPicker onSelect={s=>{setText(t=>t+s);setShowStickerPicker(false);}} onClose={()=>setShowStickerPicker(false)}/>}
 {showPerfPicker&&<PerfPicker games={games} players={players} onSelect={g=>{setSelectedPerf(g);setShowPerfPicker(false);}} onClose={()=>setShowPerfPicker(false)}/>}
+{showBotSettings&&<BotSettingsModal settings={botSettings} onSave={(s)=>{onSaveBotSettings&&onSaveBotSettings(s);setShowBotSettings(false);}} onClose={()=>setShowBotSettings(false)}/>}
 </div>
 );
 }
@@ -5169,6 +5385,7 @@ const [userIp,setUserIp]=useState("unknown");
 const [betSlip,setBetSlip]=useState([]);
 const [showBetSlip,setShowBetSlip]=useState(false);
 const [betAdminModal,setBetAdminModal]=useState(null);
+const [botSettings,setBotSettings]=useState(null);
 
 // Fetch user IP for wallet identification
 useEffect(()=>{
@@ -5221,6 +5438,10 @@ setHighlights(s.docs.map(d=>d.data()));
 },(err)=>console.error("Highlights listener error:",err));
 window._unsubHighlights=uH;
 _onSnapshot(_col(_db,"awards"),s=>{setManualAwards(s.docs.map(d=>d.data()));},(err)=>console.error("Awards listener error:",err));
+_onSnapshot(_col(_db,"bot_settings"),s=>{
+const docs=s.docs.map(d=>d.data());
+setBotSettings(docs.find(d=>d.id==="config")||null);
+},(err)=>console.error("Bot settings listener error:",err));
 }).catch(()=>{clearTimeout(timeout);setLoading(false);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
@@ -5329,7 +5550,136 @@ createdAt:new Date().toISOString()
 return()=>clearTimeout(t);
 },[games,players,larpPosts,loading]);
 
-// ── One-time migration: blog_posts → larp_posts
+// ── LARP Bots: react to every newly logged game with toxic NBA-Twitter takes
+const botGameRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!games.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+const matchIds=[...new Set(games.map(g=>g.matchId).filter(Boolean))].filter(mid=>{
+if(parseInt(mid)>BOT_LAUNCH_EPOCH)return true;
+// Backfill: also react to matches actually played on the requested date, regardless of when they were logged
+return games.some(g=>g.matchId===mid&&g.date===BOT_BACKFILL_DATE);
+});
+matchIds.forEach(mid=>{
+const baseId=`auto-bot-${mid}-0`;
+if(larpPosts.find(p=>p.id===baseId))return;
+if(botGameRanRef.current.has(mid))return;
+botGameRanRef.current.add(mid);
+const mg=games.filter(g=>g.matchId===mid);
+if(!mg.length)return;
+const withEff=mg.map(g=>({g,eff:parseFloat(calcFps(g))||0}));
+const top=withEff.slice().sort((a,b)=>b.eff-a.eff)[0];
+const worst=withEff.slice().sort((a,b)=>a.eff-b.eff)[0];
+const ref=mg.find(g=>g.teamAScore&&g.teamBScore)||mg[0];
+const tAS=parseFloat(ref.teamAScore)||0,tBS=parseFloat(ref.teamBScore)||0;
+const margin=Math.abs(tAS-tBS);
+const winTeam=tAS>=tBS?(ref.teamAName||"Team A"):(ref.teamBName||"Team B");
+const loseTeam=tAS>=tBS?(ref.teamBName||"Team B"):(ref.teamAName||"Team A");
+const topPlayer=players.find(p=>p.id===top.g.playerId);
+const worstPlayer=players.find(p=>p.id===worst.g.playerId);
+const ctx={topName:topPlayer?.name||"Someone",topPts:top.g.pts||0,topEff:top.eff,worstName:worstPlayer?.name||"Someone",worstPts:worst.g.pts||0,margin,winTeam,loseTeam};
+const n=freq.gameBotsMin+Math.floor(Math.random()*(freq.gameBotsMax-freq.gameBotsMin+1));
+randomBots(personas,n).forEach((persona,i)=>{
+setTimeout(()=>{
+fbSave("larp_posts",{
+id:`auto-bot-${mid}-${i}`,
+tempName:persona.handle,
+botId:persona.id,
+text:generateBotGamePost(persona,ctx,toxicity),
+gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Bot post error:",e));
+},1500+i*(4000+Math.random()*5000));
+});
+});
+},[games,players,larpPosts,loading,botSettings]);
+
+// ── LARP Bots: random unprompted hot takes throughout the day
+useEffect(()=>{
+if(loading)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+function tryIdlePost(){
+if(!players.length||!games.length)return;
+const bucket=Math.floor(Date.now()/freq.idleBucketMs);
+const id=`auto-bot-idle-${bucket}`;
+if(larpPosts.find(p=>p.id===id))return;
+if(Math.random()>freq.idleChance)return; // natural stagger, avoids every client posting same bucket
+const now=new Date();const cutoff=new Date(now);cutoff.setDate(now.getDate()-30);
+const recent=games.filter(g=>g.date&&new Date(g.date)>=cutoff);
+const stats=players.map(p=>{
+const pg=recent.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
+return{p,eff,ppg:avg(pg,"pts")};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+if(!stats.length)return;
+const mvp=stats[0];
+const topScorer=stats.slice().sort((a,b)=>b.ppg-a.ppg)[0];
+let streakName="",streakCount=0;
+players.forEach(p=>{
+const pg=games.filter(g=>g.playerId===p.id&&g.team!=="chameleon").slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+let streak=0;
+for(let i=pg.length-1;i>=0;i--){
+const g=pg[i];
+const myS=parseFloat(g.team==="A"?g.teamAScore:g.teamBScore),oppS=parseFloat(g.team==="A"?g.teamBScore:g.teamAScore);
+if(isNaN(myS)||isNaN(oppS))break;
+if(myS>oppS)streak++;else break;
+}
+if(streak>streakCount){streakCount=streak;streakName=p.name;}
+});
+const ctx={mvpName:mvp.p.name,mvpEff:mvp.eff,topPpgName:topScorer.p.name,topPpg:topScorer.ppg,streakName:streakName||mvp.p.name,streakCount:streakCount||1};
+const persona=pick(personas);
+fbSave("larp_posts",{
+id,tempName:persona.handle,botId:persona.id,text:generateBotIdlePost(persona,ctx,toxicity),gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Idle bot error:",e));
+}
+tryIdlePost();
+const interval=setInterval(tryIdlePost,3*60*1000);
+return()=>clearInterval(interval);
+},[loading,players,games,larpPosts,botSettings]);
+
+// ── LARP Bots: fight each other in the replies
+const botReplyRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!larpPosts.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+larpPosts.forEach(post=>{
+const postTime=new Date(post.createdAt||0).getTime();
+if(!postTime||postTime<BOT_LAUNCH_EPOCH)return;
+const baseId=`auto-bot-reply-${post.id}-0`;
+if(larpReplies.find(r=>r.id===baseId))return;
+if(botReplyRanRef.current.has(post.id))return;
+const originalPersona=post.botId?personas.find(b=>b.id===post.botId):null;
+const chance=originalPersona?freq.replyChanceBot:freq.replyChanceHuman;
+if(Math.random()>chance)return;
+botReplyRanRef.current.add(post.id);
+const n=1+Math.floor(Math.random()*3); // 1-3 reply legs
+const candidates=randomBots(personas,n,originalPersona?[originalPersona.id]:[]);
+let lastHandle=post.tempName||"someone";
+candidates.forEach((persona,i)=>{
+setTimeout(()=>{
+const targetHandle=(lastHandle.match(/^[A-Za-z0-9_]+/)||[lastHandle])[0];
+fbSave("larp_replies",{
+id:`auto-bot-reply-${post.id}-${i}`,
+postId:post.id,
+tempName:persona.handle,
+botId:persona.id,
+text:generateBotReply(persona,{targetHandle},toxicity),
+gif:null,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Bot reply error:",e));
+lastHandle=persona.handle;
+},2000+i*(5000+Math.random()*8000));
+});
+});
+},[larpPosts,larpReplies,loading,botSettings]);
 const migrationRanRef=useRef(false);
 useEffect(()=>{
 if(migrationRanRef.current||loading)return;
@@ -5439,6 +5789,7 @@ async function saveAward(a){setSaveStatus("saving");try{await fbSave("awards",a)
 async function deleteAward(id){setSaveStatus("saving");try{await fbDel("awards",id);showSaved();}catch(e){console.error(e);showError();}}
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
 async function saveBet(b){setSaveStatus("saving");try{await fbSave("bets",b);showSaved();}catch(e){console.error(e);showError();}}
+async function saveBotSettings(s){setSaveStatus("saving");try{await fbSave("bot_settings",{...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
 async function saveOddsOrWallet(obj,col){setSaveStatus("saving");try{await fbSave(col,obj);showSaved();}catch(e){console.error(e);showError();}}
 async function voidBet(bet){
 setSaveStatus("saving");
@@ -5608,7 +5959,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}
 
 {/* LARP TAB */}
-{tab==="larp"&&<LarpSection posts={larpPosts} replies={larpReplies} games={games} players={players} onCreatePost={createLarpPost} onDeletePost={deleteLarpPost} onPinPost={pinLarpPost} onLikePost={likeLarpPost} onAddReply={addLarpReply} onDeleteReply={deleteLarpReply} isAdmin={isAdmin} onOpenPerf={gid=>setModal({type:"perfDetail",gameId:gid})}/>}
+{tab==="larp"&&<LarpSection posts={larpPosts} replies={larpReplies} games={games} players={players} onCreatePost={createLarpPost} onDeletePost={deleteLarpPost} onPinPost={pinLarpPost} onLikePost={likeLarpPost} onAddReply={addLarpReply} onDeleteReply={deleteLarpReply} isAdmin={isAdmin} onOpenPerf={gid=>setModal({type:"perfDetail",gameId:gid})} botSettings={botSettings} onSaveBotSettings={saveBotSettings}/>}
 
 {/* PLAYERS TAB */}
 {tab==="players"&&(

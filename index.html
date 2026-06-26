@@ -249,6 +249,9 @@ return pick(templates);
 }
 
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+// Spawn-in like counts for LARP posts: linked/Twitter-fetched accounts (and LBAcentel) start hotter
+function rollLikes(linked){return linked?(1000+Math.floor(Math.random()*450)):(500+Math.floor(Math.random()*250));}
+function personaIsLinked(persona){return !!(persona&&(persona.twitterHandle||persona.isMediaAccount));}
 function randomBots(list,n,exclude=[]){
 const pool=list.filter(b=>!exclude.includes(b.id));
 const out=[];
@@ -4104,6 +4107,9 @@ const [showStickerPicker,setShowStickerPicker]=useState(false);
 const [showPerfPicker,setShowPerfPicker]=useState(false);
 const [expandedReplies,setExpandedReplies]=useState({});
 const [postAsRedactie,setPostAsRedactie]=useState(false);
+const [postAsLbacentel,setPostAsLbacentel]=useState(false);
+const [uploadingPhoto,setUploadingPhoto]=useState(false);
+const photoInputRef=useRef(null);
 const [markOfficial,setMarkOfficial]=useState(false);
 const [showBotSettings,setShowBotSettings]=useState(false);
 const [pollOpts,setPollOpts]=useState([]); // array of strings; empty = no poll
@@ -4118,23 +4124,38 @@ return m;
 const {IS,BR}=styles();
 
 function submit(){
-const name=postAsRedactie?"Redactie 📰":tempName.trim();
+const name=postAsLbacentel?LBACENTEL.handle:postAsRedactie?"Redactie 📰":tempName.trim();
 const validPollOpts=pollOpts.filter(o=>o&&o.trim());
 const hasPoll=validPollOpts.length>=2;
 if(!name||(!text.trim()&&!selectedGif&&!selectedPerf&&!hasPoll))return;
 onCreatePost({
 id:Date.now().toString()+"_"+Math.random().toString(36).slice(2,7),
 tempName:name,
+botId:postAsLbacentel?LBACENTEL.id:undefined,
 text:text.trim(),
 gif:selectedGif||null,
 performanceId:selectedPerf?.id||null,
-likes:0,
+likes:rollLikes(postAsLbacentel),
 pinned:false,
 official:isAdmin&&markOfficial,
 poll:hasPoll?{options:validPollOpts.map((t,i)=>({id:`opt_${i}`,text:t.trim(),votes:0}))}:null,
 createdAt:new Date().toISOString()
 });
 setText("");setSelectedGif(null);setSelectedPerf(null);setPollOpts([]);
+}
+
+// Upload an own photo for the post — compressed client-side to a small base64 JPEG
+// so it can be stored directly in the Firestore document (no paid Storage bucket needed).
+async function handlePhotoPick(e){
+const file=e.target.files&&e.target.files[0];
+if(e.target)e.target.value="";
+if(!file)return;
+setUploadingPhoto(true);
+try{
+const dataUrl=await compressImage(file,800,0.65);
+setSelectedGif(dataUrl);
+}catch(err){console.error("Foto upload mislukt:",err);}
+setUploadingPhoto(false);
 }
 
 function votePoll(post,optionId){
@@ -4230,8 +4251,12 @@ return(
 {isAdmin&&(
 <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
 <label data-testid="larp-admin-redactie" style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:postAsRedactie?`1px solid ${RED}`:"1px solid #222"}}>
-<input type="checkbox" checked={postAsRedactie} onChange={e=>setPostAsRedactie(e.target.checked)} style={{accentColor:RED}}/>
+<input type="checkbox" checked={postAsRedactie} onChange={e=>{setPostAsRedactie(e.target.checked);if(e.target.checked)setPostAsLbacentel(false);}} style={{accentColor:RED}}/>
 Posten als Redactie 📰
+</label>
+<label data-testid="larp-admin-lbacentel" style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:postAsLbacentel?"1px solid #e85d04":"1px solid #222"}}>
+<input type="checkbox" checked={postAsLbacentel} onChange={e=>{setPostAsLbacentel(e.target.checked);if(e.target.checked)setPostAsRedactie(false);}} style={{accentColor:"#e85d04"}}/>
+Posten als LBAcentel 🏀
 </label>
 <label data-testid="larp-admin-official" style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:WHITE,cursor:"pointer",background:"#0a0a0a",padding:"6px 10px",borderRadius:8,border:markOfficial?"1px solid #4FC3F7":"1px solid #222"}}>
 <input type="checkbox" checked={markOfficial} onChange={e=>setMarkOfficial(e.target.checked)} style={{accentColor:"#4FC3F7"}}/>
@@ -4242,7 +4267,7 @@ LBA Official ✓
 </button>
 </div>
 )}
-{!postAsRedactie&&<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>}
+{!postAsRedactie&&!postAsLbacentel&&<input placeholder="Tijdelijke naam" style={{...IS,marginBottom:8,fontSize:14}} value={tempName} onChange={e=>setTempName(e.target.value)}/>}
 <textarea placeholder="Wat speelt er...?" style={{...IS,minHeight:60,fontFamily:"inherit",resize:"vertical",fontSize:15,marginBottom:8}} value={text} onChange={e=>setText(e.target.value)}/>
 {selectedGif&&<div style={{position:"relative",marginBottom:8,display:"inline-block"}}><img src={selectedGif} alt="" style={{maxHeight:140,borderRadius:8}}/><button onClick={()=>setSelectedGif(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.7)",border:"none",borderRadius:"50%",width:24,height:24,color:WHITE,fontSize:12,cursor:"pointer"}}>✕</button></div>}
 {selectedPerf&&(
@@ -4268,11 +4293,13 @@ LBA Official ✓
 </div>
 )}
 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+<input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoPick} style={{display:"none"}}/>
+<button onClick={()=>photoInputRef.current&&photoInputRef.current.click()} disabled={uploadingPhoto} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600,opacity:uploadingPhoto?0.5:1}}>{uploadingPhoto?"⏳…":"📷 Foto"}</button>
 <button onClick={()=>setShowGifPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🎬 GIF</button>
 <button onClick={()=>setShowStickerPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>✨ Sticker</button>
 <button onClick={()=>setShowPerfPicker(true)} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>🏀 Performance</button>
 <button data-testid="larp-add-poll-btn" onClick={()=>setPollOpts(arr=>arr.length?arr:["",""])} style={{background:"transparent",color:RED,border:`1px solid ${RED}55`,borderRadius:20,padding:"6px 12px",fontSize:12,cursor:"pointer",fontWeight:600}}>📊 Poll</button>
-<button data-testid="larp-post-btn" onClick={submit} disabled={(!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:((!postAsRedactie&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2))?0.4:1}}>Larp 🐦</button>
+<button data-testid="larp-post-btn" onClick={submit} disabled={(!postAsRedactie&&!postAsLbacentel&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2)} style={{...BR,marginLeft:"auto",padding:"6px 18px",fontSize:13,opacity:((!postAsRedactie&&!postAsLbacentel&&!tempName.trim())||(!text.trim()&&!selectedGif&&!selectedPerf&&pollOpts.filter(o=>o.trim()).length<2))?0.4:1}}>Larp 🐦</button>
 </div>
 </div>
 {/* Feed */}
@@ -6005,7 +6032,7 @@ tempName:"LBA Bot 🤖",
 text,
 gif:null,
 performanceId:top.bestGame?.id||null,
-likes:0,
+likes:rollLikes(false),
 pinned:false,
 createdAt:new Date().toISOString()
 });
@@ -6037,7 +6064,7 @@ tempName:"LBA Bot 🤖",
 text,
 gif:null,
 performanceId:bestGame?.id||null,
-likes:0,
+likes:rollLikes(false),
 pinned:false,
 createdAt:new Date().toISOString()
 });
@@ -6087,7 +6114,7 @@ id:`auto-bot-${mid}-${i}`,
 tempName:persona.handle,
 botId:persona.id,
 text:generateBotGamePost(persona,ctx,toxicity),
-gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+gif:null,performanceId:null,likes:rollLikes(personaIsLinked(persona)),pinned:false,isBot:true,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("Bot post error:",e));
 },1500+i*(4000+Math.random()*5000));
@@ -6110,7 +6137,7 @@ if(larpPosts.find(p=>p.id===id))return;
 if(Math.random()>freq.idleChance)return;
 const persona=pick(personas);
 fbSave("larp_posts",{
-id,tempName:persona.handle,botId:persona.id,text:generateBotIdlePost(persona,leagueCtx,toxicity),gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+id,tempName:persona.handle,botId:persona.id,text:generateBotIdlePost(persona,leagueCtx,toxicity),gif:null,performanceId:null,likes:rollLikes(personaIsLinked(persona)),pinned:false,isBot:true,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("Idle bot error:",e));
 }
@@ -6308,7 +6335,7 @@ id:i===0?postId:`auto-lbacentel-game-${mid}-${i}`,
 tempName:LBACENTEL.handle,
 botId:LBACENTEL.id,
 text:generateLBAcentelGamePost(ctx),
-gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+gif:null,performanceId:null,likes:rollLikes(true),pinned:false,isBot:true,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("LBAcentel game post error:",e));
 },1000+i*(6000+Math.random()*8000));
@@ -6329,7 +6356,7 @@ if(Math.random()>0.65)return; // ~65% chance per check
 fbSave("larp_posts",{
 id,tempName:LBACENTEL.handle,botId:LBACENTEL.id,
 text:generateLBAcentelIdlePost(leagueCtx),
-gif:null,performanceId:null,likes:0,pinned:false,isBot:true,
+gif:null,performanceId:null,likes:rollLikes(true),pinned:false,isBot:true,
 createdAt:new Date().toISOString()
 }).catch(e=>console.error("LBAcentel idle error:",e));
 }
@@ -6399,7 +6426,7 @@ tempName:"Redactie 📰",
 text:text.trim()||"(geen content)",
 gif:bp.image||null,
 performanceId:null,
-likes:0,
+likes:rollLikes(false),
 pinned:!!bp.pinned,
 createdAt:bp.createdAt||new Date().toISOString()
 });

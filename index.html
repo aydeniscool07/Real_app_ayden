@@ -1560,6 +1560,128 @@ return(
 );
 }
 
+// ── NBA Player Comparison
+function NBAComparison({player,allGames}){
+const pg=allGames.filter(g=>g.playerId===player.id);
+const [result,setResult]=useState(null);
+const [loading,setLoading]=useState(false);
+const [err,setErr]=useState(null);
+const [open,setOpen]=useState(false);
+
+async function runComparison(){
+if(loading)return;
+setLoading(true);setErr(null);setResult(null);setOpen(true);
+const ppg=avg(pg,"pts"),rpg=avg(pg,"reb"),apg=avg(pg,"ast"),spg=avg(pg,"stl"),bpg=avg(pg,"blk"),topg=avg(pg,"to"),fgp=avg(pg,"fg"),threep=avg(pg,"threept");
+const eff=pg.length?parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1)):0;
+const prompt=`You are a basketball analyst. A player in a casual friend group basketball league has these career averages (games to 10 points, so stats are smaller scale than NBA):
+Name: ${player.name}
+Games: ${pg.length}
+PPG: ${ppg}, RPG: ${rpg}, APG: ${apg}, SPG: ${spg}, BPG: ${bpg}, TOV: ${topg}, FG%: ${fgp}, 3PT: ${threep}
+Efficiency score: ${eff} (formula: pts*1.2+reb*1.1+ast*1.5+stl*2+blk*2-to*1.5)
+Position: ${player.position||"unknown"}
+
+Scale-adjust for the smaller game format (games to 10 pts = roughly 3-4x smaller numbers than NBA).
+Pick the single best NBA player comparison and give a fun, specific, confident analysis.
+Respond ONLY with valid JSON (no markdown, no backticks) in this exact shape:
+{"nbaPlayer":"Full Name","era":"e.g. 2016–present","nickname":"e.g. The Slim Reaper","matchPct":87,"reason":"2-3 sentence explanation of WHY they match — specific stats, playstyle, tendencies","keyStats":["stat insight 1","stat insight 2","stat insight 3"],"verdict":"One punchy sentence, like a headline"}`;
+try{
+const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+const data=await res.json();
+const text=data.content.map(b=>b.text||"").join("");
+const clean=text.replace(/```json|```/g,"").trim();
+const parsed=JSON.parse(clean);
+setResult(parsed);
+}catch(e){setErr("Kon vergelijking niet laden. Probeer opnieuw.");}
+setLoading(false);
+}
+
+if(!open){
+return(
+<div style={{marginBottom:20}}>
+<button onClick={runComparison} style={{width:"100%",background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B655",borderRadius:14,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,textAlign:"left"}}>
+<span style={{fontSize:24}}>🏀</span>
+<div style={{flex:1}}>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:12,letterSpacing:1}}>NBA SPELER VERGELIJKING</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>Welke NBA-ster lijkt het meest op {player.name}?</div>
+</div>
+<span style={{color:GREY,fontSize:18}}>→</span>
+</button>
+</div>
+);
+}
+
+return(
+<div style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🏀 NBA VERGELIJKING</div>
+{loading&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B633",borderRadius:14,padding:"24px 16px",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+<div style={{fontSize:32,animation:"spin 1.5s linear infinite"}}>🔍</div>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:13}}>Vergelijkt met NBA database...</div>
+<div style={{color:GREY,fontSize:12}}>Analyseert speelstijl van {player.name}</div>
+<style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+</div>
+)}
+{err&&(
+<div style={{background:INPUTBG,borderRadius:14,padding:"16px",textAlign:"center"}}>
+<div style={{color:"#ff6b6b",marginBottom:8}}>{err}</div>
+<button onClick={runComparison} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontWeight:700}}>Opnieuw</button>
+</div>
+)}
+{result&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#120a1e)",border:"1px solid #9B59B688",borderRadius:14,overflow:"hidden"}}>
+{/* Header */}
+<div style={{padding:"16px 16px 12px",borderBottom:"1px solid #9B59B622"}}>
+<div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+<div style={{width:52,height:52,borderRadius:12,background:"linear-gradient(135deg,#9B59B6,#6C3483)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,flexShrink:0}}>🏀</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#9B59B6",fontSize:10,fontWeight:800,letterSpacing:1.5,marginBottom:2}}>{result.era||""}</div>
+<div style={{color:WHITE,fontWeight:900,fontSize:20,lineHeight:1.1}}>{result.nbaPlayer}</div>
+{result.nickname&&<div style={{color:GREY,fontSize:12,fontStyle:"italic",marginTop:2}}>"{result.nickname}"</div>}
+</div>
+<div style={{flexShrink:0,textAlign:"center"}}>
+<div style={{color:"#9B59B6",fontWeight:900,fontSize:28,lineHeight:1}}>{result.matchPct}%</div>
+<div style={{color:GREY,fontSize:10,fontWeight:700}}>MATCH</div>
+{/* Match bar */}
+<div style={{width:48,height:5,background:"#333",borderRadius:3,marginTop:4,overflow:"hidden"}}>
+<div style={{width:`${result.matchPct}%`,height:"100%",background:"linear-gradient(90deg,#9B59B6,#D7BDE2)",borderRadius:3}}/>
+</div>
+</div>
+</div>
+</div>
+{/* Verdict */}
+{result.verdict&&(
+<div style={{padding:"12px 16px",borderBottom:"1px solid #9B59B622",background:"rgba(155,89,182,0.08)"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14,lineHeight:1.4,fontStyle:"italic"}}>"{result.verdict}"</div>
+</div>
+)}
+{/* Reason */}
+<div style={{padding:"12px 16px",borderBottom:"1px solid #9B59B622"}}>
+<div style={{color:GREY,fontSize:13,lineHeight:1.6}}>{result.reason}</div>
+</div>
+{/* Key stats */}
+{result.keyStats&&result.keyStats.length>0&&(
+<div style={{padding:"12px 16px"}}>
+<div style={{color:"#9B59B6",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:8}}>WAAROM</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{result.keyStats.map((s,i)=>(
+<div key={i} style={{display:"flex",alignItems:"flex-start",gap:8}}>
+<span style={{color:"#9B59B6",fontWeight:800,fontSize:12,marginTop:1}}>·</span>
+<span style={{color:WHITE,fontSize:12,lineHeight:1.5}}>{s}</span>
+</div>
+))}
+</div>
+</div>
+)}
+{/* Refresh */}
+<div style={{padding:"8px 16px 12px",borderTop:"1px solid #9B59B622"}}>
+<button onClick={runComparison} style={{background:"transparent",border:"1px solid #9B59B633",borderRadius:8,padding:"6px 12px",color:GREY,fontSize:11,cursor:"pointer",fontWeight:600}}>🔄 Opnieuw analyseren</button>
+</div>
+</div>
+)}
+</div>
+);
+}
+
 // ── Admin: Give Awards Modal
 function AwardGiveModal({players,manualAwards,onSave,onDelete,onClose}){
 const {IS,BR,BG2}=styles();
@@ -2009,6 +2131,7 @@ return(
 </div>
 )}
 <TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards}/>
+{pg.length>=3&&<NBAComparison player={player} allGames={allGames}/>}
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
 return(

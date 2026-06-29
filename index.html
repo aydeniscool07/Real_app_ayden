@@ -568,6 +568,72 @@ decline:[`Decline Watch: keeping an eye on ${topPpgName}, ${topPpg} PPG won't la
 };
 return softenText(pick(banks[persona.style]||banks.washed),toxicity);
 }
+// Pre-game hype/trash-talk post for a scheduled matchday — expectations + the usual toxic slander
+function generateBotHypePost(persona,ctx,toxicity=3){
+const {teamA,teamB,hypeName,rivalName,injuredName,injuredStatus,injuredReason}=ctx;
+const banks={
+washed:[
+`${rivalName} is washed, tonight's the night everybody finds out. ${teamA} vs ${teamB} gonna expose it.`,
+`Calling it now, ${hypeName} shows up and ${rivalName} disappears like always tonight.`,
+`${teamA} vs ${teamB} tonight and I already know ${rivalName} doesn't show up in the big one.`
+],
+parlay:[
+`Putting my whole wallet on ${hypeName} going off tonight. ${teamA} vs ${teamB}, lock it in.`,
+`Same-game parlay loading for tonight: ${hypeName} over, ${rivalName} under. Don't @ me when I'm right.`,
+`${teamA} vs ${teamB} tonight, I'm betting big on ${hypeName}. Last time I did this I lost everything. Doing it anyway.`
+],
+oldhead:[
+`Back in my day a game like ${teamA} vs ${teamB} actually meant something. Let's see if this generation shows up.`,
+`${hypeName} better bring it tonight, we used to play through actual contact.`,
+`${teamA} vs ${teamB}, I'll believe the hype when I see it. Talk is cheap.`
+],
+statnerd:[
+`Per my model ${hypeName} has the statistical edge tonight against ${teamB}. Most of you won't get it but the numbers are clear.`,
+`${teamA} vs ${teamB}: my projection has ${hypeName} putting up a big EFF number tonight. Bookmark this.`,
+`Ran the numbers on tonight's ${teamA} vs ${teamB} matchup. It's not close on paper.`
+],
+caps:[
+`${(teamA||"").toUpperCase()} VS ${(teamB||"").toUpperCase()} TONIGHT LETS GOOOO`,
+`${(hypeName||"").toUpperCase()} ABOUT TO GO OFF TONIGHT I CAN FEEL IT`,
+`NOBODY IS READY FOR WHAT ${(hypeName||"").toUpperCase()} IS ABOUT TO DO TONIGHT`
+],
+ratio:[
+`${rivalName} hyping himself up pregame again. Ratio incoming after tipoff.`,
+`${teamA} vs ${teamB} tonight, ${rivalName} talking big. We'll see. Ratio loading.`,
+`Cute that ${rivalName} thinks tonight's any different. Ratio.`
+],
+contrarian:[
+`Everybody's picking ${hypeName} tonight, I'm fading him. Unpopular but I don't care.`,
+`Hot take before tipoff: ${teamB} actually wins tonight. Don't @ me.`,
+`${teamA} vs ${teamB} hype is overblown. I've seen this movie before.`
+],
+rigged:[
+`Curious how ${hypeName} always plays well right when the schedule favors him. Tonight's no different I bet.`,
+`${teamA} vs ${teamB} tonight — something tells me the refs already know who's winning.`,
+`Lineups for tonight look suspiciously convenient. Just saying.`
+],
+soft:[
+`${rivalName} gonna fold the second tonight's game gets physical, watch.`,
+`${teamA} vs ${teamB} tonight, we'll see who's actually built for this or who's soft.`,
+`Talk is easy pregame. Let's see who's soft when the game's actually on the line tonight.`
+],
+decline:[
+`Decline Watch heading into tonight: keeping a close eye on ${rivalName}. Trend's not good.`,
+`Tonight's ${teamA} vs ${teamB} could be the game the tracker's been warning about for ${rivalName}.`,
+`${hypeName} still got it for now, but tonight's the kind of game that starts the slide for ${rivalName}.`
+]
+};
+let pool=banks[persona.style]||banks.washed;
+if(injuredName&&injuredStatus){
+const statusWord=injuredStatus==="out"?"OUT":"questionable";
+pool=pool.concat([
+`${injuredName} suddenly ${statusWord} right before tonight's ${teamA} vs ${teamB}? Sure, convenient timing.`,
+`Hearing ${injuredName} is ${statusWord} for tonight${injuredReason?` (${injuredReason})`:""}. Huge if true.`,
+`If ${injuredName} really sits tonight, this whole game changes. ${statusWord==="OUT"?"Book it.":"Watch this space."}`
+]);
+}
+return softenText(pick(pool),toxicity);
+}
 function flavorReply(style,text){
 if(style==="caps")return text.toUpperCase();
 if(style==="statnerd")return text+" (per my model)";
@@ -913,6 +979,17 @@ return(
 <span style={{fontSize:13,fontWeight:500,color:GREY}}>{STAT_SMALL[k]}</span>
 </span>
 ))}
+</div>
+);
+}
+
+// Small pill used in the MVP Race section to show one possible statistical "path" to the needed eff
+function PathChip({label,value,sub}){
+return(
+<div style={{background:"rgba(255,255,255,0.05)",border:"1px solid #2a2a2a",borderRadius:12,padding:"10px 14px",minWidth:130,flex:"1 1 130px"}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>{label}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:2}}>{value}</div>
+<div style={{color:GREY,fontSize:10.5,lineHeight:1.4}}>{sub}</div>
 </div>
 );
 }
@@ -2291,6 +2368,14 @@ return (
 
             const todayStr = nowDate.toISOString().slice(0,10);
 
+            // Look up the soonest upcoming scheduled game (this month or later) where this
+            // player has an injury report entry set — surfaces "questionable"/"out" tags.
+            function injuryFor(pid){
+              const upcoming = scheduledGames.filter(g=>g.date && g.date>=todayStr && g.injuryReport && g.injuryReport[pid] && g.injuryReport[pid].status).sort((a,b)=>a.date.localeCompare(b.date));
+              if(!upcoming.length) return null;
+              return {...upcoming[0].injuryReport[pid], gameDate:upcoming[0].date, gameTitle:upcoming[0].title};
+            }
+
             // Scheduled matchdays remaining this month with their play chance
             // Each scheduled matchday = 3 games per player
             // Expected games = sum over scheduled days of: (playChance/100) * 3
@@ -2320,103 +2405,162 @@ return (
 
             const leaderEffSum = leader.games.reduce((s,g)=>s+(+calcFps(g)),0);
             const leaderN = leader.games.length;
+            const leaderInjury = injuryFor(leader.player.id);
+
+            // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5
+            // Given a target eff and a player's current per-game baselines, work out a few
+            // realistic "paths" to get there: lean on scoring, lean on playmaking, lean on
+            // boards, or just scale everything up proportionally (all-around).
+            function pathsFor(ps, neededEff) {
+              const basePts = ps.ppg || 0, baseReb = ps.rpg || 0, baseAst = ps.apg || 0;
+              const baseStl = avg(ps.games,"stl") || 0, baseBlk = avg(ps.games,"blk") || 0, baseTo = avg(ps.games,"to") || 0;
+              const otherFixed = baseStl*2 + baseBlk*2 - baseTo*1.5; // hold stl/blk/to at current rate
+              const scoringPts = Math.max(0, Math.ceil((neededEff - (baseReb*1.1 + baseAst*1.5 + otherFixed)) / 1.2));
+              const playmakingAst = Math.max(0, Math.ceil((neededEff - (basePts*1.2 + baseReb*1.1 + otherFixed)) / 1.5));
+              const boardsReb = Math.max(0, Math.ceil((neededEff - (basePts*1.2 + baseAst*1.5 + otherFixed)) / 1.1));
+              const curStatEff = basePts*1.2 + baseReb*1.1 + baseAst*1.5;
+              const scaleFactor = curStatEff > 0 ? (neededEff - otherFixed) / curStatEff : null;
+              const balanced = (scaleFactor && scaleFactor > 0) ? {
+                pts: Math.max(0, Math.ceil(basePts*scaleFactor)),
+                reb: Math.max(0, Math.ceil(baseReb*scaleFactor)),
+                ast: Math.max(0, Math.ceil(baseAst*scaleFactor))
+              } : null;
+              return { scoringPts, playmakingAst, boardsReb, balanced };
+            }
 
             return (
-              <div style={{marginTop:24,marginBottom:4}}>
-                <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 MVP RACE — WAT HEEFT IEDEREEN NODIG?</div>
-                <div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>
+              <div style={{marginTop:30,marginBottom:6}}>
+                <div style={{color:WHITE,fontSize:16,fontWeight:800,letterSpacing:0.5,marginBottom:5}}>🏁 MVP RACE — WAT HEEFT IEDEREEN NODIG?</div>
+                <div style={{color:GREY,fontSize:12,marginBottom:14,lineHeight:1.5}}>
                   {matchdaysLeft === 0 ? "Geen geplande speeldagen meer deze maand" : `${matchdaysLeft} geplande speeldag${matchdaysLeft!==1?"en":""} over · ~${gamesLeft} verwachte games/speler (op basis van speelkans)`}
                 </div>
 
+                {leaderInjury && (
+                  <div data-testid="mvp-race-leader-injury" style={{display:"flex",alignItems:"flex-start",gap:12,background:leaderInjury.status==="out"?"#2a0a0a":"#2a1f08",border:`1px solid ${leaderInjury.status==="out"?RED:"#f5a524"}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+                    <span style={{fontSize:22}}>🩺</span>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontWeight:800,fontSize:14,color:leaderInjury.status==="out"?RED:"#f5a524"}}>
+                        Leider {leader.player.name} staat als {leaderInjury.status==="out"?"OUT":"QUESTIONABLE"} op het injury report{leaderInjury.gameTitle?` voor ${leaderInjury.gameTitle}`:""}
+                      </div>
+                      <div style={{color:GREY,fontSize:12.5,marginTop:3,lineHeight:1.5}}>
+                        {leaderInjury.reason?`${leaderInjury.reason}. `:""}Dit kan de leider games kosten — extra kans voor de rest van het veld om in te lopen op de troon.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {gamesLeft === 0 ? (
-                  <div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:12,padding:"12px 14px"}}>
+                  <div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:14,padding:"16px 18px"}}>
                     Geen speeldagen meer verwacht deze maand. {leader.player.name} staat op 1.
                   </div>
                 ) : (
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:16}}>
                     {playerStats.map((ps, i) => {
+                      const psInjury = injuryFor(ps.player.id);
+
                       if (i === 0) {
-                        // Leader: show how low they can drop and still win
-                        // Even if they score 0 eff in remaining games, their new avg:
+                        // Leader: show how low they can drop and still win, plus what the
+                        // chaser would realistically need to overtake that worst case.
                         const worstCaseEff = parseFloat(((leaderEffSum) / (leaderN + gamesLeft)).toFixed(1));
-                        // What eff does #2 need to exactly match leader at worst case?
                         const challenger = playerStats[1];
                         const cEffSum = challenger.games.reduce((s,g)=>s+(+calcFps(g)),0);
                         const cN = challenger.games.length;
-                        // target = worstCaseEff (leader's worst avg)
                         const neededRaw = (worstCaseEff * (cN + gamesLeft) - cEffSum) / gamesLeft;
                         const neededEff = Math.max(0, parseFloat(neededRaw.toFixed(1)));
-                        // How many pts roughly equals that eff? pts ≈ eff/1.2 (rough inverse of calcFps weight)
-                        const neededPts = Math.max(0, Math.round(neededEff / 1.2));
+                        const paths = pathsFor(challenger, neededEff);
 
                         return (
-                          <div key={ps.player.id} style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:12,padding:"12px 14px"}}>
-                            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                              <div style={{width:22,height:22,borderRadius:"50%",background:RED,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:11,flexShrink:0}}>1</div>
-                              <Avatar player={ps.player} size={32}/>
+                          <div key={ps.player.id} data-testid="mvp-race-leader-card" style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:18,padding:"20px 22px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+                              <div style={{width:30,height:30,borderRadius:"50%",background:RED,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14,flexShrink:0}}>1</div>
+                              <Avatar player={ps.player} size={48}/>
                               <div style={{flex:1,minWidth:0}}>
-                                <div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name} <span style={{color:RED,fontSize:11}}>· leider</span></div>
-                                <div style={{color:GREY,fontSize:11}}>{ps.games.length}G · {ps.eff} eff nu</div>
+                                <div style={{fontWeight:800,fontSize:19,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name} <span style={{color:RED,fontSize:13,fontWeight:700}}>· leider</span></div>
+                                <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG</div>
                               </div>
                               <div style={{textAlign:"right",flexShrink:0}}>
-                                <div style={{color:"#f5a524",fontWeight:800,fontSize:15}}>veilig</div>
-                                <div style={{color:GREY,fontSize:10}}>als {ps.eff}+ eff bijhouden</div>
+                                <div style={{color:"#f5a524",fontWeight:800,fontSize:19}}>veilig</div>
+                                <div style={{color:GREY,fontSize:11}}>bij {ps.eff}+ eff</div>
                               </div>
                             </div>
-                            <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"8px 10px",fontSize:12,color:GREY,lineHeight:1.6}}>
-                              <span style={{color:WHITE,fontWeight:700}}>Slechtste scenario:</span> als {ps.player.name.split(" ")[0]} de rest <span style={{color:"#ff6b6b",fontWeight:700}}>niets</span> scoort → zakt naar ~<span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>. Dan heeft #{2} nog <span style={{color:RED,fontWeight:700}}>{neededEff} eff/game</span> (~{neededPts} pts) nodig om te overtreffen.
+
+                            {psInjury && (
+                              <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.05)",borderRadius:9,padding:"7px 12px",fontSize:11.5,color:psInjury.status==="out"?"#ff6b6b":"#f5a524",fontWeight:700,marginBottom:12}}>
+                                🩺 {psInjury.status==="out"?"OUT":"QUESTIONABLE"}{psInjury.reason?` · ${psInjury.reason}`:""}
+                              </div>
+                            )}
+
+                            <div style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"14px 16px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:challenger?12:0}}>
+                              <span style={{color:WHITE,fontWeight:700}}>Slechtste scenario:</span> als {ps.player.name.split(" ")[0]} de rest van de maand <span style={{color:"#ff6b6b",fontWeight:700}}>niets</span> meer scoort, zakt hij/zij naar ~<span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>.
+                              {challenger && (
+                                <> Dan heeft <span style={{color:WHITE,fontWeight:700}}>{challenger.player.name}</span> over de resterende ~{gamesLeft} games gemiddeld <span style={{color:RED,fontWeight:700}}>{neededEff} eff/game</span> nodig om dat te overtreffen — bijvoorbeeld via één van deze paden:</>
+                              )}
                             </div>
+
+                            {challenger && (
+                              <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                                <PathChip label="🎯 SCORING" value={`${paths.scoringPts} pts/g`} sub={`+ ${challenger.rpg} reb · ${challenger.apg} ast (huidig gem.)`}/>
+                                <PathChip label="🎁 PLAYMAKING" value={`${paths.playmakingAst} ast/g`} sub={`+ ${challenger.ppg} pts · ${challenger.rpg} reb (huidig gem.)`}/>
+                                <PathChip label="🧱 BOARDS" value={`${paths.boardsReb} reb/g`} sub={`+ ${challenger.ppg} pts · ${challenger.apg} ast (huidig gem.)`}/>
+                                {paths.balanced && <PathChip label="⚖️ ALL-AROUND" value={`${paths.balanced.pts}p/${paths.balanced.reb}r/${paths.balanced.ast}a`} sub="evenredig omhoog over alles"/>}
+                              </div>
+                            )}
                           </div>
                         );
                       }
 
-                      // Challengers: what do they need to overtake #1?
+                      // Challengers: what do they need to overtake #1, broken into multiple
+                      // realistic statistical paths (pure scoring, playmaking, boards, or balanced).
                       const psEffSum = ps.games.reduce((s,g)=>s+(+calcFps(g)),0);
                       const psN = ps.games.length;
 
-                      // Scenario A: leader plays all remaining games at their current avg eff
+                      // Scenario: leader plays all remaining games at their current avg eff
                       const leaderFutureEff = parseFloat(((leaderEffSum + gamesLeft * leader.eff) / (leaderN + gamesLeft)).toFixed(1));
-                      // ps needs: (leaderFutureEff * (psN + gamesLeft) - psEffSum) / gamesLeft > neededEff to win
                       const neededRaw = (leaderFutureEff * (psN + gamesLeft) - psEffSum) / gamesLeft;
                       const neededEff = parseFloat(Math.max(0, neededRaw + 0.1).toFixed(1)); // +0.1 to actually beat, not just tie
-
-                      // Roughly how many pts is that? eff ≈ pts*1.2 + reb*1.1 + ast*1.5 ... assume avg reb/ast
-                      // Use player's current avg reb/ast to estimate pts needed
-                      const avgReb = ps.rpg || 0;
-                      const avgAst = ps.apg || 0;
-                      const avgStl = avg(ps.games,"stl") || 0;
-                      const avgBlk = avg(ps.games,"blk") || 0;
-                      const avgTo  = avg(ps.games,"to")  || 0;
-                      // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5
-                      // pts*1.2 = neededEff - (reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5)
-                      const nonPtsEff = avgReb*1.1 + avgAst*1.5 + avgStl*2 + avgBlk*2 - avgTo*1.5;
-                      const ptsNeeded = Math.max(0, Math.ceil((neededEff - nonPtsEff) / 1.2));
 
                       const gap = parseFloat((neededEff - ps.eff).toFixed(1));
                       const isRealistic = neededEff <= 20; // arbitrary "realistic" ceiling
                       const isTooFar = neededEff > 30;
+                      const paths = pathsFor(ps, neededEff);
 
                       return (
-                        <div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",opacity:isTooFar?0.6:1}}>
-                          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                            <div style={{width:22,height:22,borderRadius:"50%",background:INPUTBG,border:`1px solid ${GREY}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0,color:GREY}}>{i+1}</div>
-                            <Avatar player={ps.player} size={32}/>
+                        <div key={ps.player.id} data-testid={`mvp-race-card-${ps.player.id}`} style={{background:INPUTBG,borderRadius:18,padding:"20px 22px",opacity:isTooFar?0.65:1,border:psInjury?`1px solid ${psInjury.status==="out"?RED:"#f5a524"}`:"1px solid transparent"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+                            <div style={{width:30,height:30,borderRadius:"50%",background:INPUTBG,border:`1px solid ${GREY}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0,color:GREY}}>{i+1}</div>
+                            <Avatar player={ps.player} size={48}/>
                             <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
-                              <div style={{color:GREY,fontSize:11}}>{ps.games.length}G · {ps.eff} eff nu · {gap>0?`+${gap} nodig`:"al boven leider"}</div>
+                              <div style={{fontWeight:800,fontSize:18,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+                              <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · {gap>0?`+${gap} eff nodig`:"al boven leider"}</div>
                             </div>
                             <div style={{textAlign:"right",flexShrink:0}}>
-                              <div style={{color:isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:15}}>{neededEff} eff</div>
-                              <div style={{color:GREY,fontSize:10}}>per game nodig</div>
+                              <div style={{color:isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:19}}>{neededEff}</div>
+                              <div style={{color:GREY,fontSize:11}}>eff/game nodig</div>
                             </div>
                           </div>
-                          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"8px 10px",fontSize:12,color:GREY,lineHeight:1.6}}>
+
+                          {psInjury && (
+                            <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.05)",borderRadius:9,padding:"7px 12px",fontSize:11.5,color:psInjury.status==="out"?"#ff6b6b":"#f5a524",fontWeight:700,marginBottom:12}}>
+                              🩺 {psInjury.status==="out"?"OUT":"QUESTIONABLE"}{psInjury.reason?` · ${psInjury.reason}`:""}
+                            </div>
+                          )}
+
+                          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:12,padding:"12px 14px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:isTooFar?0:12}}>
                             {isTooFar ? (
-                              <span>Zou <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff/game</span> (~{ptsNeeded} pts) nodig hebben — <span style={{color:"#ff6b6b"}}>onrealistisch</span> in {gamesLeft} games.</span>
+                              <span>Zou gemiddeld <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff/game</span> nodig hebben over ~{gamesLeft} games — <span style={{color:"#ff6b6b"}}>vrijwel onrealistisch</span>.</span>
                             ) : (
-                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig (~<span style={{color:RED,fontWeight:700}}>{ptsNeeded} pts</span> + gemiddeld reb/ast) over de komende {gamesLeft} games om #{1} te pakken.</span>
+                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig over de komende ~{gamesLeft} games om #1 te pakken (als de leider op {leader.eff} eff blijft draaien). Meerdere paden om daar te komen:</span>
                             )}
                           </div>
+
+                          {!isTooFar && (
+                            <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                              <PathChip label="🎯 SCORING" value={`${paths.scoringPts} pts/g`} sub={`+ ${ps.rpg} reb · ${ps.apg} ast (huidig)`}/>
+                              <PathChip label="🎁 PLAYMAKING" value={`${paths.playmakingAst} ast/g`} sub={`+ ${ps.ppg} pts · ${ps.rpg} reb (huidig)`}/>
+                              <PathChip label="🧱 BOARDS" value={`${paths.boardsReb} reb/g`} sub={`+ ${ps.ppg} pts · ${ps.apg} ast (huidig)`}/>
+                              {paths.balanced && <PathChip label="⚖️ ALL-AROUND" value={`${paths.balanced.pts}p/${paths.balanced.reb}r/${paths.balanced.ast}a`} sub="evenredig omhoog over alles"/>}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2425,6 +2569,7 @@ return (
               </div>
             );
           })()}
+
 
           {/* MVPs van afgelopen maanden — carousel */}
           {(() => {
@@ -6121,6 +6266,53 @@ createdAt:new Date().toISOString()
 });
 });
 },[games,players,larpPosts,loading,botSettings]);
+
+// ── LARP Bots: hype + trash talk about today's scheduled matchup before it's played
+const botHypeRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!scheduledGames.length)return;
+const personas=effectivePersonas(botSettings);
+const toxicity=botSettings?.toxicity||3;
+const freq=freqConfig(botSettings?.postFrequency||2);
+const todayStr=new Date().toISOString().slice(0,10);
+const todaysGames=scheduledGames.filter(g=>g.date===todayStr);
+todaysGames.forEach(game=>{
+const baseId=`auto-bot-hype-${game.id}-0`;
+if(larpPosts.find(p=>p.id===baseId))return;
+if(botHypeRanRef.current.has(game.id))return;
+botHypeRanRef.current.add(game.id);
+const teamA=game.teamAName||"Team A",teamB=game.teamBName||"Team B";
+const lineupA=(game.lineupA||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+const lineupB=(game.lineupB||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+const all=[...lineupA,...lineupB];
+const hypePlayer=all.length?pick(all):null;
+const others=all.filter(p=>p.id!==hypePlayer?.id);
+const rivalPlayer=others.length?pick(others):(hypePlayer?null:null);
+const injuredEntries=Object.entries(game.injuryReport||{}).filter(([pid,r])=>r&&r.status&&r.status!=="active");
+let injuredName=null,injuredStatus=null,injuredReason=null;
+if(injuredEntries.length){
+const [ipid,irep]=pick(injuredEntries);
+const ip=players.find(p=>p.id===ipid);
+injuredName=ip?.name||null;
+injuredStatus=irep.status;
+injuredReason=irep.reason;
+}
+const ctx={teamA,teamB,hypeName:hypePlayer?.name||teamA,rivalName:rivalPlayer?.name||teamB,injuredName,injuredStatus,injuredReason};
+const n=freq.gameBotsMin+Math.floor(Math.random()*(freq.gameBotsMax-freq.gameBotsMin+1));
+randomBots(personas,n).forEach((persona,i)=>{
+setTimeout(()=>{
+fbSave("larp_posts",{
+id:`auto-bot-hype-${game.id}-${i}`,
+tempName:persona.handle,
+botId:persona.id,
+text:generateBotHypePost(persona,ctx,toxicity),
+gif:null,performanceId:null,likes:rollLikes(personaIsLinked(persona)),pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("Hype bot post error:",e));
+},1500+i*(4000+Math.random()*5000));
+});
+});
+},[scheduledGames,players,larpPosts,loading,botSettings]);
 
 // ── LARP Bots: random unprompted hot takes throughout the day
 useEffect(()=>{

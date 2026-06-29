@@ -2368,44 +2368,66 @@ return (
 
             const todayStr = nowDate.toISOString().slice(0,10);
 
-            // Look up the soonest upcoming scheduled game (this month or later) where this
-            // player has an injury report entry set — surfaces "questionable"/"out" tags.
-            function injuryFor(pid){
-              const upcoming = scheduledGames.filter(g=>g.date && g.date>=todayStr && g.injuryReport && g.injuryReport[pid] && g.injuryReport[pid].status && g.injuryReport[pid].status!=="active").sort((a,b)=>a.date.localeCompare(b.date));
-              if(!upcoming.length) return null;
-              return {...upcoming[0].injuryReport[pid], gameDate:upcoming[0].date, gameTitle:upcoming[0].title};
-            }
-
-            // Scheduled matchdays remaining this month with their play chance
-            // Each scheduled matchday = 3 games per player
-            // Expected games = sum over scheduled days of: (playChance/100) * 3
+            // Scheduled matchdays remaining THIS MONTH only — injury reports on games outside
+            // this window (past, or next month) shouldn't influence this month's race at all.
             const scheduledThisMonthAhead = scheduledGames.filter(g => {
               if (!g.date) return false;
               return g.date.slice(0,7) === curMonthKey && g.date > todayStr;
             });
-
-            // Sum expected games: if playChance set, use it; else assume 70%
-            const expectedGames = scheduledThisMonthAhead.reduce((sum, g) => {
-              const chance = (g.playChance !== undefined && g.playChance !== null && g.playChance !== "")
-                ? Number(g.playChance) / 100
-                : 0.7;
-              return sum + chance * 3; // 3 games per matchday
-            }, 0);
-
-            const gamesLeft = parseFloat(expectedGames.toFixed(1));
             const matchdaysLeft = scheduledThisMonthAhead.length;
 
+            // Per-matchday play chance for a specific player: starts from the day's general
+            // playChance (or 70% default), then nudges it for that player's injury tag —
+            // "out" zeroes that day, "questionable" only halves it (one tag shouldn't nuke
+            // a whole month of projections), "active"/unset doesn't change anything.
+            function dayChanceForPlayer(g, pid) {
+              const base = (g.playChance !== undefined && g.playChance !== null && g.playChance !== "")
+                ? Number(g.playChance) / 100 : 0.7;
+              const rep = g.injuryReport && g.injuryReport[pid];
+              if (rep && rep.status === "out") return 0;
+              if (rep && rep.status === "questionable") return base * 0.5;
+              return base;
+            }
+            // Expected remaining games this month for one specific player (3 games/matchday)
+            function gamesLeftFor(pid) {
+              return parseFloat(scheduledThisMonthAhead.reduce((sum,g)=>sum+dayChanceForPlayer(g,pid)*3,0).toFixed(1));
+            }
+            // Which of this month's remaining matchdays actually flag this player (excl. "active")
+            function injuryDaysFor(pid) {
+              return scheduledThisMonthAhead.filter(g=>g.injuryReport && g.injuryReport[pid] && g.injuryReport[pid].status && g.injuryReport[pid].status!=="active");
+            }
+            // Human-readable summary: worst status found, why, and how many of the remaining
+            // days it actually touches — so "1 of 4" reads very differently from "4 of 4".
+            function injurySummaryFor(pid) {
+              const days = injuryDaysFor(pid);
+              if (!days.length) return null;
+              const outDay = days.find(g=>g.injuryReport[pid].status==="out");
+              const worst = outDay || days[0];
+              const noInjuryGames = parseFloat(scheduledThisMonthAhead.reduce((sum,g)=>{
+                const base=(g.playChance!==undefined&&g.playChance!==null&&g.playChance!=="")?Number(g.playChance)/100:0.7;
+                return sum+base*3;
+              },0).toFixed(1));
+              return {
+                status: outDay ? "out" : "questionable",
+                reason: worst.injuryReport[pid].reason,
+                affected: days.length,
+                total: matchdaysLeft,
+                gamesLeft: gamesLeftFor(pid),
+                gamesLeftNoInjury: noInjuryGames
+              };
+            }
+
             const leader = playerStats[0]; // current #1 by avg eff
+            const leaderGamesLeft = Math.max(0, gamesLeftFor(leader.player.id));
+            const leaderInjury = injurySummaryFor(leader.player.id);
 
             // Helper: given current total eff sum and game count, plus extra games at a new avg eff,
             // compute new overall avg eff
             // avg_eff = (currentEffSum + extraGames * extraAvgEff) / (currentGames + extraGames)
             // We want new avg eff > target → solve for extraAvgEff:
             // extraAvgEff > (target * (n + g) - currentEffSum) / g
-
             const leaderEffSum = leader.games.reduce((s,g)=>s+(+calcFps(g)),0);
             const leaderN = leader.games.length;
-            const leaderInjury = injuryFor(leader.player.id);
 
             // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5
             // Given a target eff and a player's current per-game baselines, work out a few
@@ -2428,11 +2450,25 @@ return (
               return { scoringPts, playmakingAst, boardsReb, balanced };
             }
 
+            // Small, calm injury chip — scoped to THIS month, shows exactly how many of the
+            // remaining days are actually affected so one "questionable" doesn't read as doom.
+            function InjuryChip({summary}) {
+              if (!summary) return null;
+              const isOut = summary.status === "out";
+              const color = isOut ? "#ff6b6b" : "#f5a524";
+              return (
+                <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.05)",borderRadius:9,padding:"7px 12px",fontSize:11.5,color,fontWeight:700,marginBottom:12,flexWrap:"wrap"}}>
+                  <span>🩺 {isOut?"OUT":"QUESTIONABLE"} · {summary.affected}/{summary.total} resterende speeldag{summary.total!==1?"en":""}{summary.reason?` · ${summary.reason}`:""}</span>
+                  <span style={{color:GREY,fontWeight:500}}>→ verwacht nog ~{summary.gamesLeft} games (i.p.v. ~{summary.gamesLeftNoInjury} zonder report)</span>
+                </div>
+              );
+            }
+
             return (
               <div style={{marginTop:30,marginBottom:6}}>
                 <div style={{color:WHITE,fontSize:16,fontWeight:800,letterSpacing:0.5,marginBottom:5}}>🏁 MVP RACE — WAT HEEFT IEDEREEN NODIG?</div>
                 <div style={{color:GREY,fontSize:12,marginBottom:14,lineHeight:1.5}}>
-                  {matchdaysLeft === 0 ? "Geen geplande speeldagen meer deze maand" : `${matchdaysLeft} geplande speeldag${matchdaysLeft!==1?"en":""} over · ~${gamesLeft} verwachte games/speler (op basis van speelkans)`}
+                  {matchdaysLeft === 0 ? "Geen geplande speeldagen meer deze maand" : `${matchdaysLeft} geplande speeldag${matchdaysLeft!==1?"en":""} over deze maand · verwachte games per speler hieronder, op basis van speelkans + injury report`}
                 </div>
 
                 {leaderInjury && (
@@ -2440,32 +2476,41 @@ return (
                     <span style={{fontSize:22}}>🩺</span>
                     <div style={{minWidth:0}}>
                       <div style={{fontWeight:800,fontSize:14,color:leaderInjury.status==="out"?RED:"#f5a524"}}>
-                        Leider {leader.player.name} staat als {leaderInjury.status==="out"?"OUT":"QUESTIONABLE"} op het injury report{leaderInjury.gameTitle?` voor ${leaderInjury.gameTitle}`:""}
+                        Leider {leader.player.name} staat {leaderInjury.status==="out"?"OUT":"questionable"} voor {leaderInjury.affected} van de {leaderInjury.total} resterende speeldag{leaderInjury.total!==1?"en":""} deze maand
                       </div>
                       <div style={{color:GREY,fontSize:12.5,marginTop:3,lineHeight:1.5}}>
-                        {leaderInjury.reason?`${leaderInjury.reason}. `:""}Dit kan de leider games kosten — extra kans voor de rest van het veld om in te lopen op de troon.
+                        {leaderInjury.reason?`${leaderInjury.reason}. `:""}Verwacht daardoor nog ~{leaderInjury.gamesLeft} games i.p.v. ~{leaderInjury.gamesLeftNoInjury} — {leaderInjury.affected<leaderInjury.total?"licht effect, dit alleen kost de troon niet":"merkbaar effect op de resterende projectie"}.
                       </div>
                     </div>
                   </div>
                 )}
 
-                {gamesLeft === 0 ? (
+                {leaderGamesLeft <= 0 && matchdaysLeft > 0 ? (
+                  <div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:14,padding:"16px 18px",marginBottom:16}}>
+                    {leader.player.name} speelt door huidige speelkans/injury status waarschijnlijk geen games meer deze maand — de race onder de rest van het veld blijft hieronder gewoon staan.
+                  </div>
+                ) : null}
+
+                {matchdaysLeft === 0 ? (
                   <div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:14,padding:"16px 18px"}}>
                     Geen speeldagen meer verwacht deze maand. {leader.player.name} staat op 1.
                   </div>
                 ) : (
                   <div style={{display:"flex",flexDirection:"column",gap:16}}>
                     {playerStats.map((ps, i) => {
-                      const psInjury = injuryFor(ps.player.id);
+                      const psInjury = injurySummaryFor(ps.player.id);
+                      const psGamesLeft = Math.max(0, gamesLeftFor(ps.player.id));
 
                       if (i === 0) {
                         // Leader: show how low they can drop and still win, plus what the
                         // chaser would realistically need to overtake that worst case.
-                        const worstCaseEff = parseFloat(((leaderEffSum) / (leaderN + gamesLeft)).toFixed(1));
+                        const safeGamesLeft = leaderGamesLeft > 0 ? leaderGamesLeft : 0.1;
+                        const worstCaseEff = parseFloat(((leaderEffSum) / (leaderN + safeGamesLeft)).toFixed(1));
                         const challenger = playerStats[1];
                         const cEffSum = challenger.games.reduce((s,g)=>s+(+calcFps(g)),0);
                         const cN = challenger.games.length;
-                        const neededRaw = (worstCaseEff * (cN + gamesLeft) - cEffSum) / gamesLeft;
+                        const cGamesLeft = Math.max(0.1, gamesLeftFor(challenger.player.id));
+                        const neededRaw = (worstCaseEff * (cN + cGamesLeft) - cEffSum) / cGamesLeft;
                         const neededEff = Math.max(0, parseFloat(neededRaw.toFixed(1)));
                         const paths = pathsFor(challenger, neededEff);
 
@@ -2476,7 +2521,7 @@ return (
                               <Avatar player={ps.player} size={48}/>
                               <div style={{flex:1,minWidth:0}}>
                                 <div style={{fontWeight:800,fontSize:19,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name} <span style={{color:RED,fontSize:13,fontWeight:700}}>· leider</span></div>
-                                <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG</div>
+                                <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · ~{leaderGamesLeft} games over deze maand</div>
                               </div>
                               <div style={{textAlign:"right",flexShrink:0}}>
                                 <div style={{color:"#f5a524",fontWeight:800,fontSize:19}}>veilig</div>
@@ -2484,16 +2529,12 @@ return (
                               </div>
                             </div>
 
-                            {psInjury && (
-                              <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.05)",borderRadius:9,padding:"7px 12px",fontSize:11.5,color:psInjury.status==="out"?"#ff6b6b":"#f5a524",fontWeight:700,marginBottom:12}}>
-                                🩺 {psInjury.status==="out"?"OUT":"QUESTIONABLE"}{psInjury.reason?` · ${psInjury.reason}`:""}
-                              </div>
-                            )}
+                            <InjuryChip summary={psInjury}/>
 
                             <div style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"14px 16px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:challenger?12:0}}>
-                              <span style={{color:WHITE,fontWeight:700}}>Slechtste scenario:</span> als {ps.player.name.split(" ")[0]} de rest van de maand <span style={{color:"#ff6b6b",fontWeight:700}}>niets</span> meer scoort, zakt hij/zij naar ~<span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>.
+                              <span style={{color:WHITE,fontWeight:700}}>Slechtste scenario:</span> als {ps.player.name.split(" ")[0]} de rest van de maand <span style={{color:"#ff6b6b",fontWeight:700}}>niets</span> meer scoort over zijn/haar verwachte ~{leaderGamesLeft} games, zakt hij/zij naar ~<span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>.
                               {challenger && (
-                                <> Dan heeft <span style={{color:WHITE,fontWeight:700}}>{challenger.player.name}</span> over de resterende ~{gamesLeft} games gemiddeld <span style={{color:RED,fontWeight:700}}>{neededEff} eff/game</span> nodig om dat te overtreffen — bijvoorbeeld via één van deze paden:</>
+                                <> Dan heeft <span style={{color:WHITE,fontWeight:700}}>{challenger.player.name}</span> over zijn/haar eigen verwachte ~{cGamesLeft} games gemiddeld <span style={{color:RED,fontWeight:700}}>{neededEff} eff/game</span> nodig om dat te overtreffen — bijvoorbeeld via één van deze paden:</>
                               )}
                             </div>
 
@@ -2511,49 +2552,52 @@ return (
 
                       // Challengers: what do they need to overtake #1, broken into multiple
                       // realistic statistical paths (pure scoring, playmaking, boards, or balanced).
+                      // Each player's own expected games this month (incl. their own injury tags)
+                      // is used — not a shared league-wide number — so one flagged game only ever
+                      // softly nudges that one player's projection.
                       const psEffSum = ps.games.reduce((s,g)=>s+(+calcFps(g)),0);
                       const psN = ps.games.length;
+                      const safePsGamesLeft = psGamesLeft > 0 ? psGamesLeft : 0.1;
 
                       // Scenario: leader plays all remaining games at their current avg eff
-                      const leaderFutureEff = parseFloat(((leaderEffSum + gamesLeft * leader.eff) / (leaderN + gamesLeft)).toFixed(1));
-                      const neededRaw = (leaderFutureEff * (psN + gamesLeft) - psEffSum) / gamesLeft;
+                      const leaderFutureEff = parseFloat(((leaderEffSum + leaderGamesLeft * leader.eff) / (leaderN + leaderGamesLeft)).toFixed(1));
+                      const neededRaw = (leaderFutureEff * (psN + safePsGamesLeft) - psEffSum) / safePsGamesLeft;
                       const neededEff = parseFloat(Math.max(0, neededRaw + 0.1).toFixed(1)); // +0.1 to actually beat, not just tie
 
                       const gap = parseFloat((neededEff - ps.eff).toFixed(1));
                       const isRealistic = neededEff <= 20; // arbitrary "realistic" ceiling
                       const isTooFar = neededEff > 30;
+                      const cantCatchUp = psGamesLeft <= 0;
                       const paths = pathsFor(ps, neededEff);
 
                       return (
-                        <div key={ps.player.id} data-testid={`mvp-race-card-${ps.player.id}`} style={{background:INPUTBG,borderRadius:18,padding:"20px 22px",opacity:isTooFar?0.65:1,border:psInjury?`1px solid ${psInjury.status==="out"?RED:"#f5a524"}`:"1px solid transparent"}}>
+                        <div key={ps.player.id} data-testid={`mvp-race-card-${ps.player.id}`} style={{background:INPUTBG,borderRadius:18,padding:"20px 22px",opacity:(isTooFar||cantCatchUp)?0.65:1,border:psInjury?`1px solid ${psInjury.status==="out"?RED:"#f5a524"}`:"1px solid transparent"}}>
                           <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
                             <div style={{width:30,height:30,borderRadius:"50%",background:INPUTBG,border:`1px solid ${GREY}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0,color:GREY}}>{i+1}</div>
                             <Avatar player={ps.player} size={48}/>
                             <div style={{flex:1,minWidth:0}}>
                               <div style={{fontWeight:800,fontSize:18,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
-                              <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · {gap>0?`+${gap} eff nodig`:"al boven leider"}</div>
+                              <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · ~{psGamesLeft} games over · {gap>0?`+${gap} eff nodig`:"al boven leider"}</div>
                             </div>
                             <div style={{textAlign:"right",flexShrink:0}}>
-                              <div style={{color:isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:19}}>{neededEff}</div>
-                              <div style={{color:GREY,fontSize:11}}>eff/game nodig</div>
+                              <div style={{color:cantCatchUp?"#ff6b6b":isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:19}}>{cantCatchUp?"—":neededEff}</div>
+                              <div style={{color:GREY,fontSize:11}}>{cantCatchUp?"geen games over":"eff/game nodig"}</div>
                             </div>
                           </div>
 
-                          {psInjury && (
-                            <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.05)",borderRadius:9,padding:"7px 12px",fontSize:11.5,color:psInjury.status==="out"?"#ff6b6b":"#f5a524",fontWeight:700,marginBottom:12}}>
-                              🩺 {psInjury.status==="out"?"OUT":"QUESTIONABLE"}{psInjury.reason?` · ${psInjury.reason}`:""}
-                            </div>
-                          )}
+                          <InjuryChip summary={psInjury}/>
 
-                          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:12,padding:"12px 14px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:isTooFar?0:12}}>
-                            {isTooFar ? (
-                              <span>Zou gemiddeld <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff/game</span> nodig hebben over ~{gamesLeft} games — <span style={{color:"#ff6b6b"}}>vrijwel onrealistisch</span>.</span>
+                          <div style={{background:"rgba(255,255,255,0.03)",borderRadius:12,padding:"12px 14px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:(isTooFar||cantCatchUp)?0:12}}>
+                            {cantCatchUp ? (
+                              <span>Verwacht deze maand geen games meer te spelen (speelkans/injury report) — kan dit nog inhalen volgende maand.</span>
+                            ) : isTooFar ? (
+                              <span>Zou gemiddeld <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff/game</span> nodig hebben over ~{psGamesLeft} eigen games — <span style={{color:"#ff6b6b"}}>vrijwel onrealistisch</span>.</span>
                             ) : (
-                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig over de komende ~{gamesLeft} games om #1 te pakken (als de leider op {leader.eff} eff blijft draaien). Meerdere paden om daar te komen:</span>
+                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig over de komende ~{psGamesLeft} eigen games om #1 te pakken (als de leider over zijn/haar ~{leaderGamesLeft} games op {leader.eff} eff blijft draaien). Meerdere paden om daar te komen:</span>
                             )}
                           </div>
 
-                          {!isTooFar && (
+                          {!isTooFar && !cantCatchUp && (
                             <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
                               <PathChip label="🎯 SCORING" value={`${paths.scoringPts} pts/g`} sub={`+ ${ps.rpg} reb · ${ps.apg} ast (huidig)`}/>
                               <PathChip label="🎁 PLAYMAKING" value={`${paths.playmakingAst} ast/g`} sub={`+ ${ps.ppg} pts · ${ps.rpg} reb (huidig)`}/>

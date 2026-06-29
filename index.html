@@ -2371,7 +2371,7 @@ return (
             // Look up the soonest upcoming scheduled game (this month or later) where this
             // player has an injury report entry set — surfaces "questionable"/"out" tags.
             function injuryFor(pid){
-              const upcoming = scheduledGames.filter(g=>g.date && g.date>=todayStr && g.injuryReport && g.injuryReport[pid] && g.injuryReport[pid].status).sort((a,b)=>a.date.localeCompare(b.date));
+              const upcoming = scheduledGames.filter(g=>g.date && g.date>=todayStr && g.injuryReport && g.injuryReport[pid] && g.injuryReport[pid].status && g.injuryReport[pid].status!=="active").sort((a,b)=>a.date.localeCompare(b.date));
               if(!upcoming.length) return null;
               return {...upcoming[0].injuryReport[pid], gameDate:upcoming[0].date, gameTitle:upcoming[0].title};
             }

@@ -2673,6 +2673,337 @@ return (
               </>
             );
           })()}
+{/* ── EFFICIENCY LAB ── */}
+{playerStats.length>0&&(()=>{
+// Per-stat contribution breakdown averaged across all month games
+const statWeights=[
+{key:"pts",label:"PTS",weight:1.2,color:"#E8312A",emoji:"🏀"},
+{key:"reb",label:"REB",weight:1.1,color:"#5B9BD5",emoji:"🛡️"},
+{key:"ast",label:"AST",weight:1.5,color:"#27AE60",emoji:"🎯"},
+{key:"stl",label:"STL",weight:2.0,color:"#f5a524",emoji:"🤏"},
+{key:"blk",label:"BLK",weight:2.0,color:"#9B59B6",emoji:"✋"},
+{key:"to", label:"TO", weight:-1.5,color:"#ff6b6b",emoji:"💸"},
+];
+
+// Eff tier label
+function effTier(e){
+if(e>=18)return{label:"ELITE",color:"#f5a524"};
+if(e>=14)return{label:"GOED",color:"#27AE60"};
+if(e>=10)return{label:"GEMIDDELD",color:"#5B9BD5"};
+if(e>=6) return{label:"ONDER GEM.",color:GREY};
+return{label:"LAAG",color:"#ff6b6b"};
+}
+
+// For the bar chart: best eff in month = 100%
+const maxEff=playerStats[0]?.eff||1;
+
+// Per-player avg stat contribution per game
+function statContrib(ps,sw){
+const a=avg(ps.games,sw.key);
+return parseFloat((a*Math.abs(sw.weight)).toFixed(2));
+}
+
+// FG bonus contribution
+function fgBonus(ps){
+const a=avg(ps.games,"fg");
+return a>40?parseFloat(((a-40)*0.1).toFixed(2)):0;
+}
+
+// Consistency: stddev of eff across games
+function stdDev(ps){
+if(ps.games.length<2)return null;
+const mean=ps.eff;
+const variance=ps.games.reduce((s,g)=>s+Math.pow(+calcFps(g)-mean,2),0)/ps.games.length;
+return parseFloat(Math.sqrt(variance).toFixed(1));
+}
+
+// Best / worst game
+function bestGame(ps){return ps.games.reduce((b,g)=>(+calcFps(g)>+calcFps(b)?g:b),ps.games[0]);}
+function worstGame(ps){return ps.games.reduce((b,g)=>(+calcFps(g)<+calcFps(b)?g:b),ps.games[0]);}
+
+// Who is the most consistent (lowest stddev with >=3 games)?
+const consistencyList=playerStats.filter(ps=>ps.games.length>=3).map(ps=>({ps,sd:stdDev(ps)})).filter(x=>x.sd!==null).sort((a,b)=>a.sd-b.sd);
+const mostConsistent=consistencyList[0];
+const mostExplosive=consistencyList[consistencyList.length-1];
+
+// Biggest TO drag
+const biggestToDrag=playerStats.slice().sort((a,b)=>avg(b.games,"to")-avg(a.games,"to"))[0];
+
+// Most defensive (stl+blk combined)
+const mostDefensive=playerStats.slice().sort((a,b)=>(avg(b.games,"stl")+avg(b.games,"blk"))-(avg(a.games,"stl")+avg(a.games,"blk")))[0];
+
+// Eff over time (game-by-game) for top-3 players, sorted by date
+const top3=playerStats.slice(0,3);
+const allDates=[...new Set(monthGames.map(g=>g.date).filter(Boolean))].sort();
+
+// Stat DNA: % split of positive contributions per player
+function dna(ps){
+const contributions=statWeights.filter(sw=>sw.weight>0).map(sw=>({...sw,val:statContrib(ps,sw)}));
+const bonus=fgBonus(ps);
+const total=contributions.reduce((s,c)=>s+c.val,0)+bonus;
+if(!total)return contributions.map(sw=>({...sw,pct:0}));
+return contributions.map(sw=>({...sw,pct:parseFloat(((statContrib(ps,sw)/total)*100).toFixed(1))}));
+}
+
+// Mini sparkline SVG for a player's eff over the month
+function Sparkline({ps}){
+if(ps.games.length<2)return<span style={{color:GREY,fontSize:11}}>—</span>;
+const vals=ps.games.slice().sort((a,b)=>a.date<b.date?-1:1).map(g=>+calcFps(g));
+const mn=Math.min(...vals),mx=Math.max(...vals);
+const range=mx-mn||1;
+const W=80,H=28,pad=4;
+const pts=vals.map((v,i)=>`${pad+(i/(vals.length-1))*(W-pad*2)},${pad+(1-(v-mn)/range)*(H-pad*2)}`).join(" ");
+return(
+<svg width={W} height={H} style={{overflow:"visible"}}>
+<polyline points={pts} fill="none" stroke={RED} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round"/>
+{vals.map((v,i)=>{
+const x=pad+(i/(vals.length-1))*(W-pad*2);
+const y=pad+(1-(v-mn)/range)*(H-pad*2);
+return<circle key={i} cx={x} cy={y} r={2.5} fill={v===mx?"#f5a524":v===mn?"#ff6b6b":RED}/>;
+})}
+</svg>
+);
+}
+
+// Donut: stat DNA
+function DnaPie({ps}){
+const d=dna(ps);
+const W=64,cx=32,cy=32,r=24,stroke=10;
+const circ=2*Math.PI*r;
+let offset=0;
+const slices=d.filter(s=>s.pct>0);
+return(
+<svg width={W} height={W}>
+<circle cx={cx} cy={cy} r={r} fill="none" stroke="#222" strokeWidth={stroke}/>
+{slices.map((s,i)=>{
+const dash=(s.pct/100)*circ;
+const gap=circ-dash;
+const el=<circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={stroke} strokeDasharray={`${dash} ${gap}`} strokeDashoffset={-offset} style={{transform:"rotate(-90deg)",transformOrigin:"center"}}/>;
+offset+=dash;
+return el;
+})}
+<text x={cx} y={cy+1} textAnchor="middle" dominantBaseline="middle" fill={WHITE} fontSize={9} fontWeight={800}>{ps.eff}</text>
+</svg>
+);
+}
+
+return(
+<div style={{marginTop:28}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>EFF LAB — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>
+Formule: <span style={{color:WHITE,fontWeight:700}}>PTS×1.2 + REB×1.1 + AST×1.5 + STL×2 + BLK×2 − TO×1.5</span> + FG% bonus boven 40%
+</div>
+
+{/* Weight cards */}
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:20}}>
+{statWeights.map(sw=>(
+<div key={sw.key} style={{background:INPUTBG,borderRadius:12,padding:"10px 12px",display:"flex",flexDirection:"column",gap:4}}>
+<div style={{display:"flex",alignItems:"center",gap:6}}>
+<span style={{fontSize:16}}>{sw.emoji}</span>
+<span style={{color:sw.color,fontWeight:800,fontSize:13}}>{sw.label}</span>
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18}}>{sw.weight>0?"+":""}{sw.weight}×</div>
+<div style={{color:GREY,fontSize:10}}>{sw.weight>0?"positief":"negatief"}</div>
+</div>
+))}
+</div>
+
+{/* Eff bar chart */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📊 EFF VERGELIJKING</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
+{playerStats.map((ps,i)=>{
+const tier=effTier(ps.eff);
+const pct=Math.round((ps.eff/maxEff)*100);
+const sd=stdDev(ps);
+return(
+<div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<div style={{width:22,height:22,borderRadius:"50%",background:i===0?RED:"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0}}>{i+1}</div>
+<Avatar player={ps.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{ps.games.length}G{sd!==null?` · σ ${sd}`:" · <3G"}</div>
+</div>
+<span style={{background:`${tier.color}22`,color:tier.color,border:`1px solid ${tier.color}55`,borderRadius:8,padding:"2px 7px",fontSize:9,fontWeight:800,letterSpacing:0.5}}>{tier.label}</span>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:18}}>{ps.eff}</div>
+<div style={{color:GREY,fontSize:10}}>eff</div>
+</div>
+</div>
+{/* Bar */}
+<div style={{height:8,background:"#222",borderRadius:4,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${pct}%`,background:`linear-gradient(90deg,${i===0?RED:"#444"},${i===0?"#ff6b6b":"#666"})`,borderRadius:4,transition:"width .4s ease"}}/>
+</div>
+{/* Sparkline row */}
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8}}>
+<div style={{display:"flex",gap:14}}>
+{statWeights.filter(sw=>sw.weight>0).map(sw=>(
+<div key={sw.key} style={{textAlign:"center"}}>
+<div style={{color:sw.color,fontWeight:700,fontSize:13}}>{avg(ps.games,sw.key)}</div>
+<div style={{color:GREY,fontSize:9}}>{sw.label}</div>
+</div>
+))}
+<div style={{textAlign:"center"}}>
+<div style={{color:"#ff6b6b",fontWeight:700,fontSize:13}}>{avg(ps.games,"to")}</div>
+<div style={{color:GREY,fontSize:9}}>TO</div>
+</div>
+</div>
+<Sparkline ps={ps}/>
+</div>
+</div>
+);
+})}
+</div>
+
+{/* DNA pies */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>🧬 STAT DNA (positieve bijdragen)</div>
+<div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:8,marginLeft:-16,marginRight:-16,paddingLeft:16,paddingRight:16,marginBottom:24}}>
+{playerStats.map(ps=>{
+const d=dna(ps).sort((a,b)=>b.pct-a.pct);
+const top=d[0];
+return(
+<div key={ps.player.id} style={{flexShrink:0,background:INPUTBG,borderRadius:14,padding:"14px 12px",minWidth:130,display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+<DnaPie ps={ps}/>
+<div style={{color:WHITE,fontWeight:700,fontSize:12,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{ps.player.name}</div>
+{top&&<div style={{color:top.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{top.emoji} {top.label} DOMINANT</div>}
+<div style={{display:"flex",flexDirection:"column",gap:3,width:"100%"}}>
+{d.filter(s=>s.pct>0).map(s=>(
+<div key={s.key} style={{display:"flex",alignItems:"center",gap:5}}>
+<div style={{width:`${Math.round(s.pct)}%`,maxWidth:"60%",height:4,background:s.color,borderRadius:2,flexShrink:0}}/>
+<span style={{color:GREY,fontSize:9}}>{s.label} {s.pct}%</span>
+</div>
+))}
+</div>
+</div>
+);
+})}
+</div>
+
+{/* Insights row */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>💡 LAB INSIGHTS</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
+{mostConsistent&&(
+<div style={{background:"linear-gradient(135deg,#0a1a0a,#0e1e0e)",border:"1px solid #27AE6055",borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"center"}}>
+<span style={{fontSize:22}}>🎯</span>
+<div>
+<div style={{color:"#27AE60",fontWeight:700,fontSize:12,letterSpacing:0.5}}>MEEST CONSISTENT</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{mostConsistent.ps.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>σ {mostConsistent.sd} standaarddeviatie over {mostConsistent.ps.games.length} games — laagste spreiding</div>
+</div>
+</div>
+)}
+{mostExplosive&&mostExplosive.ps.player.id!==mostConsistent?.ps.player.id&&(
+<div style={{background:"linear-gradient(135deg,#1a0a0a,#2a0808)",border:`1px solid ${RED}55`,borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"center"}}>
+<span style={{fontSize:22}}>⚡</span>
+<div>
+<div style={{color:RED,fontWeight:700,fontSize:12,letterSpacing:0.5}}>MEEST EXPLOSIEF</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{mostExplosive.ps.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>σ {mostExplosive.sd} — grote schommelingen, hoog plafond</div>
+</div>
+</div>
+)}
+{mostDefensive&&(
+<div style={{background:"linear-gradient(135deg,#0a0a1a,#0e0e2a)",border:"1px solid #9B59B655",borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"center"}}>
+<span style={{fontSize:22}}>🛡️</span>
+<div>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:12,letterSpacing:0.5}}>DEFENSIEVE KRACHT</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{mostDefensive.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>{avg(mostDefensive.games,"stl")} STL + {avg(mostDefensive.games,"blk")} BLK gem. — {parseFloat((avg(mostDefensive.games,"stl")+avg(mostDefensive.games,"blk")).toFixed(1))} defensieve bijdrage/game</div>
+</div>
+</div>
+)}
+{biggestToDrag&&avg(biggestToDrag.games,"to")>0&&(
+<div style={{background:"linear-gradient(135deg,#1a0808,#1a0a0a)",border:"1px solid #ff6b6b55",borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"center"}}>
+<span style={{fontSize:22}}>💸</span>
+<div>
+<div style={{color:"#ff6b6b",fontWeight:700,fontSize:12,letterSpacing:0.5}}>MEESTE EFF VERLIES DOOR TO</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{biggestToDrag.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>{avg(biggestToDrag.games,"to")} TO/game = −{parseFloat((avg(biggestToDrag.games,"to")*1.5).toFixed(1))} eff/game verlies</div>
+</div>
+</div>
+)}
+{playerStats.map(ps=>{
+const b=bestGame(ps);
+const w=worstGame(ps);
+if(!b||!w||ps.games.length<2)return null;
+const bEff=+calcFps(b),wEff=+calcFps(w);
+if(bEff-wEff<5)return null;
+return(
+<div key={`range-${ps.player.id}`} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",gap:12,alignItems:"center"}}>
+<span style={{fontSize:22}}>📈</span>
+<div style={{flex:1}}>
+<div style={{color:GREY,fontWeight:700,fontSize:12,letterSpacing:0.5}}>BEREIK · {ps.player.name}</div>
+<div style={{display:"flex",gap:14,marginTop:4}}>
+<div><div style={{color:"#f5a524",fontWeight:800,fontSize:16}}>{bEff}</div><div style={{color:GREY,fontSize:10}}>BESTE · {b.date?.slice(5)||"—"}</div></div>
+<div style={{color:GREY,fontSize:18,alignSelf:"center"}}>→</div>
+<div><div style={{color:"#ff6b6b",fontWeight:800,fontSize:16}}>{wEff}</div><div style={{color:GREY,fontSize:10}}>SLECHTSTE · {w.date?.slice(5)||"—"}</div></div>
+<div><div style={{color:WHITE,fontWeight:800,fontSize:16}}>±{parseFloat((bEff-wEff).toFixed(1))}</div><div style={{color:GREY,fontSize:10}}>SPREAD</div></div>
+</div>
+</div>
+</div>
+);
+})}
+</div>
+
+{/* Multi-player eff over time */}
+{top3.length>=2&&(()=>{
+if(top3.every(ps=>ps.games.length<2))return null;
+const allVals=top3.flatMap(ps=>ps.games.map(g=>+calcFps(g)));
+const gMin=Math.min(...allVals),gMax=Math.max(...allVals);
+const gRange=gMax-gMin||1;
+const W=320,H=90,padX=8,padY=8;
+// For each player: map their games by date index in allDates
+const colors=[RED,"#5B9BD5","#27AE60"];
+return(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📈 EFF TIJDLIJN — TOP {top3.length}</div>
+<div style={{background:INPUTBG,borderRadius:14,padding:"16px 14px",overflowX:"auto"}}>
+<svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block"}}>
+{/* Grid lines */}
+{[0,0.25,0.5,0.75,1].map(f=>{
+const y=padY+(1-f)*(H-padY*2);
+return<line key={f} x1={padX} y1={y} x2={W-padX} y2={y} stroke="#333" strokeWidth={0.5}/>;
+})}
+{top3.map((ps,ci)=>{
+if(ps.games.length<2)return null;
+const sorted=ps.games.slice().sort((a,b)=>a.date<b.date?-1:1);
+const pts=sorted.map((g,i)=>{
+const di=allDates.indexOf(g.date);
+const x=padX+(di/(allDates.length-1||1))*(W-padX*2);
+const y=padY+(1-(+calcFps(g)-gMin)/gRange)*(H-padY*2);
+return`${x},${y}`;
+});
+return<polyline key={ci} points={pts.join(" ")} fill="none" stroke={colors[ci]} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>;
+})}
+{/* Dots */}
+{top3.map((ps,ci)=>{
+const sorted=ps.games.slice().sort((a,b)=>a.date<b.date?-1:1);
+return sorted.map((g,i)=>{
+const di=allDates.indexOf(g.date);
+const x=padX+(di/(allDates.length-1||1))*(W-padX*2);
+const y=padY+(1-(+calcFps(g)-gMin)/gRange)*(H-padY*2);
+return<circle key={`${ci}-${i}`} cx={x} cy={y} r={3} fill={colors[ci]}/>;
+});
+})}
+</svg>
+{/* Legend */}
+<div style={{display:"flex",gap:14,marginTop:10,flexWrap:"wrap"}}>
+{top3.map((ps,ci)=>(
+<div key={ci} style={{display:"flex",alignItems:"center",gap:5}}>
+<div style={{width:14,height:3,background:colors[ci],borderRadius:2}}/>
+<span style={{color:WHITE,fontSize:11,fontWeight:700}}>{ps.player.name}</span>
+</div>
+))}
+</div>
+</div>
+</div>
+);
+})()}
+
+</div>
+);
+})()}
+
 </>
 )}
 {cardFor&&<PlayerCardModal player={cardFor} allGames={games} monthKey={selMonth} onClose={()=>setCardFor(null)}/>}

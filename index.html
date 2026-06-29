@@ -1585,13 +1585,13 @@ Pick the single best NBA player comparison and give a fun, specific, confident a
 Respond ONLY with valid JSON (no markdown, no backticks) in this exact shape:
 {"nbaPlayer":"Full Name","era":"e.g. 2016–present","nickname":"e.g. The Slim Reaper","matchPct":87,"reason":"2-3 sentence explanation of WHY they match — specific stats, playstyle, tendencies","keyStats":["stat insight 1","stat insight 2","stat insight 3"],"verdict":"One punchy sentence, like a headline"}`;
 try{
-const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AQ.Ab8RN6JffaLO8eyCngyRg4jDGfhIvBwu97zyfbRsXUQ-JLbM0A`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.8,maxOutputTokens:1000}})});
+const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AQ.Ab8RN6JffaLO8eyCngyRg4jDGfhIvBwu97zyfbRsXUQ-JLbM0A`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":"AQ.Ab8RN6JffaLO8eyCngyRg4jDGfhIvBwu97zyfbRsXUQ-JLbM0A"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.8,maxOutputTokens:1000}})});
 const data=await res.json();
 const text=data.candidates?.[0]?.content?.parts?.map(b=>b.text||"").join("")||"";
 const clean=text.replace(/```json|```/g,"").trim();
 const parsed=JSON.parse(clean);
 setResult(parsed);
-}catch(e){setErr("Kon vergelijking niet laden. Probeer opnieuw.");}
+}catch(e){setErr("Fout: "+(e&&e.message?e.message:String(e)));}
 setLoading(false);
 }
 

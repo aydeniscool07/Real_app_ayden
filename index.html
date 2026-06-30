@@ -249,6 +249,14 @@ return pick(templates);
 }
 
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+// Small stable string hash (djb2-ish), used to build deterministic short ids
+// from variable-length signatures like an injury-report fingerprint.
+function hashStr(str){
+let h=0;
+const s=String(str||"");
+for(let i=0;i<s.length;i++){h=((h<<5)-h+s.charCodeAt(i))|0;}
+return Math.abs(h).toString(36);
+}
 // Spawn-in like counts for LARP posts: linked/Twitter-fetched accounts (and LBAcentel) start hotter
 function rollLikes(linked){return linked?(1000+Math.floor(Math.random()*450)):(500+Math.floor(Math.random()*250));}
 function personaIsLinked(persona){return !!(persona&&(persona.twitterHandle||persona.isMediaAccount));}
@@ -570,7 +578,7 @@ return softenText(pick(banks[persona.style]||banks.washed),toxicity);
 }
 // Pre-game hype/trash-talk post for a scheduled matchday — expectations + the usual toxic slander
 function generateBotHypePost(persona,ctx,toxicity=3){
-const {teamA,teamB,hypeName,rivalName,injuredName,injuredStatus,injuredReason}=ctx;
+const {teamA,teamB,hypeName,rivalName,injuredName,injuredStatus,injuredReason,isUpdate}=ctx;
 const banks={
 washed:[
 `${rivalName} is washed, tonight's the night everybody finds out. ${teamA} vs ${teamB} gonna expose it.`,
@@ -626,11 +634,16 @@ decline:[
 let pool=banks[persona.style]||banks.washed;
 if(injuredName&&injuredStatus){
 const statusWord=injuredStatus==="out"?"OUT":"questionable";
-pool=pool.concat([
+const injuryLines=isUpdate?[
+`UPDATE: ${injuredName} now ${statusWord} for tonight's ${teamA} vs ${teamB}${injuredReason?` (${injuredReason})`:""}. Report just changed.`,
+`Status flip — ${injuredName} just went ${statusWord} ahead of tonight. Wasn't like that an hour ago.`,
+`Injury report update: ${injuredName} ${statusWord} now for ${teamA} vs ${teamB}. ${statusWord==="OUT"?"Book it.":"Watch this space."}`
+]:[
 `${injuredName} suddenly ${statusWord} right before tonight's ${teamA} vs ${teamB}? Sure, convenient timing.`,
 `Hearing ${injuredName} is ${statusWord} for tonight${injuredReason?` (${injuredReason})`:""}. Huge if true.`,
 `If ${injuredName} really sits tonight, this whole game changes. ${statusWord==="OUT"?"Book it.":"Watch this space."}`
-]);
+];
+pool=isUpdate?injuryLines:pool.concat(injuryLines);
 }
 return softenText(pick(pool),toxicity);
 }
@@ -6849,7 +6862,13 @@ createdAt:new Date().toISOString()
 },[games,players,larpPosts,loading,botSettings]);
 
 // ── LARP Bots: hype + trash talk about today's scheduled matchup before it's played
+// Re-fires whenever today's injury report changes (new status/reason), so bots react
+// to late-breaking news the same way real NBA-Twitter would, not just once at tip-off.
 const botHypeRanRef=useRef(new Set());
+function injuryReportSig(game){
+const entries=Object.entries(game.injuryReport||{}).filter(([,r])=>r&&r.status&&r.status!=="active");
+return entries.map(([pid,r])=>`${pid}:${r.status}:${r.reason||""}`).sort().join("|");
+}
 useEffect(()=>{
 if(loading||!scheduledGames.length)return;
 const personas=effectivePersonas(botSettings);
@@ -6858,10 +6877,13 @@ const freq=freqConfig(botSettings?.postFrequency||2);
 const todayStr=new Date().toISOString().slice(0,10);
 const todaysGames=scheduledGames.filter(g=>g.date===todayStr);
 todaysGames.forEach(game=>{
-const baseId=`auto-bot-hype-${game.id}-0`;
+const sig=injuryReportSig(game);
+const runKey=`${game.id}::${sig}`;
+const baseId=`auto-bot-hype-${game.id}-${hashStr(sig)}-0`;
 if(larpPosts.find(p=>p.id===baseId))return;
-if(botHypeRanRef.current.has(game.id))return;
-botHypeRanRef.current.add(game.id);
+if(botHypeRanRef.current.has(runKey))return;
+const isUpdate=[...botHypeRanRef.current].some(k=>k.startsWith(`${game.id}::`)&&k!==runKey);
+botHypeRanRef.current.add(runKey);
 const teamA=game.teamAName||"Team A",teamB=game.teamBName||"Team B";
 const lineupA=(game.lineupA||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
 const lineupB=(game.lineupB||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
@@ -6878,12 +6900,12 @@ injuredName=ip?.name||null;
 injuredStatus=irep.status;
 injuredReason=irep.reason;
 }
-const ctx={teamA,teamB,hypeName:hypePlayer?.name||teamA,rivalName:rivalPlayer?.name||teamB,injuredName,injuredStatus,injuredReason};
+const ctx={teamA,teamB,hypeName:hypePlayer?.name||teamA,rivalName:rivalPlayer?.name||teamB,injuredName,injuredStatus,injuredReason,isUpdate};
 const n=freq.gameBotsMin+Math.floor(Math.random()*(freq.gameBotsMax-freq.gameBotsMin+1));
 randomBots(personas,n).forEach((persona,i)=>{
 setTimeout(()=>{
 fbSave("larp_posts",{
-id:`auto-bot-hype-${game.id}-${i}`,
+id:`auto-bot-hype-${game.id}-${hashStr(sig)}-${i}`,
 tempName:persona.handle,
 botId:persona.id,
 text:generateBotHypePost(persona,ctx,toxicity),

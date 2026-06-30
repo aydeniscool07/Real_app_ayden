@@ -5469,24 +5469,57 @@ const [teamAName,setTeamAName]=useState("Mijn Team");
 const [teamBName,setTeamBName]=useState("Tegenstander");
 const [showPicker,setShowPicker]=useState(false);
 const [step,setStep]=useState("teamA"); // teamA | teamB | result
+const [aiPrediction,setAiPrediction]=useState(null);
+const [aiLoading,setAiLoading]=useState(false);
+const [aiErr,setAiErr]=useState(null);
+const [nbaCompare,setNbaCompare]=useState(null);
+const [nbaLoading,setNbaLoading]=useState(false);
+const [nbaErr,setNbaErr]=useState(null);
+
+useEffect(()=>{
+try{
+const saved=JSON.parse(localStorage.getItem("lba_saved_lineup")||"null");
+if(saved){
+if(saved.lineupA)setLineupA(saved.lineupA);
+if(saved.lineupB)setLineupB(saved.lineupB);
+if(saved.teamAName)setTeamAName(saved.teamAName);
+if(saved.teamBName)setTeamBName(saved.teamBName);
+if(saved.useChameleon!==undefined)setUseChameleon(saved.useChameleon);
+}
+}catch(e){}
+},[]);
+function saveLineup(){
+try{
+localStorage.setItem("lba_saved_lineup",JSON.stringify({lineupA,lineupB,teamAName,teamBName,useChameleon}));
+}catch(e){}
+}
 
 // Stats calc
 function getPlayerStats(pid,chameleon=false){
 const pg=games.filter(g=>g.playerId===pid&&(chameleon?g.team==="chameleon":g.team!=="chameleon")).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
 const last5=pg.slice(0,5);
-if(!last5.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0,gp:0};
+if(!last5.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0,gp:0,eff:0,form:[]};
 const{w,l,d}=getWinLoss(pg);
 const total=w+l+d;
+const last3=pg.slice(0,3);
+const form=last3.map(g=>{
+const e=+calcFps(g);
+if(e>=14)return"hot";
+if(e>=8)return"warm";
+return"cold";
+});
 return{
 pts:avg(last5,"pts"),reb:avg(last5,"reb"),ast:avg(last5,"ast"),
 winRate:total?parseFloat(((w+d*0.5)/total*100).toFixed(1)):0,
 fps:parseFloat((last5.reduce((s,g)=>s+(+calcFps(g)),0)/last5.length).toFixed(1)),
-gp:pg.length
+gp:pg.length,
+eff:parseFloat((last5.reduce((s,g)=>s+(+calcFps(g)),0)/last5.length).toFixed(1)),
+form
 };
 }
 function lineupStats(lineup,chameleon=false){
 const pids=Object.values(lineup||{}).filter(Boolean);
-if(!pids.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0};
+if(!pids.length)return{pts:0,reb:0,ast:0,winRate:0,fps:0,eff:0};
 const stats=pids.map(pid=>getPlayerStats(pid,chameleon));
 return{
 pts:parseFloat((stats.reduce((s,x)=>s+x.pts,0)).toFixed(1)),
@@ -5494,7 +5527,102 @@ reb:parseFloat((stats.reduce((s,x)=>s+x.reb,0)).toFixed(1)),
 ast:parseFloat((stats.reduce((s,x)=>s+x.ast,0)).toFixed(1)),
 winRate:parseFloat((stats.reduce((s,x)=>s+x.winRate,0)/stats.length).toFixed(1)),
 fps:parseFloat((stats.reduce((s,x)=>s+x.fps,0)).toFixed(1)),
+eff:parseFloat((stats.reduce((s,x)=>s+x.eff,0)/stats.length).toFixed(1)),
 };
+}
+
+// Positional balance check
+function positionWarning(lineup){
+const pids=Object.entries(lineup||{}).filter(([,v])=>v);
+if(pids.length<2)return null;
+const posByPlayer=pids.map(([slot,pid])=>{
+const p=players.find(x=>x.id===pid);
+return p?.position||slot;
+});
+const counts={};
+posByPlayer.forEach(p=>{counts[p]=(counts[p]||0)+1;});
+const stacked=Object.entries(counts).find(([,c])=>c>=3);
+return stacked?`${stacked[1]}× ${stacked[0]} gestapeld — weinig variatie`:null;
+}
+
+// Auto-suggest best lineup by eff
+function suggestBestLineup(excludeIds=[]){
+const ranked=players.filter(p=>!excludeIds.includes(p.id)).map(p=>({p,st:getPlayerStats(p.id,false)})).filter(x=>x.st.gp>0).sort((a,b)=>b.st.eff-a.st.eff);
+const slots=["PG","SG","SF","PF","C"];
+const result={PG:null,SG:null,SF:null,PF:null,C:null};
+const used=new Set();
+slots.forEach(slot=>{
+const match=ranked.find(r=>!used.has(r.p.id)&&r.p.position===slot);
+if(match){result[slot]=match.p.id;used.add(match.p.id);}
+});
+slots.forEach(slot=>{
+if(result[slot])return;
+const next=ranked.find(r=>!used.has(r.p.id));
+if(next){result[slot]=next.p.id;used.add(next.p.id);}
+});
+return result;
+}
+
+// Head-to-head: past games where these two sets of players opposed each other
+function findHeadToHead(idsA,idsB){
+if(!idsA.length||!idsB.length)return[];
+const byMatch={};
+games.forEach(g=>{
+const key=g.matchId||(g.id?g.id.split("_")[0]:null);
+if(!key)return;
+if(!byMatch[key])byMatch[key]=[];
+byMatch[key].push(g);
+});
+const matches=[];
+Object.values(byMatch).forEach(gs=>{
+const teamAIds=gs.filter(g=>g.team==="A").map(g=>g.playerId);
+const teamBIds=gs.filter(g=>g.team==="B").map(g=>g.playerId);
+const overlapA=idsA.filter(id=>teamAIds.includes(id)).length;
+const overlapB=idsB.filter(id=>teamBIds.includes(id)).length;
+const overlapAtoB=idsA.filter(id=>teamBIds.includes(id)).length;
+const overlapBtoA=idsB.filter(id=>teamAIds.includes(id)).length;
+if((overlapA>=2&&overlapB>=2)||(overlapAtoB>=2&&overlapBtoA>=2)){
+const aWasA=overlapA>=overlapAtoB;
+const ga=gs.find(g=>g.team==="A");
+const gb=gs.find(g=>g.team==="B");
+const scoreA=aWasA?ga?.teamAScore:gb?.teamBScore;
+const scoreB=aWasA?ga?.teamBScore:gb?.teamAScore;
+matches.push({date:gs[0]?.date,scoreA,scoreB});
+}
+});
+return matches.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,5);
+}
+
+// Chemistry: pairs within a lineup with high combined eff when on the same team historically
+function findChemistry(lineup){
+const pids=Object.values(lineup||{}).filter(Boolean);
+if(pids.length<2)return[];
+const byMatch={};
+games.forEach(g=>{
+const key=g.matchId||(g.id?g.id.split("_")[0]:null);
+if(!key)return;
+if(!byMatch[key])byMatch[key]=[];
+byMatch[key].push(g);
+});
+const pairs=[];
+for(let i=0;i<pids.length;i++){
+for(let j=i+1;j<pids.length;j++){
+const a=pids[i],b=pids[j];
+const sharedGames=[];
+Object.values(byMatch).forEach(gs=>{
+const ga=gs.find(g=>g.playerId===a);
+const gb=gs.find(g=>g.playerId===b);
+if(ga&&gb&&ga.team===gb.team&&ga.team!=="chameleon"){
+sharedGames.push({ga,gb});
+}
+});
+if(sharedGames.length>=2){
+const combinedEff=parseFloat((sharedGames.reduce((s,{ga,gb})=>s+(+calcFps(ga))+(+calcFps(gb)),0)/sharedGames.length).toFixed(1));
+pairs.push({a,b,games:sharedGames.length,combinedEff});
+}
+}
+}
+return pairs.sort((a,b)=>b.combinedEff-a.combinedEff).slice(0,3);
 }
 
 const statsA=lineupStats(lineupA,useChameleon);
@@ -5578,6 +5706,71 @@ return(
 );
 }
 
+function FormDots({form}){
+if(!form||!form.length)return null;
+const colorFor=f=>f==="hot"?"#27AE60":f==="warm"?"#f5a524":"#ff6b6b";
+return(
+<div style={{display:"flex",gap:3}}>
+{form.map((f,i)=>(
+<span key={i} style={{width:7,height:7,borderRadius:"50%",background:colorFor(f),display:"inline-block"}}/>
+))}
+</div>
+);
+}
+
+async function getAiPrediction(){
+if(aiLoading)return;
+setAiLoading(true);setAiErr(null);setAiPrediction(null);
+const namesA=Object.entries(lineupA).filter(([,v])=>v).map(([slot,pid])=>{const p=players.find(x=>x.id===pid);const st=getPlayerStats(pid,useChameleon);return`${p?.name} (${slot}, ${st.eff} eff, ${st.pts} pts, ${st.reb} reb, ${st.ast} ast over laatste 5)`;});
+const namesB=Object.entries(lineupB||{}).filter(([,v])=>v).map(([slot,pid])=>{const p=players.find(x=>x.id===pid);const st=getPlayerStats(pid,false);return`${p?.name} (${slot}, ${st.eff} eff, ${st.pts} pts, ${st.reb} reb, ${st.ast} ast over laatste 5)`;});
+const prompt=`Je bent een basketball analist. Twee teams in een casual vrienden-competitie (games tot 10 punten) gaan tegen elkaar spelen.
+
+Team "${teamAName}": ${namesA.join("; ")}
+Team "${teamBName}": ${namesB.join("; ")}
+
+Geef een scherpe, specifieke voorspelling. Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
+{"winner":"naam van het winnende team","confidence":72,"summary":"1-2 zinnen kernoordeel","breakdown":["punt 1 over een specifiek statistisch voordeel","punt 2","punt 3"],"scoreGuess":"bijv. 10-7"}`;
+try{
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer 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"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:800,temperature:0.8,messages:[{role:"user",content:prompt}]})});
+const rawText=await res.text();
+if(!res.ok){setAiErr("API fout "+res.status+": "+rawText.slice(0,200));setAiLoading(false);return;}
+const data=JSON.parse(rawText);
+const text=data.choices?.[0]?.message?.content||"";
+const clean=text.replace(/```json|```/g,"").trim();
+setAiPrediction(JSON.parse(clean));
+}catch(e){setAiErr("Fout: "+(e&&e.message?e.message:String(e)));}
+setAiLoading(false);
+}
+
+async function getNbaCompare(){
+if(nbaLoading)return;
+setNbaLoading(true);setNbaErr(null);setNbaCompare(null);
+const filledIds=Object.values(lineupA).filter(Boolean);
+const isDuo=filledIds.length===2;
+const namesA=Object.entries(lineupA).filter(([,v])=>v).map(([slot,pid])=>{const p=players.find(x=>x.id===pid);const st=getPlayerStats(pid,useChameleon);return`${p?.name} (${slot}, ${st.eff} eff, ${st.pts} pts, ${st.reb} reb, ${st.ast} ast)`;});
+const prompt=isDuo
+?`Je bent een basketball analist. Vergelijk dit 2-mans duo uit een casual vrienden-competitie (games tot 10 punten) met het meest gelijkende NBA-duo qua speelstijl en synergie:
+${namesA.join("; ")}
+
+Antwoord ALLEEN met geldige JSON (geen markdown):
+{"type":"duo","nbaMatch":"bijv. Stockton & Malone","era":"jaren","matchPct":85,"reason":"2-3 zinnen waarom dit duo lijkt op het NBA-duo","verdict":"één pakkende zin"}`
+:`Je bent een basketball analist. Vergelijk dit team uit een casual vrienden-competitie (games tot 10 punten) met het meest gelijkende NBA-team qua speelstijl, roster-opbouw en balans:
+${namesA.join("; ")}
+
+Antwoord ALLEEN met geldige JSON (geen markdown):
+{"type":"team","nbaMatch":"bijv. Golden State Warriors","era":"jaren","matchPct":85,"reason":"2-3 zinnen waarom dit team lijkt op het NBA-team","verdict":"één pakkende zin"}`;
+try{
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer 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"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:700,temperature:0.8,messages:[{role:"user",content:prompt}]})});
+const rawText=await res.text();
+if(!res.ok){setNbaErr("API fout "+res.status+": "+rawText.slice(0,200));setNbaLoading(false);return;}
+const data=JSON.parse(rawText);
+const text=data.choices?.[0]?.message?.content||"";
+const clean=text.replace(/```json|```/g,"").trim();
+setNbaCompare(JSON.parse(clean));
+}catch(e){setNbaErr("Fout: "+(e&&e.message?e.message:String(e)));}
+setNbaLoading(false);
+}
+
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:300,overflowY:"auto",display:"flex",alignItems:"flex-start",justifyContent:"center",paddingBottom:40}}>
 <div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#0a0a0a",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,minHeight:"80vh",paddingBottom:20}}>
@@ -5602,21 +5795,102 @@ return(
 <span style={{color:GREY,fontSize:12}}>🦎 Kameleon stats gebruiken</span>
 </label>
 </div>
+<div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+<button onClick={()=>setLineupA(suggestBestLineup())} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>✨ Beste lineup</button>
+<button onClick={saveLineup} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>💾 Opslaan</button>
+</div>
+{positionWarning(lineupA)&&(
+<div style={{marginTop:8,background:"#3a2a0022",border:"1px solid #f5a52455",borderRadius:8,padding:"6px 10px",color:"#f5a524",fontSize:11,fontWeight:600}}>⚠️ {positionWarning(lineupA)}</div>
+)}
 {/* Team A stats */}
-<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
-{[["PTS",statsA.pts],["REB",statsA.reb],["AST",statsA.ast],["WIN%",statsA.winRate+"%"]].map(([l,v])=>(
-<div key={l} style={{background:INPUTBG,borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
-<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{v}</div>
-<div style={{color:GREY,fontSize:10}}>{l}</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginTop:10}}>
+{[["PTS",statsA.pts],["REB",statsA.reb],["AST",statsA.ast],["EFF",statsA.eff],["WIN%",statsA.winRate+"%"]].map(([l,v])=>(
+<div key={l} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px",textAlign:"center"}}>
+<div style={{color:l==="EFF"?RED:WHITE,fontWeight:800,fontSize:15}}>{v}</div>
+<div style={{color:GREY,fontSize:9}}>{l}</div>
 </div>
 ))}
 </div>
+{(()=>{
+const chem=findChemistry(lineupA);
+if(!chem.length)return null;
+return(
+<div style={{marginTop:10}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>🤝 CHEMIE</div>
+<div style={{display:"flex",flexDirection:"column",gap:5}}>
+{chem.map((c,i)=>{
+const pa=players.find(x=>x.id===c.a),pb=players.find(x=>x.id===c.b);
+return(
+<div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"#0a1f0a",border:"1px solid #27AE6044",borderRadius:8,padding:"6px 10px"}}>
+<span style={{color:"#27AE60",fontSize:11,fontWeight:700,flex:1}}>{pa?.name} + {pb?.name}</span>
+<span style={{color:GREY,fontSize:10}}>{c.combinedEff} eff samen · {c.games}G</span>
+</div>
+);
+})}
+</div>
+</div>
+);
+})()}
 </div>
 
 {/* Create opponent or show comparison */}
 {!lineupB&&filledA>=1&&(
 <div style={{padding:"0 16px",marginTop:12}}>
 <button onClick={()=>setLineupB({PG:null,SG:null,SF:null,PF:null,C:null})} style={{...BG2,border:`1px dashed ${DARKGREY}`}}>+ Tegenstander toevoegen</button>
+</div>
+)}
+
+{/* NBA duo/team comparison — only needs Team A filled with 2+ */}
+{filledA>=2&&(
+<div style={{padding:"0 16px",marginTop:12}}>
+{!nbaCompare&&!nbaLoading&&(
+<button onClick={getNbaCompare} style={{width:"100%",background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B655",borderRadius:14,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,textAlign:"left"}}>
+<span style={{fontSize:22}}>🏀</span>
+<div style={{flex:1}}>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:12,letterSpacing:1}}>{filledA===2?"NBA DUO VERGELIJKING":"NBA TEAM VERGELIJKING"}</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>Welk NBA-{filledA===2?"duo":"team"} lijkt op {teamAName}?</div>
+</div>
+<span style={{color:GREY,fontSize:16}}>→</span>
+</button>
+)}
+{nbaLoading&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B633",borderRadius:14,padding:"20px 16px",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+<div style={{fontSize:28}}>🔍</div>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:13}}>Vergelijkt met NBA database...</div>
+</div>
+)}
+{nbaErr&&(
+<div style={{background:INPUTBG,borderRadius:14,padding:"14px",textAlign:"center"}}>
+<div style={{color:"#ff6b6b",marginBottom:8,fontSize:13}}>{nbaErr}</div>
+<button onClick={getNbaCompare} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"8px 16px",cursor:"pointer",fontWeight:700}}>Opnieuw</button>
+</div>
+)}
+{nbaCompare&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#120a1e)",border:"1px solid #9B59B688",borderRadius:14,overflow:"hidden"}}>
+<div style={{padding:"14px 16px 10px",borderBottom:"1px solid #9B59B622",display:"flex",alignItems:"flex-start",gap:12}}>
+<div style={{width:46,height:46,borderRadius:10,background:"linear-gradient(135deg,#9B59B6,#6C3483)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🏀</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#9B59B6",fontSize:9,fontWeight:800,letterSpacing:1.5}}>{nbaCompare.era||""} · {nbaCompare.type==="duo"?"DUO":"TEAM"}</div>
+<div style={{color:WHITE,fontWeight:900,fontSize:17,lineHeight:1.15}}>{nbaCompare.nbaMatch}</div>
+</div>
+<div style={{textAlign:"center",flexShrink:0}}>
+<div style={{color:"#9B59B6",fontWeight:900,fontSize:22}}>{nbaCompare.matchPct}%</div>
+<div style={{color:GREY,fontSize:9,fontWeight:700}}>MATCH</div>
+</div>
+</div>
+{nbaCompare.verdict&&(
+<div style={{padding:"10px 16px",borderBottom:"1px solid #9B59B622",background:"rgba(155,89,182,0.08)"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,lineHeight:1.4,fontStyle:"italic"}}>"{nbaCompare.verdict}"</div>
+</div>
+)}
+<div style={{padding:"10px 16px"}}>
+<div style={{color:GREY,fontSize:12,lineHeight:1.6}}>{nbaCompare.reason}</div>
+</div>
+<div style={{padding:"6px 16px 10px",borderTop:"1px solid #9B59B622"}}>
+<button onClick={getNbaCompare} style={{background:"transparent",border:"1px solid #9B59B633",borderRadius:8,padding:"6px 12px",color:GREY,fontSize:11,cursor:"pointer",fontWeight:600}}>🔄 Opnieuw</button>
+</div>
+</div>
+)}
 </div>
 )}
 
@@ -5628,11 +5902,11 @@ return(
 <div style={{color:GREY,fontSize:12,flexShrink:0}}>{filledB} spelers</div>
 </div>
 <CourtView lineup={lineupB} team="B"/>
-<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
-{[["PTS",statsB.pts],["REB",statsB.reb],["AST",statsB.ast],["WIN%",statsB.winRate+"%"]].map(([l,v])=>(
-<div key={l} style={{background:"#0a1a3c",borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
-<div style={{color:"#5599ff",fontWeight:800,fontSize:16}}>{v}</div>
-<div style={{color:GREY,fontSize:10}}>{l}</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginTop:10}}>
+{[["PTS",statsB.pts],["REB",statsB.reb],["AST",statsB.ast],["EFF",statsB.eff],["WIN%",statsB.winRate+"%"]].map(([l,v])=>(
+<div key={l} style={{background:"#0a1a3c",borderRadius:10,padding:"8px 4px",textAlign:"center"}}>
+<div style={{color:l==="EFF"?"#5599ff":WHITE,fontWeight:800,fontSize:15}}>{v}</div>
+<div style={{color:GREY,fontSize:9}}>{l}</div>
 </div>
 ))}
 </div>
@@ -5651,7 +5925,8 @@ return(
 <StatBar label="Totaal AST" valA={statsA.ast} valB={statsB.ast}/>
 <StatBar label="Gem. Win%" valA={statsA.winRate} valB={statsB.winRate}/>
 <StatBar label="Totaal FPS" valA={statsA.fps} valB={statsB.fps}/>
-{/* Winner prediction */}
+<StatBar label="Gem. EFF" valA={statsA.eff} valB={statsB.eff}/>
+{/* Winner prediction (formula-based, instant) */}
 {(()=>{
 const scoreA=statsA.pts*0.4+statsA.reb*0.2+statsA.ast*0.2+statsA.winRate*0.2;
 const scoreB=statsB.pts*0.4+statsB.reb*0.2+statsB.ast*0.2+statsB.winRate*0.2;
@@ -5669,6 +5944,81 @@ return(
 </div>
 );
 })()}
+{/* Head-to-head history */}
+{(()=>{
+const idsA=Object.values(lineupA).filter(Boolean);
+const idsB=Object.values(lineupB||{}).filter(Boolean);
+const h2h=findHeadToHead(idsA,idsB);
+if(!h2h.length)return null;
+return(
+<div style={{marginTop:12}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8}}>📜 EERDER TEGEN ELKAAR</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{h2h.map((m,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#111",borderRadius:8,padding:"8px 12px"}}>
+<span style={{color:GREY,fontSize:11}}>{m.date}</span>
+<span style={{color:WHITE,fontWeight:700,fontSize:14}}>{m.scoreA ?? "?"} – {m.scoreB ?? "?"}</span>
+</div>
+))}
+</div>
+</div>
+);
+})()}
+{/* AI prediction with reasoning */}
+<div style={{marginTop:14}}>
+{!aiPrediction&&!aiLoading&&(
+<button onClick={getAiPrediction} style={{width:"100%",background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B655",borderRadius:12,padding:"12px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,textAlign:"left"}}>
+<span style={{fontSize:20}}>🧠</span>
+<div style={{flex:1}}>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:12,letterSpacing:0.5}}>AI WEDSTRIJD ANALYSE</div>
+<div style={{color:GREY,fontSize:11,marginTop:1}}>Diepere voorspelling met onderbouwing</div>
+</div>
+<span style={{color:GREY,fontSize:14}}>→</span>
+</button>
+)}
+{aiLoading&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#0a0a1a)",border:"1px solid #9B59B633",borderRadius:12,padding:"18px 14px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
+<div style={{fontSize:24}}>🔍</div>
+<div style={{color:"#9B59B6",fontWeight:700,fontSize:12}}>Analyseert matchup...</div>
+</div>
+)}
+{aiErr&&(
+<div style={{background:"#111",borderRadius:12,padding:"12px",textAlign:"center"}}>
+<div style={{color:"#ff6b6b",marginBottom:6,fontSize:12}}>{aiErr}</div>
+<button onClick={getAiPrediction} style={{background:RED,color:WHITE,border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontWeight:700,fontSize:12}}>Opnieuw</button>
+</div>
+)}
+{aiPrediction&&(
+<div style={{background:"linear-gradient(135deg,#1a0a2a,#120a1e)",border:"1px solid #9B59B688",borderRadius:12,overflow:"hidden"}}>
+<div style={{padding:"12px 14px",borderBottom:"1px solid #9B59B622",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+<div>
+<div style={{color:"#9B59B6",fontSize:9,fontWeight:800,letterSpacing:1}}>AI VOORSPELT</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:15}}>{aiPrediction.winner}</div>
+</div>
+<div style={{textAlign:"center"}}>
+<div style={{color:"#9B59B6",fontWeight:900,fontSize:20}}>{aiPrediction.confidence}%</div>
+<div style={{color:GREY,fontSize:9}}>{aiPrediction.scoreGuess||""}</div>
+</div>
+</div>
+<div style={{padding:"10px 14px",borderBottom:"1px solid #9B59B622"}}>
+<div style={{color:WHITE,fontSize:12.5,fontStyle:"italic",lineHeight:1.5}}>"{aiPrediction.summary}"</div>
+</div>
+{aiPrediction.breakdown&&(
+<div style={{padding:"10px 14px"}}>
+{aiPrediction.breakdown.map((b,i)=>(
+<div key={i} style={{display:"flex",gap:8,marginBottom:6}}>
+<span style={{color:"#9B59B6",fontWeight:800}}>·</span>
+<span style={{color:GREY,fontSize:12,lineHeight:1.5}}>{b}</span>
+</div>
+))}
+</div>
+)}
+<div style={{padding:"6px 14px 10px",borderTop:"1px solid #9B59B622"}}>
+<button onClick={getAiPrediction} style={{background:"transparent",border:"1px solid #9B59B633",borderRadius:8,padding:"5px 10px",color:GREY,fontSize:10,cursor:"pointer",fontWeight:600}}>🔄 Opnieuw</button>
+</div>
+</div>
+)}
+</div>
 </div>
 )}
 </div>
@@ -5686,8 +6036,11 @@ return(
 <div key={p.id} onClick={()=>pickPlayer(p.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px",borderRadius:12,marginBottom:6,background:INPUTBG,cursor:"pointer"}}>
 <Avatar player={p} size={38}/>
 <div style={{flex:1}}>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
 <div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p.name}</div>
-<div style={{color:GREY,fontSize:12}}>{p.position||"—"} · {st.gp}G</div>
+<FormDots form={st.form}/>
+</div>
+<div style={{color:GREY,fontSize:12}}>{p.position||"—"} · {st.gp}G · {st.eff} eff</div>
 </div>
 <div style={{display:"flex",gap:10,textAlign:"center"}}>
 {[["PTS",st.pts],["REB",st.reb],["AST",st.ast]].map(([l,v])=>(

@@ -2022,6 +2022,83 @@ return <polygon key={lvl} points={gp} fill="none" stroke="#333" strokeWidth="1"/
 );
 }
 
+// ── Admin: Status Graphic Maker (overlay text like "RULED OUT" on a player's photo)
+const STATUS_GRAPHIC_PRESETS=[
+{label:"RULED OUT",color:"#FF8A00"},
+{label:"OUT",color:RED},
+{label:"QUESTIONABLE",color:"#FFD400"},
+{label:"GAME-TIME DECISION",color:"#FFD400"},
+{label:"ACTIVE",color:"#27AE60"},
+{label:"PROBABLE",color:"#27AE60"},
+];
+function StatusGraphicModal({player,onClose}){
+const [text,setText]=useState(STATUS_GRAPHIC_PRESETS[0].label);
+const [color,setColor]=useState(STATUS_GRAPHIC_PRESETS[0].color);
+const [useBackdrop,setUseBackdrop]=useState(!!player.backdrop);
+const [exporting,setExporting]=useState(false);
+const graphicRef=useRef();
+const imgSrc=useBackdrop&&player.backdrop?player.backdrop:(player.pfp||null);
+
+async function exportGraphic(){
+if(!graphicRef.current||!window.html2canvas)return;
+setExporting(true);
+try{
+const canvas=await window.html2canvas(graphicRef.current,{backgroundColor:"#000",useCORS:true,scale:2});
+const link=document.createElement("a");
+link.download=`${player.name.replace(/\s+/g,"_")}_status.png`;
+link.href=canvas.toDataURL("image/png");
+link.click();
+}catch(e){console.error("Export mislukt:",e);}
+setExporting(false);
+}
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:270,padding:20,gap:18}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{width:"100%",maxWidth:380}}>
+<div ref={graphicRef} style={{position:"relative",width:"100%",aspectRatio:"4/5",borderRadius:14,overflow:"hidden",background:"#0a0a0a"}}>
+{imgSrc?(
+<img src={imgSrc} crossOrigin="anonymous" style={{width:"100%",height:"100%",objectFit:"cover",filter:"grayscale(15%) contrast(1.05)"}}/>
+):(
+<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}><Avatar player={player} size={120}/></div>
+)}
+<div style={{position:"absolute",inset:0,background:"linear-gradient(180deg,rgba(0,0,0,0.55) 0%,transparent 30%,transparent 65%,rgba(0,0,0,0.75) 100%)"}}/>
+<div style={{position:"absolute",top:18,left:18,right:18}}>
+<div style={{color,fontWeight:900,fontSize:text.length>14?28:38,lineHeight:1.02,letterSpacing:"-1px",textTransform:"uppercase",textShadow:"0 2px 10px rgba(0,0,0,0.6)",wordBreak:"break-word"}}>{text||"STATUS"}</div>
+</div>
+<div style={{position:"absolute",bottom:14,left:18,right:18,display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,textShadow:"0 1px 6px rgba(0,0,0,0.7)"}}>{player.name}{player.jersey?` · #${player.jersey}`:""}</div>
+<div style={{color:GREY,fontSize:10,fontWeight:800,letterSpacing:1}}>LBA STATS</div>
+</div>
+</div>
+</div>
+<div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:380,background:"#111",borderRadius:16,padding:18}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>STATUS TEKST</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+{STATUS_GRAPHIC_PRESETS.map(p=>(
+<button key={p.label} onClick={()=>{setText(p.label);setColor(p.color);}} style={{background:text===p.label?p.color:INPUTBG,color:text===p.label?"#000":WHITE,border:"none",borderRadius:8,padding:"7px 10px",fontWeight:700,fontSize:11,cursor:"pointer"}}>{p.label}</button>
+))}
+</div>
+<input value={text} onChange={e=>setText(e.target.value)} placeholder="Eigen tekst..." style={{width:"100%",background:INPUTBG,border:"1px solid #2a2a2a",borderRadius:10,padding:"11px 12px",color:WHITE,fontSize:14,marginBottom:10}}/>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+<span style={{color:GREY,fontSize:11,fontWeight:700}}>KLEUR</span>
+{["#FF8A00",RED,"#FFD400","#27AE60","#4FC3F7",WHITE].map(c=>(
+<button key={c} onClick={()=>setColor(c)} style={{width:24,height:24,borderRadius:"50%",background:c,border:color===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>
+))}
+</div>
+{player.backdrop&&player.pfp&&(
+<label style={{display:"flex",alignItems:"center",gap:8,marginBottom:14,fontSize:12,color:WHITE,cursor:"pointer"}}>
+<input type="checkbox" checked={useBackdrop} onChange={e=>setUseBackdrop(e.target.checked)}/> Gebruik achtergrondfoto i.p.v. profielfoto
+</label>
+)}
+<div style={{display:"flex",gap:10}}>
+<button onClick={exportGraphic} disabled={exporting} style={{flex:1,background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer",opacity:exporting?0.6:1}}>{exporting?"...":"📸 Download"}</button>
+<button onClick={onClose} style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer"}}>Sluiten</button>
+</div>
+</div>
+</div>
+);
+}
+
 function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
@@ -2030,6 +2107,7 @@ const hotStreak=useMemo(()=>computeHotStreak(pg),[pg]);
 const matchups=useMemo(()=>computeMatchups(pg),[pg]);
 const milestones=useMemo(()=>computeMilestones(pg),[pg]);
 const [showCard,setShowCard]=useState(false);
+const [showStatusGraphic,setShowStatusGraphic]=useState(false);
 const latestMonth=pg.length?gameYearMonth(pg[0]):currentMonthKey();
 const profileRef=useRef();
 const [exporting,setExporting]=useState(false);
@@ -2174,6 +2252,7 @@ return(
 ))}
 <div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap"}}>
 {isAdmin&&<button onClick={onEditPlayer} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>✏️ Bewerken</button>}
+{isAdmin&&<button data-testid="status-graphic-btn" onClick={()=>setShowStatusGraphic(true)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>🏷️ Status</button>}
 {onCompare&&<button data-testid="compare-btn" onClick={()=>onCompare(player)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>⚖️ Vergelijk</button>}
 <button data-testid="open-card-btn" onClick={()=>setShowCard(true)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px"}}>🎴 Kaart</button>
 <button data-testid="export-profile-btn" onClick={exportProfile} disabled={exporting} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:600,fontSize:15,cursor:"pointer",flex:"1 1 100px",opacity:exporting?0.6:1}}>{exporting?"...":"📸 Export"}</button>
@@ -2182,6 +2261,7 @@ return(
 </div>
 </div>
 {showCard&&<PlayerCardModal player={player} allGames={allGames} monthKey={latestMonth} onClose={()=>setShowCard(false)}/>}
+{showStatusGraphic&&<StatusGraphicModal player={player} onClose={()=>setShowStatusGraphic(false)}/>}
 </div>
 );
 }

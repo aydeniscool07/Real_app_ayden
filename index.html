@@ -2295,7 +2295,7 @@ return(
 }
 
 // ── Monthly Stats Tab
-function MonthlyStats({games,players,scheduledGames=[],onOpenPlayer}){
+function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPlayer}){
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [cardFor,setCardFor]=useState(null); // player object or null
@@ -2485,20 +2485,25 @@ return (
 
           {/* MVP Race — what does it take? */}
           {(() => {
-            // Only show for the current (still-running) month
+            // Stop once the MVP award has actually been handed out for this month —
+            // not just because the calendar flipped to a new month.
+            const mvpAlreadyGiven = manualAwards.some(a => a.month === selMonth && a.awardId === "mvp");
+            if (mvpAlreadyGiven) return null;
             const nowDate = new Date();
             const curMonthKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth()+1).padStart(2,"0")}`;
-            if (selMonth !== curMonthKey) return null;
             if (playerStats.length < 2) return null;
 
             const todayStr = nowDate.toISOString().slice(0,10);
 
             // Scheduled matchdays remaining THIS MONTH only — injury reports on games outside
             // this window (past, or next month) shouldn't influence this month's race at all.
-            const scheduledThisMonthAhead = scheduledGames.filter(g => {
+            // Only counts as "ahead" if we're still within the calendar month being viewed;
+            // once that month has passed, treat remaining matchdays as 0 (nothing left to predict)
+            // while still showing the race until the award is manually given.
+            const scheduledThisMonthAhead = selMonth === curMonthKey ? scheduledGames.filter(g => {
               if (!g.date) return false;
               return g.date.slice(0,7) === curMonthKey && g.date > todayStr;
-            });
+            }) : [];
             const matchdaysLeft = scheduledThisMonthAhead.length;
 
             // Per-matchday play chance for a specific player: starts from the day's general
@@ -7720,7 +7725,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* MONTHLY TAB */}
-{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
+{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}

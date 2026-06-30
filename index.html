@@ -2502,7 +2502,7 @@ return (
             // while still showing the race until the award is manually given.
             const scheduledThisMonthAhead = selMonth === curMonthKey ? scheduledGames.filter(g => {
               if (!g.date) return false;
-              return g.date.slice(0,7) === curMonthKey && g.date > todayStr;
+              return g.date.slice(0,7) === curMonthKey && g.date >= todayStr;
             }) : [];
             const matchdaysLeft = scheduledThisMonthAhead.length;
 
@@ -5931,10 +5931,31 @@ return(
 <StatBar label="Gem. Win%" valA={statsA.winRate} valB={statsB.winRate}/>
 <StatBar label="Totaal FPS" valA={statsA.fps} valB={statsB.fps}/>
 <StatBar label="Gem. EFF" valA={statsA.eff} valB={statsB.eff}/>
+{(()=>{
+const nA=Object.values(lineupA).filter(Boolean).length||1;
+const nB=Object.values(lineupB||{}).filter(Boolean).length||1;
+if(nA===nB)return null;
+return(
+<div style={{marginTop:8,marginBottom:4,background:"#0a0a0a",borderRadius:8,padding:"8px 10px"}}>
+<div style={{color:GREY,fontSize:10,marginBottom:6}}>⚖️ PER SPELER — eerlijke vergelijking ({nA} vs {nB} man)</div>
+<StatBar label="PTS / speler" valA={parseFloat((statsA.pts/nA).toFixed(1))} valB={parseFloat((statsB.pts/nB).toFixed(1))}/>
+<StatBar label="REB / speler" valA={parseFloat((statsA.reb/nA).toFixed(1))} valB={parseFloat((statsB.reb/nB).toFixed(1))}/>
+<StatBar label="AST / speler" valA={parseFloat((statsA.ast/nA).toFixed(1))} valB={parseFloat((statsB.ast/nB).toFixed(1))}/>
+</div>
+);
+})()}
 {/* Winner prediction (formula-based, instant) */}
 {(()=>{
-const scoreA=statsA.pts*0.4+statsA.reb*0.2+statsA.ast*0.2+statsA.winRate*0.2;
-const scoreB=statsB.pts*0.4+statsB.reb*0.2+statsB.ast*0.2+statsB.winRate*0.2;
+const nA=Object.values(lineupA).filter(Boolean).length||1;
+const nB=Object.values(lineupB||{}).filter(Boolean).length||1;
+// Normalize counting stats to per-player averages so a 5-man lineup isn't
+// automatically favored over a 4-man one just by having more bodies on the floor.
+const ppgA=statsA.pts/nA,rpgA=statsA.reb/nA,apgA=statsA.ast/nA;
+const ppgB=statsB.pts/nB,rpgB=statsB.reb/nB,apgB=statsB.ast/nB;
+// Eff is already a fair per-player average, and win rate directly reflects
+// actual team success regardless of roster size — both get real weight here.
+const scoreA=ppgA*0.2+rpgA*0.1+apgA*0.1+statsA.winRate*0.3+statsA.eff*0.3;
+const scoreB=ppgB*0.2+rpgB*0.1+apgB*0.1+statsB.winRate*0.3+statsB.eff*0.3;
 const total=scoreA+scoreB||1;
 const probA=Math.round(scoreA/total*100);
 return(

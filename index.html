@@ -5728,8 +5728,8 @@ desc:"Screener's verdediger stapt hard uit om de ballhandler te vertragen. On-ba
 play:{
 ballPath:[{x:100,y:155},{x:100,y:130},{x:78,y:108},{x:55,y:85}],
 teammates:[
-{label:"O1",color:"#81C784",path:[{x:78,y:128},{x:78,y:128},{x:78,y:60},{x:78,y:32}]},
-{label:"O2",color:"#81C784",path:[{x:145,y:130},{x:145,y:130},{x:145,y:130},{x:145,y:130}]},
+{label:"O1",color:"#f5a524",path:[{x:78,y:128},{x:78,y:128},{x:78,y:60},{x:78,y:32}]},
+{label:"O2",color:"#f5a524",path:[{x:145,y:130},{x:145,y:130},{x:145,y:130},{x:145,y:130}]},
 ],
 defenders:[
 {label:"D1",color:"#ff6b6b",path:[{x:100,y:140},{x:88,y:125},{x:65,y:108},{x:55,y:92}]},
@@ -5748,8 +5748,8 @@ desc:"On-ball verdediger over het scherm, screener's man laat de ballhandler kom
 play:{
 ballPath:[{x:100,y:155},{x:100,y:130},{x:80,y:108}],
 teammates:[
-{label:"O1",color:"#81C784",path:[{x:80,y:126},{x:80,y:126},{x:80,y:70}]},
-{label:"O2",color:"#81C784",path:[{x:148,y:132},{x:148,y:132},{x:148,y:132}]},
+{label:"O1",color:"#f5a524",path:[{x:80,y:126},{x:80,y:126},{x:80,y:70}]},
+{label:"O2",color:"#f5a524",path:[{x:148,y:132},{x:148,y:132},{x:148,y:132}]},
 ],
 defenders:[
 {label:"D1",color:"#ff6b6b",path:[{x:100,y:142},{x:95,y:125},{x:82,y:108}]},
@@ -5768,8 +5768,8 @@ desc:"Beide verdedigers switchen bij elk screen. Minimaliseert rotatie — maar 
 play:{
 ballPath:[{x:100,y:155},{x:100,y:130},{x:78,y:108}],
 teammates:[
-{label:"O1",color:"#81C784",path:[{x:78,y:126},{x:78,y:126},{x:78,y:65}]},
-{label:"O2",color:"#81C784",path:[{x:148,y:130},{x:148,y:130},{x:148,y:130}]},
+{label:"O1",color:"#f5a524",path:[{x:78,y:126},{x:78,y:126},{x:78,y:65}]},
+{label:"O2",color:"#f5a524",path:[{x:148,y:130},{x:148,y:130},{x:148,y:130}]},
 ],
 defenders:[
 {label:"D1",color:"#ff6b6b",path:[{x:100,y:143},{x:90,y:125},{x:78,y:60}]},
@@ -5788,8 +5788,8 @@ desc:"Zodra de ball-handler de middenlijn passeert val je hem aan met twee man. 
 play:{
 ballPath:[{x:100,y:155},{x:100,y:135},{x:85,y:120},{x:68,y:105}],
 teammates:[
-{label:"O1",color:"#81C784",path:[{x:155,y:120},{x:155,y:120},{x:155,y:120},{x:155,y:120}]},
-{label:"O2",color:"#81C784",path:[{x:100,y:110},{x:100,y:110},{x:100,y:110},{x:100,y:110}]},
+{label:"O1",color:"#f5a524",path:[{x:155,y:120},{x:155,y:120},{x:155,y:120},{x:155,y:120}]},
+{label:"O2",color:"#f5a524",path:[{x:100,y:110},{x:100,y:110},{x:100,y:110},{x:100,y:110}]},
 ],
 defenders:[
 {label:"D1",color:"#ff6b6b",path:[{x:100,y:140},{x:88,y:128},{x:72,y:112},{x:60,y:100}]},
@@ -5865,7 +5865,7 @@ return(
 {play.play.teammates.map((t,i)=>(
 <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"4px 10px"}}>
 <div style={{width:14,height:14,borderRadius:"50%",background:t.color||"#4FC3F7",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:"#000"}}>{t.label}</div>
-<span style={{color:GREY,fontSize:11,fontWeight:600}}>{play.type==="offense"?`Aanvaller ${i+2}`:`Aanvaller ${i+1}`}</span>
+<span style={{color:GREY,fontSize:11,fontWeight:600}}>{play.type==="defense"?`Aanvaller ${i+1}`:`Teamgenoot ${i+1}`}</span>
 </div>
 ))}
 {play.play.defenders.map((d,i)=>(

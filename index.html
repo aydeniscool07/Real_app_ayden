@@ -7000,10 +7000,10 @@ const [showPlaybook,setShowPlaybook]=useState(false);
 const [showHallOfFame,setShowHallOfFame]=useState(false);
 const [manualAwards,setManualAwards]=useState([]);
 const [userIp,setUserIp]=useState("unknown");
-const [fantasyUsers,setFantasyUsers]=useState([]);
-const [fantasyTeams,setFantasyTeams]=useState([]);
-const [fantasyAuthUserId,setFantasyAuthUserId]=useState(()=>{try{return localStorage.getItem("lba_fantasy_user")||null;}catch(e){return null;}});
-const [fantasyAuthError,setFantasyAuthError]=useState("");
+const [triviaUsers,setTriviaUsers]=useState([]);
+const [triviaResults,setTriviaResults]=useState([]);
+const [triviaAuthUserId,setTriviaAuthUserId]=useState(()=>{try{return localStorage.getItem("lba_trivia_user")||null;}catch(e){return null;}});
+const [triviaAuthError,setTriviaAuthError]=useState("");
 const [botSettings,setBotSettings]=useState(null);
 
 // Fetch user IP for wallet identification
@@ -7046,8 +7046,8 @@ bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);set
 uL=_onSnapshot(_col(_db,"larp_posts"),s=>{
 setLarpPosts(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp posts listener error:",err));
-_onSnapshot(_col(_db,"fantasy_users"),s=>{setFantasyUsers(s.docs.map(d=>d.data()));},(err)=>console.error("Fantasy users error:",err));
-_onSnapshot(_col(_db,"fantasy_teams"),s=>{setFantasyTeams(s.docs.map(d=>d.data()));},(err)=>console.error("Fantasy teams error:",err));
+_onSnapshot(_col(_db,"fantasy_users"),s=>{setTriviaUsers(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia users error:",err));
+_onSnapshot(_col(_db,"trivia_results"),s=>{setTriviaResults(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia results error:",err));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
@@ -7661,30 +7661,29 @@ async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave(
 async function saveBotSettings(s){setSaveStatus("saving");try{await fbSave("bot_settings",{...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
 // Fantasy League: simple username/password accounts stored in Firestore (no real auth backend,
 // matches the rest of this app's no-server pattern). Username is lowercased to form the doc id.
-async function fantasyLogin(username,password){
-setFantasyAuthError("");
+async function triviaLogin(username,password){
+setTriviaAuthError("");
 const id=(username||"").trim().toLowerCase();
-const u=fantasyUsers.find(x=>x.id===id);
-if(!u||u.password!==password){setFantasyAuthError("Onjuiste gebruikersnaam of wachtwoord.");return;}
-setFantasyAuthUserId(id);
-try{localStorage.setItem("lba_fantasy_user",id);}catch(e){}
+const u=triviaUsers.find(x=>x.id===id);
+if(!u||u.password!==password){setTriviaAuthError("Onjuiste gebruikersnaam of wachtwoord.");return;}
+setTriviaAuthUserId(id);
+try{localStorage.setItem("lba_trivia_user",id);}catch(e){}
 }
-async function fantasyRegister(username,password,teamName,maxRoster){
-setFantasyAuthError("");
+async function triviaRegister(username,password){
+setTriviaAuthError("");
 const id=(username||"").trim().toLowerCase();
-if(!id||!password){setFantasyAuthError("Vul een gebruikersnaam en wachtwoord in.");return;}
-if(fantasyUsers.find(x=>x.id===id)){setFantasyAuthError("Deze gebruikersnaam bestaat al.");return;}
+if(!id||!password){setTriviaAuthError("Vul een gebruikersnaam en wachtwoord in.");return;}
+if(triviaUsers.find(x=>x.id===id)){setTriviaAuthError("Deze gebruikersnaam bestaat al.");return;}
 setSaveStatus("saving");
 try{
-await fbSave("fantasy_users",{id,username:username.trim(),password,teamName:teamName?.trim()||`${username.trim()}'s Team`,createdAt:new Date().toISOString()});
-await fbSave("fantasy_teams",{id,teamName:teamName?.trim()||`${username.trim()}'s Team`,roster:[],predictions:{}});
+await fbSave("fantasy_users",{id,username:username.trim(),password,createdAt:new Date().toISOString()});
 showSaved();
-setFantasyAuthUserId(id);
-try{localStorage.setItem("lba_fantasy_user",id);}catch(e){}
+setTriviaAuthUserId(id);
+try{localStorage.setItem("lba_trivia_user",id);}catch(e){}
 }catch(e){console.error(e);showError();}
 }
-function fantasyLogout(){setFantasyAuthUserId(null);try{localStorage.removeItem("lba_fantasy_user");}catch(e){}}
-async function saveFantasyTeam(team){setSaveStatus("saving");try{await fbSave("fantasy_teams",team);showSaved();}catch(e){console.error(e);showError();}}
+function triviaLogout(){setTriviaAuthUserId(null);try{localStorage.removeItem("lba_trivia_user");}catch(e){}}
+async function saveTriviaResult(result){setSaveStatus("saving");try{await fbSave("trivia_results",{...result,id:result.id+"_"+result.date});showSaved();}catch(e){console.error(e);showError();}}
 
 function getSorted(){
 let gs=[...games];
@@ -7866,19 +7865,18 @@ return(
 )}
 
 {/* FANTASY TAB */}
-{tab==="fantasy"&&(
-<FantasyTab
+{tab==="trivia"&&(
+<TriviaTab
 players={players}
 games={games}
-scheduledGames={scheduledGames}
-fantasyUsers={fantasyUsers}
-fantasyTeams={fantasyTeams}
-authUserId={fantasyAuthUserId}
-authError={fantasyAuthError}
-onLogin={fantasyLogin}
-onRegister={fantasyRegister}
-onLogout={fantasyLogout}
-onSaveTeam={saveFantasyTeam}
+triviaUsers={triviaUsers}
+triviaResults={triviaResults}
+authUserId={triviaAuthUserId}
+authError={triviaAuthError}
+onLogin={triviaLogin}
+onRegister={triviaRegister}
+onLogout={triviaLogout}
+onSaveResult={saveTriviaResult}
 />
 )}
 
@@ -7901,7 +7899,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"fantasy",icon:"🏈",label:"Fantasy"}].map(({id,icon,label})=>(
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"}].map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>

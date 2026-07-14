@@ -1073,6 +1073,70 @@ return(
 );
 }
 
+// ── Admin Dashboard — central hub for admin-only settings & quick actions
+function AdminDashboardModal({appSettings,botSettings,players,games,scheduledGames,larpPosts,triviaUsers,manualAwards,onSaveAppSettings,onSaveBotSettings,onClose,onQuickAction}){
+const [showBotSettings,setShowBotSettings]=useState(false);
+const {BG2}=styles();
+const triviaEnabled=appSettings?.triviaEnabled!==false;
+const stats=[
+{label:"Players",value:players?.length||0,icon:"👥"},
+{label:"Games",value:games?.length||0,icon:"🏀"},
+{label:"Gepland",value:scheduledGames?.length||0,icon:"📅"},
+{label:"LARP posts",value:larpPosts?.length||0,icon:"🐦"},
+{label:"Trivia users",value:triviaUsers?.length||0,icon:"🧠"},
+{label:"Awards",value:manualAwards?.length||0,icon:"🏆"},
+];
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"88vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:16,textAlign:"center",color:WHITE}}>⚙️ Admin Dashboard</div>
+
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:20}}>
+{stats.map(s=>(
+<div key={s.label} style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 8px",textAlign:"center"}}>
+<div style={{fontSize:18,marginBottom:4}}>{s.icon}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{s.value}</div>
+<div style={{color:GREY,fontSize:10}}>{s.label}</div>
+</div>
+))}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>SNELLE ACTIES</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginBottom:20}}>
+<button onClick={()=>onQuickAction("logGame")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 8px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏀 Log Game</button>
+<button onClick={()=>onQuickAction("addPlayer")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 8px",fontWeight:600,fontSize:13,cursor:"pointer"}}>👤 Player toevoegen</button>
+<button onClick={()=>onQuickAction("scheduleGame")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 8px",fontWeight:600,fontSize:13,cursor:"pointer"}}>📅 Game plannen</button>
+<button onClick={()=>onQuickAction("hallOfFame")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 8px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏆 Award uitreiken</button>
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>INSTELLINGEN</div>
+
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🧠 Trivia tab</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{triviaEnabled?"Zichtbaar voor iedereen":"Verborgen voor niet-admins"}</div>
+</div>
+<button onClick={()=>onSaveAppSettings({triviaEnabled:!triviaEnabled})} style={{background:triviaEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+{triviaEnabled?"Uitschakelen":"Inschakelen"}
+</button>
+</div>
+
+<div onClick={()=>setShowBotSettings(true)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer"}}>
+<div>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🤖 LARP Bot instellingen</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>Toxiciteit, frequentie & persona's</div>
+</div>
+<span style={{color:GREY,fontSize:16}}>›</span>
+</div>
+
+<button onClick={onClose} style={{...BG2,marginTop:8}}>Sluiten</button>
+</div>
+{showBotSettings&&<BotSettingsModal settings={botSettings} onSave={(s)=>{onSaveBotSettings&&onSaveBotSettings(s);setShowBotSettings(false);}} onClose={()=>setShowBotSettings(false)}/>}
+</div>
+);
+}
+
 // ── Perf Detail Modal
 function PerfDetailModal({game,player,allPlayers,allGames,comments,highlights,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment,onAddHighlight,onDeleteHighlight,onOpenHighlight}){
 const fps=calcFps(game);
@@ -1414,7 +1478,9 @@ return streak>=3?streak:0;
 }
 
 // ── Beste / slechtste matchup per speler (gegroepeerd op opponent team naam)
-function computeMatchups(playerGames){
+// Alleen matchups met minstens minGames potjes tellen mee — anders is 1 toevallige
+// uitschieter genoeg om als "beste"/"moeilijkste" matchup te gelden, wat misleidend is.
+function computeMatchups(playerGames,minGames=2){
 const byOpp={};
 playerGames.forEach(g=>{
 const opp=(g.opponent||"").trim();
@@ -1427,9 +1493,15 @@ opponent:opp,games:gs.length,
 eff:parseFloat((gs.reduce((s,g)=>s+(+calcFps(g)),0)/gs.length).toFixed(1)),
 ppg:avg(gs,"pts"),rpg:avg(gs,"reb"),apg:avg(gs,"ast")
 }));
-if(!rows.length)return{best:null,worst:null};
-const sorted=[...rows].sort((a,b)=>b.eff-a.eff);
-return{best:sorted[0],worst:sorted[sorted.length-1]};
+const eligible=rows.filter(r=>r.games>=minGames);
+// Fallback: als niemand aan de drempel voldoet maar er is precies 1 opponent in
+// totaal, gebruik die alsnog (anders zou een speler met 1 tegenstander nooit een
+// matchup-kaart krijgen). Bij 2+ verschillende opponents zonder herhaling blijft
+// het leeg — te weinig data om iets zinnigs te zeggen.
+const pool=eligible.length?eligible:(rows.length===1?rows:[]);
+if(!pool.length)return{best:null,worst:null};
+const sorted=[...pool].sort((a,b)=>b.eff-a.eff);
+return{best:sorted[0],worst:sorted.length>1?sorted[sorted.length-1]:null};
 }
 
 // ── Head-to-head tussen twee spelers (via matchId, tegenover elkaar in andere teams)
@@ -2491,7 +2563,9 @@ const pg=yGames.filter(g=>g.playerId===p.id);
 if(!pg.length)return null;
 const eff=parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1));
 return{p,eff,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast")};
-}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+}).filter(Boolean);
+const yLeagueAvgEff=stats.length?stats.reduce((s,x)=>s+x.eff,0)/stats.length:0;
+stats.sort((a,b)=>mvpScore(b.eff,b.games.length,yLeagueAvgEff)-mvpScore(a.eff,a.games.length,yLeagueAvgEff));
 return stats[0]||null;
 },[games,players,yearKey]);
 
@@ -7069,7 +7143,7 @@ return parsed;
 }
 
 // ── Main Trivia Tab
-function TriviaTab({players,games,triviaUsers,triviaResults,dailyQuestions,authUserId,authError,onLogin,onRegister,onLogout,onSaveResult,onSaveQuestions}){
+function TriviaTab({players,games,triviaUsers,triviaResults,dailyQuestions,authUserId,authError,onLogin,onRegister,onLogout,onSaveResult,onSaveQuestions,isAdmin,triviaEnabled,onToggleTrivia}){
 const todayStr=new Date().toISOString().slice(0,10);
 const [quizState,setQuizState]=useState("idle"); // idle | loading | playing | error
 const [loadErr,setLoadErr]=useState("");
@@ -7092,8 +7166,32 @@ if(r.date===todayStr){map[r.id].todayScore=r.score;map[r.id].todayTotal=r.total;
 return Object.values(map).sort((a,b)=>b.totalScore-a.totalScore);
 },[triviaResults,todayStr]);
 
+const adminToggleBar=isAdmin&&(
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:"10px 14px",marginBottom:14}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🧠 Trivia tab {triviaEnabled?"actief":"uitgeschakeld"}</div>
+<button onClick={()=>onToggleTrivia&&onToggleTrivia(!triviaEnabled)} style={{background:triviaEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+{triviaEnabled?"Uitschakelen":"Inschakelen"}
+</button>
+</div>
+);
+
+if(!triviaEnabled&&!isAdmin){
+return (
+<div style={{padding:"60px 20px",textAlign:"center"}}>
+<div style={{fontSize:40,marginBottom:12}}>🧠</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:16,marginBottom:6}}>Trivia is tijdelijk uitgeschakeld</div>
+<div style={{color:GREY,fontSize:13}}>We zijn bezig met een update. Kom later terug!</div>
+</div>
+);
+}
+
 if(!authUserId){
-return <TriviaAuthCard onLogin={onLogin} onRegister={onRegister} error={authError}/>;
+return (
+<div>
+{adminToggleBar}
+<TriviaAuthCard onLogin={onLogin} onRegister={onRegister} error={authError}/>
+</div>
+);
 }
 
 const me=triviaUsers.find(u=>u.id===authUserId);
@@ -7136,6 +7234,7 @@ const {BR}=styles();
 
 return(
 <div style={{padding:"16px 16px 90px"}}>
+{adminToggleBar}
 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
 <div style={{fontWeight:800,fontSize:20}}>🧠 LBA Trivia</div>
 <button onClick={onLogout} style={{background:"transparent",border:`1px solid ${DARKGREY}`,color:GREY,borderRadius:10,padding:"6px 12px",fontSize:12,cursor:"pointer"}}>Uitloggen</button>
@@ -7281,6 +7380,7 @@ const [triviaAuthUserId,setTriviaAuthUserId]=useState(()=>{try{return localStora
 const [triviaAuthError,setTriviaAuthError]=useState("");
 const [triviaQuestions,setTriviaQuestions]=useState([]);
 const [botSettings,setBotSettings]=useState(null);
+const [appSettings,setAppSettings]=useState(null);
 
 // Fetch user IP for wallet identification
 useEffect(()=>{
@@ -7337,6 +7437,10 @@ _onSnapshot(_col(_db,"bot_settings"),s=>{
 const docs=s.docs.map(d=>d.data());
 setBotSettings(docs.find(d=>d.id==="config")||null);
 },(err)=>console.error("Bot settings listener error:",err));
+_onSnapshot(_col(_db,"app_settings"),s=>{
+const docs=s.docs.map(d=>d.data());
+setAppSettings(docs.find(d=>d.id==="config")||null);
+},(err)=>console.error("App settings listener error:",err));
 }).catch(()=>{clearTimeout(timeout);setLoading(false);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
@@ -7936,6 +8040,13 @@ async function saveAward(a){setSaveStatus("saving");try{await fbSave("awards",a)
 async function deleteAward(id){setSaveStatus("saving");try{await fbDel("awards",id);showSaved();}catch(e){console.error(e);showError();}}
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
 async function saveBotSettings(s){setSaveStatus("saving");try{await fbSave("bot_settings",{...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
+async function saveAppSettings(s){setSaveStatus("saving");try{await fbSave("app_settings",{...(appSettings||{}),...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
+function handleAdminQuickAction(action){
+if(action==="logGame"){setModal("logGame");}
+else if(action==="addPlayer"){setModal("addPlayer");}
+else if(action==="scheduleGame"){setModal(null);setTab("fullgames");}
+else if(action==="hallOfFame"){setModal(null);setShowHallOfFame(true);}
+}
 // Fantasy League: simple username/password accounts stored in Firestore (no real auth backend,
 // matches the rest of this app's no-server pattern). Username is lowercased to form the doc id.
 async function triviaLogin(username,password){
@@ -8029,6 +8140,7 @@ Nu updaten
 </div>
 <div style={{display:"flex",gap:8,alignItems:"center",width:70,justifyContent:"flex-end"}}>
 <button onClick={()=>setModal("notifSettings")} style={{background:"transparent",border:"none",color:GREY,fontSize:18,cursor:"pointer",padding:0,lineHeight:1}}>🔔</button>
+{isAdmin&&<button onClick={()=>setModal("adminDashboard")} style={{background:"transparent",border:"none",color:GREY,fontSize:18,cursor:"pointer",padding:0,lineHeight:1}}>⚙️</button>}
 {isAdmin&&<button onClick={()=>setModal("logGame")} style={{background:"transparent",border:"none",color:RED,fontSize:14,fontWeight:700,cursor:"pointer"}}>+</button>}
 </div>
 </div>
@@ -8155,6 +8267,9 @@ onRegister={triviaRegister}
 onLogout={triviaLogout}
 onSaveResult={saveTriviaResult}
 onSaveQuestions={saveTriviaQuestions}
+isAdmin={isAdmin}
+triviaEnabled={appSettings?.triviaEnabled!==false}
+onToggleTrivia={(v)=>saveAppSettings({triviaEnabled:v})}
 />
 )}
 
@@ -8177,7 +8292,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"}].map(({id,icon,label})=>(
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"}].filter(({id})=>id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false).map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>
@@ -8192,6 +8307,7 @@ return (
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}
+{modal==="adminDashboard"&&<AdminDashboardModal appSettings={appSettings} botSettings={botSettings} players={players} games={games} scheduledGames={scheduledGames} larpPosts={larpPosts} triviaUsers={triviaUsers} manualAwards={manualAwards} onSaveAppSettings={saveAppSettings} onSaveBotSettings={saveBotSettings} onClose={()=>setModal(null)} onQuickAction={handleAdminQuickAction}/>}
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(

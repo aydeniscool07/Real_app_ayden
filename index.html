@@ -4441,8 +4441,15 @@ position:"relative"
 {futureGames.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen geplande games</div>}
 {futureGames.map(g=>{
 const injuredEntries=Object.entries(g.injuryReport||{}).filter(([pid,r])=>r&&r.status);
-const lineupA=(g.lineupA||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
-const lineupB=(g.lineupB||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+const rawLineupGames=(g.lineupGames&&g.lineupGames.length)?g.lineupGames:[{teamAName:g.teamAName,teamBName:g.teamBName,lineupA:g.lineupA,lineupB:g.lineupB,chameleon:g.chameleon}];
+const lineupGames=rawLineupGames.map(lg=>({
+teamAName:lg.teamAName||"Team A",
+teamBName:lg.teamBName||"Team B",
+lineupA:(lg.lineupA||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean),
+lineupB:(lg.lineupB||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean),
+chameleon:(lg.chameleon||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean)
+}));
+const hasAnyLineup=lineupGames.some(lg=>lg.lineupA.length>0||lg.lineupB.length>0||lg.chameleon.length>0);
 const hasChance=g.playChance!==undefined&&g.playChance!==null&&g.playChance!=="";
 const chanceVal=hasChance?Number(g.playChance):null;
 const chanceColor=chanceVal===null?GREY:chanceVal>=66?"#27AE60":chanceVal>=33?"#f5a524":RED;
@@ -4477,13 +4484,18 @@ return(
 <div style={{color:chanceColor,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>📊 {chanceVal}% kans dat we spelen</div>
 </div>
 )}
-{(lineupA.length>0||lineupB.length>0)&&(
+{hasAnyLineup&&(
 <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
 <div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>📋 PROJECTED LINEUPS</div>
+{lineupGames.map((lg,gi)=>{
+if(lg.lineupA.length===0&&lg.lineupB.length===0&&lg.chameleon.length===0)return null;
+return(
+<div key={gi} style={{marginBottom:gi<lineupGames.length-1?10:0}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,marginBottom:4}}>GAME {gi+1}</div>
 <div style={{display:"flex",gap:10}}>
-{[{label:g.teamAName||"Team A",list:lineupA},{label:g.teamBName||"Team B",list:lineupB}].filter(t=>t.list.length>0).map(({label,list})=>(
+{[{label:lg.teamAName,list:lg.lineupA,color:RED},{label:lg.teamBName,list:lg.lineupB,color:RED},{label:"🦎 Kameleon",list:lg.chameleon,color:"#8e5cff"}].filter(t=>t.list.length>0).map(({label,list,color})=>(
 <div key={label} style={{flex:1,minWidth:0}}>
-<div style={{color:RED,fontSize:11,fontWeight:700,marginBottom:4}}>{label}</div>
+<div style={{color,fontSize:11,fontWeight:700,marginBottom:4}}>{label}</div>
 {list.map(p=>(
 <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0"}}>
 <Avatar player={p} size={22}/>
@@ -4493,6 +4505,9 @@ return(
 </div>
 ))}
 </div>
+</div>
+);
+})}
 </div>
 )}
 {injuredEntries.length>0&&(
@@ -4600,9 +4615,17 @@ return(
 }
 
 // ── Scheduled Game Modal
+function mkLineupGame(){return{teamAName:"Team A",teamBName:"Team B",lineupA:[],lineupB:[],chameleon:[]};}
+function initScheduledForm(g){
+if(!g)return{title:"",date:new Date().toISOString().slice(0,10),location:"",injuryReport:{},playChance:100,lineupGames:[mkLineupGame(),mkLineupGame(),mkLineupGame()]};
+if(g.lineupGames&&g.lineupGames.length)return{...g,lineupGames:g.lineupGames.map(lg=>({teamAName:lg.teamAName||"Team A",teamBName:lg.teamBName||"Team B",lineupA:lg.lineupA||[],lineupB:lg.lineupB||[],chameleon:lg.chameleon||[]}))};
+// migrate legacy single-lineup scheduled games into "Game 1", keep 2 extra empty games
+return{...g,lineupGames:[{teamAName:g.teamAName||"Team A",teamBName:g.teamBName||"Team B",lineupA:g.lineupA||[],lineupB:g.lineupB||[],chameleon:g.chameleon||[]},mkLineupGame(),mkLineupGame()]};
+}
+
 function ScheduledGameModal({game,players,onSave,onClose}){
 const isEdit=!!game;
-const [form,setForm]=useState(game?{...game}:{title:"",date:new Date().toISOString().slice(0,10),location:"",injuryReport:{},playChance:100,teamAName:"Team A",teamBName:"Team B",lineupA:[],lineupB:[]});
+const [form,setForm]=useState(()=>initScheduledForm(game));
 const [saving,setSaving]=useState(false);
 const {IS,BR,BG2}=styles();
 const STATUSES=[
@@ -4617,18 +4640,36 @@ setForm(f=>({...f,injuryReport:{...(f.injuryReport||{}),[pid]:{...(f.injuryRepor
 function setPlayerReason(pid,reason){
 setForm(f=>({...f,injuryReport:{...(f.injuryReport||{}),[pid]:{...(f.injuryReport?.[pid]||{}),reason}}}));
 }
-function toggleLineup(team,pid){
+function setLineupGameField(gi,field,value){
 setForm(f=>{
-const a=new Set(f.lineupA||[]),b=new Set(f.lineupB||[]);
-if(team==="A"){ if(a.has(pid))a.delete(pid); else {a.add(pid);b.delete(pid);} }
-else { if(b.has(pid))b.delete(pid); else {b.add(pid);a.delete(pid);} }
-return{...f,lineupA:[...a],lineupB:[...b]};
+const games=(f.lineupGames||[]).map((lg,i)=>i===gi?{...lg,[field]:value}:lg);
+return{...f,lineupGames:games};
+});
+}
+function toggleLineup(gi,team,pid){
+setForm(f=>{
+const games=(f.lineupGames||[]).map((lg,i)=>{
+if(i!==gi)return lg;
+const a=new Set(lg.lineupA||[]),b=new Set(lg.lineupB||[]),c=new Set(lg.chameleon||[]);
+const target=team==="A"?a:team==="B"?b:c;
+if(target.has(pid)){target.delete(pid);}
+else{target.add(pid);[a,b,c].forEach(s=>{if(s!==target)s.delete(pid);});}
+return{...lg,lineupA:[...a],lineupB:[...b],chameleon:[...c]};
+});
+return{...f,lineupGames:games};
 });
 }
 
 async function save(){
 if(!form.title?.trim()||!form.date)return;
 setSaving(true);
+const lineupGames=(form.lineupGames||[mkLineupGame(),mkLineupGame(),mkLineupGame()]).map(lg=>({
+teamAName:lg.teamAName||"Team A",
+teamBName:lg.teamBName||"Team B",
+lineupA:lg.lineupA||[],
+lineupB:lg.lineupB||[],
+chameleon:lg.chameleon||[]
+}));
 await onSave({
 id:isEdit?game.id:Date.now().toString(),
 title:form.title.trim(),
@@ -4636,10 +4677,12 @@ date:form.date,
 location:form.location||"",
 injuryReport:form.injuryReport||{},
 playChance:form.playChance===""||form.playChance===undefined||form.playChance===null?null:Number(form.playChance),
-teamAName:form.teamAName||"Team A",
-teamBName:form.teamBName||"Team B",
-lineupA:form.lineupA||[],
-lineupB:form.lineupB||[]
+lineupGames,
+// legacy top-level fields kept in sync with Game 1 for backward compatibility
+teamAName:lineupGames[0].teamAName,
+teamBName:lineupGames[0].teamBName,
+lineupA:lineupGames[0].lineupA,
+lineupB:lineupGames[0].lineupB
 });
 setSaving(false);
 onClose();
@@ -4665,22 +4708,35 @@ return(
 </div>
 </div>
 
-{/* Projected Lineups */}
+{/* Projected Lineups — 3 games per matchday, each with a chameleon slot */}
 {players&&players.length>0&&(
 <div style={{marginTop:18}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>📋 PROJECTED LINEUPS</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>📋 PROJECTED LINEUPS</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12}}>3 games per matchday — elke game heeft een eigen Team A, Team B en 🦎 Kameleon</div>
+{(form.lineupGames||[]).map((lg,gi)=>{
+const filledCount=(lg.lineupA||[]).length+(lg.lineupB||[]).length+(lg.chameleon||[]).length;
+return(
+<div key={gi} style={{marginBottom:18,background:"#151517",borderRadius:12,padding:12}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:800}}>Game {gi+1}</div>
+{filledCount>0&&<div style={{color:GREY,fontSize:11}}>{filledCount} speler{filledCount!==1?"s":""}</div>}
+</div>
 <div style={{display:"flex",gap:10,marginBottom:10}}>
-<input placeholder="Naam team A" style={{...IS,fontSize:13}} value={form.teamAName||""} onChange={e=>setForm(f=>({...f,teamAName:e.target.value}))}/>
-<input placeholder="Naam team B" style={{...IS,fontSize:13}} value={form.teamBName||""} onChange={e=>setForm(f=>({...f,teamBName:e.target.value}))}/>
+<input placeholder="Naam team A" style={{...IS,fontSize:13}} value={lg.teamAName||""} onChange={e=>setLineupGameField(gi,"teamAName",e.target.value)}/>
+<input placeholder="Naam team B" style={{...IS,fontSize:13}} value={lg.teamBName||""} onChange={e=>setLineupGameField(gi,"teamBName",e.target.value)}/>
 </div>
 {players.slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")).map(p=>{
-const inA=(form.lineupA||[]).includes(p.id),inB=(form.lineupB||[]).includes(p.id);
+const inA=(lg.lineupA||[]).includes(p.id),inB=(lg.lineupB||[]).includes(p.id),inC=(lg.chameleon||[]).includes(p.id);
 return(
-<div key={p.id} data-testid={`lineup-row-${p.id}`} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 10px",marginBottom:6}}>
-<Avatar player={p} size={32}/>
-<div style={{fontWeight:700,fontSize:13,color:WHITE,flex:1}}>{p.name}</div>
-<button onClick={()=>toggleLineup("A",p.id)} style={{background:inA?`${RED}22`:"transparent",border:`1px solid ${inA?RED:"#333"}`,color:inA?RED:GREY,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{form.teamAName||"Team A"}</button>
-<button onClick={()=>toggleLineup("B",p.id)} style={{background:inB?`${RED}22`:"transparent",border:`1px solid ${inB?RED:"#333"}`,color:inB?RED:GREY,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>{form.teamBName||"Team B"}</button>
+<div key={p.id} data-testid={`lineup-row-g${gi}-${p.id}`} style={{display:"flex",alignItems:"center",gap:8,background:INPUTBG,borderRadius:10,padding:"8px 10px",marginBottom:6}}>
+<Avatar player={p} size={28}/>
+<div style={{fontWeight:700,fontSize:13,color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+<button onClick={()=>toggleLineup(gi,"A",p.id)} style={{background:inA?`${RED}22`:"transparent",border:`1px solid ${inA?RED:"#333"}`,color:inA?RED:GREY,borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{lg.teamAName||"Team A"}</button>
+<button onClick={()=>toggleLineup(gi,"B",p.id)} style={{background:inB?`${RED}22`:"transparent",border:`1px solid ${inB?RED:"#333"}`,color:inB?RED:GREY,borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{lg.teamBName||"Team B"}</button>
+<button onClick={()=>toggleLineup(gi,"C",p.id)} style={{background:inC?"#8e5cff22":"transparent",border:`1px solid ${inC?"#8e5cff":"#333"}`,color:inC?"#8e5cff":GREY,borderRadius:8,padding:"5px 9px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🦎</button>
+</div>
+);
+})}
 </div>
 );
 })}

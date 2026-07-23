@@ -870,6 +870,64 @@ function calcFps(g){
 const p=+g.pts||0,r=+g.reb||0,a=+g.ast||0,s=+g.stl||0,b=+g.blk||0,t=+g.to||0,fg=+g.fg||0;
 return Math.max(0,p*1.2+r*1.1+a*1.5+s*2+b*2-t*1.5+(fg>40?(fg-40)*0.1:0)).toFixed(1);
 }
+// ── ESPN-style AI commentary helpers
+async function callGroqAI(prompt,maxTokens=400,temperature=0.85){
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:maxTokens,temperature,messages:[{role:"user",content:prompt}]})});
+const rawText=await res.text();
+if(!res.ok)throw new Error("API fout "+res.status+": "+rawText.slice(0,200));
+const data=JSON.parse(rawText);
+const text=data.choices?.[0]?.message?.content||"";
+return text.replace(/```json|```/g,"").trim();
+}
+// Detect statistical milestones in a single performance so the AI has real facts to work with
+function detectMilestones(g){
+const pts=+g.pts||0,reb=+g.reb||0,ast=+g.ast||0,stl=+g.stl||0,blk=+g.blk||0,to=+g.to||0;
+const doubleDigitCats=[pts,reb,ast,stl,blk].filter(v=>v>=10).length;
+const tags=[];
+if(doubleDigitCats>=4)tags.push("quadruple-double");
+else if(doubleDigitCats>=3)tags.push("triple-double");
+else if(doubleDigitCats>=2)tags.push("double-double");
+if(pts>=25)tags.push(`${pts} punten avond`);
+if(ast>=10)tags.push(`${ast} assists`);
+if(reb>=12)tags.push(`${reb} rebounds`);
+if(stl>=5)tags.push(`${stl} steals`);
+if(blk>=5)tags.push(`${blk} blocks`);
+if(stl+blk>=6)tags.push("defensieve show");
+if(to<=1&&ast>=6)tags.push("bijna geen balverlies bij veel assists");
+if(pts===0&&reb===0&&ast===0)tags.push("onzichtbare avond");
+return tags;
+}
+// Generate ESPN-style commentary for a single player performance
+async function generatePerfCommentary(game,playerName){
+const milestones=detectMilestones(game);
+const hint=game.commentaryHint?`\nContext van de coach: "${game.commentaryHint}"`:"";
+const prompt=`Je bent een ESPN sportverslaggever die in het Nederlands schrijft over een casual vrienden basketballcompetitie (1-tegen-1 of kleine teams, games tot 10 punten).
+Schrijf pakkende, energieke ESPN-stijl commentaar over deze prestatie van ${playerName}:
+Stats: ${game.pts||0} pts, ${game.reb||0} reb, ${game.ast||0} ast, ${game.stl||0} stl, ${game.blk||0} blk, ${game.to||0} to.
+${milestones.length?`Opvallende feiten: ${milestones.join(", ")}.`:"Geen bijzondere milestones, houd het luchtig."}${hint}
+Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
+{"headline":"korte pakkende kop, max 6 woorden, ALL CAPS stijl","body":"1-2 zinnen ESPN-stijl commentaar, geschreven alsof het live op tv wordt gezegd"}`;
+const clean=await callGroqAI(prompt,300,0.9);
+return JSON.parse(clean);
+}
+// Generate ESPN-style recap commentary for a full match (all players/teams combined)
+async function generateMatchCommentary(matchGames,players,tAN,tBN,hint){
+const withNames=matchGames.map(g=>{
+const p=players.find(x=>x.id===g.playerId);
+const side=g.team==="A"?tAN:g.team==="B"?tBN:"Kameleon";
+return `${p?.name||"?"} (${side}): ${g.pts||0} pts, ${g.reb||0} reb, ${g.ast||0} ast, ${g.stl||0} stl, ${g.blk||0} blk`;
+}).join("; ");
+const s=matchGames[0]||{};
+const scoreLine=s.teamAScore&&s.teamBScore?`Eindstand: ${tAN} ${s.teamAScore} - ${s.teamBScore} ${tBN}.`:"";
+const hintLine=hint?`\nContext van de coach: "${hint}"`:"";
+const prompt=`Je bent een ESPN sportverslaggever die in het Nederlands een korte recap schrijft over een casual vrienden basketballwedstrijd.
+${scoreLine}
+Boxscore: ${withNames}.${hintLine}
+Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
+{"headline":"korte pakkende kop, max 8 woorden, ALL CAPS stijl","body":"2-3 zinnen ESPN-stijl recap van de wedstrijd, noem de belangrijkste speler(s) bij naam"}`;
+const clean=await callGroqAI(prompt,400,0.9);
+return JSON.parse(clean);
+}
 function avg(arr,key){if(!arr.length)return 0;return parseFloat((arr.reduce((s,g)=>s+(+g[key]||0),0)/arr.length).toFixed(1));}
 // MVP ranking score: eff average is still the main driver, but games played now gives
 // a real (small, capped) bonus — playing more games actually helps your ranking, not just
@@ -1138,13 +1196,49 @@ return(
 }
 
 // ── Perf Detail Modal
-function PerfDetailModal({game,player,allPlayers,allGames,comments,highlights,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment,onAddHighlight,onDeleteHighlight,onOpenHighlight}){
+// ── ESPN-style commentary banner (used for both single performances and full match recaps)
+function EspnCommentaryBanner({commentary,loading,err,isAdmin,hint,onHintChange,onGenerate,label}){
+if(!commentary&&!isAdmin)return null;
+return(
+<div style={{margin:"12px 0",background:"linear-gradient(135deg,#2a0e0e,#1a1a1a)",border:`1px solid ${RED}55`,borderRadius:12,padding:"12px 14px"}}>
+<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:commentary?6:0}}>
+<span style={{fontSize:11,fontWeight:800,letterSpacing:1.5,color:RED}}>📺 {label||"ESPN"}</span>
+{isAdmin&&<button onClick={onGenerate} disabled={loading} style={{marginLeft:"auto",background:"transparent",border:`1px solid ${RED}55`,color:RED,borderRadius:12,padding:"3px 10px",fontSize:11,fontWeight:700,cursor:loading?"default":"pointer",opacity:loading?0.6:1}}>{loading?"Bezig...":commentary?"🔄 Regenereer":"✨ Genereer"}</button>}
+</div>
+{commentary&&(
+<>
+<div style={{fontWeight:800,fontSize:14,letterSpacing:0.5,marginBottom:4,color:WHITE}}>{commentary.headline}</div>
+<div style={{fontSize:13,color:"#ddd",lineHeight:1.4}}>{commentary.body}</div>
+</>
+)}
+{err&&<div style={{color:RED,fontSize:12,marginTop:6}}>{err}</div>}
+{isAdmin&&(
+<textarea placeholder="Coach commentaar (optioneel) — AI schrijft er ESPN-stijl commentaar omheen" value={hint||""} onChange={e=>onHintChange(e.target.value)} rows={2} style={{width:"100%",marginTop:8,background:"#111",border:"none",borderRadius:8,color:WHITE,fontSize:12,padding:"8px 10px",outline:"none",resize:"vertical",fontFamily:"inherit"}}/>
+)}
+</div>
+);
+}
+
+function PerfDetailModal({game,player,allPlayers,allGames,comments,highlights,onClose,onDelete,onEdit,isAdmin,onAddComment,onDeleteComment,onAddHighlight,onDeleteHighlight,onOpenHighlight,onUpdateCommentary}){
 const fps=calcFps(game);
 const matchGames=game.matchId?allGames.filter(g=>g.matchId===game.matchId):[];
 const tAN=game.teamAName||"Team A",tBN=game.teamBName||"Team B";
 const gameComments=comments.filter(c=>c.gameId===game.id);
 const matchKey=game.matchId||game.id;
 const matchHighlights=(highlights||[]).filter(h=>h.gameId===matchKey).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+const [commHint,setCommHint]=useState(game.commentaryHint||"");
+const [commLoading,setCommLoading]=useState(false);
+const [commErr,setCommErr]=useState(null);
+async function genCommentary(){
+if(commLoading)return;
+setCommLoading(true);setCommErr(null);
+try{
+const patchedGame={...game,commentaryHint:commHint};
+const result=await generatePerfCommentary(patchedGame,player?.name||"speler");
+onUpdateCommentary&&await onUpdateCommentary(game.id,{aiCommentary:result,commentaryHint:commHint});
+}catch(e){setCommErr(e&&e.message?e.message:String(e));}
+setCommLoading(false);
+}
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}}>
 <div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto",paddingBottom:"calc(24px + env(safe-area-inset-bottom,0px))"}}>
@@ -1177,6 +1271,7 @@ return(
 <span style={{color:game.team==="B"?RED:WHITE}}>{tBN}</span>
 </div>
 )}
+<EspnCommentaryBanner commentary={game.aiCommentary} loading={commLoading} err={commErr} isAdmin={isAdmin} hint={commHint} onHintChange={setCommHint} onGenerate={genCommentary} label="ESPN COMMENTARY"/>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>JOUW STATS</div>
 <FullStatGrid game={game}/>
 {matchGames.length>1&&(
@@ -4354,10 +4449,11 @@ return(
 }
 
 // ── Full Games Section
-function FullGamesSection({scheduledGames,pastGames,players,onAddScheduledGame,onEditScheduledGame,onDeleteScheduledGame,isAdmin}){
+function FullGamesSection({scheduledGames,pastGames,players,onAddScheduledGame,onEditScheduledGame,onDeleteScheduledGame,onSaveFullMatch,isAdmin}){
 const [selectedMonth,setSelectedMonth]=useState(new Date());
 const [showAddModal,setShowAddModal]=useState(false);
 const [editingScheduled,setEditingScheduled]=useState(null);
+const [editingMatch,setEditingMatch]=useState(null);
 const [rainChances,setRainChances]=useState({});
 
 // Get days in month
@@ -4563,7 +4659,7 @@ return(
             return (
               <div key={mi} style={{background:INPUTBG,borderRadius:12,overflow:"hidden",marginBottom:12}}>
                 {hasScore ? (
-                  <div style={{background:"#111",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"center",gap:16}}>
+                  <div style={{background:"#111",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"center",gap:16,position:"relative"}}>
                     <div style={{textAlign:"right",flex:1}}><span style={{fontWeight:700,fontSize:13,color:aWon?WHITE:GREY}}>{tAN}</span></div>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontSize:22,fontWeight:800,color:aWon?WHITE:GREY}}>{s.teamAScore}</span>
@@ -4571,10 +4667,19 @@ return(
                       <span style={{fontSize:22,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
                     </div>
                     <div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:13,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+                    {isAdmin&&<button onClick={()=>setEditingMatch(mG)} style={{position:"absolute",top:8,right:10,background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13}}>✏️</button>}
                   </div>
                 ) : (
-                  <div style={{background:"#111",padding:"8px 14px",textAlign:"center"}}>
+                  <div style={{background:"#111",padding:"8px 14px",textAlign:"center",position:"relative"}}>
                     <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span>
+                    {isAdmin&&<button onClick={()=>setEditingMatch(mG)} style={{position:"absolute",top:6,right:10,background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13}}>✏️</button>}
+                  </div>
+                )}
+                {s.matchAiCommentary&&(
+                  <div style={{padding:"10px 14px",borderBottom:`1px solid ${DIVIDER}`}}>
+                    <div style={{fontSize:10,fontWeight:800,letterSpacing:1.5,color:RED,marginBottom:3}}>📺 ESPN</div>
+                    <div style={{fontWeight:800,fontSize:13,marginBottom:2,color:WHITE}}>{s.matchAiCommentary.headline}</div>
+                    <div style={{fontSize:12,color:"#ccc",lineHeight:1.4}}>{s.matchAiCommentary.body}</div>
                   </div>
                 )}
                 <div style={{padding:"8px 0"}}>
@@ -4610,6 +4715,7 @@ return(
 {isAdmin&&<button onClick={()=>{setEditingScheduled(null);setShowAddModal(true);}} style={{background:RED,color:WHITE,border:"none",borderRadius:20,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%",marginTop:16}}>+ Game plannen</button>}
 
 {showAddModal&&<ScheduledGameModal game={editingScheduled} players={players} onSave={onAddScheduledGame} onClose={()=>{setShowAddModal(false);setEditingScheduled(null);}}/>}
+{editingMatch&&<EditFullMatchModal matchGames={editingMatch} players={players} onSave={onSaveFullMatch} onClose={()=>setEditingMatch(null)}/>}
 </div>
 );
 }
@@ -5456,11 +5562,24 @@ return(
 function EditGameModal({game,players,allGames,onSave,onClose}){
 const [form,setForm]=useState({...game});
 const [saving,setSaving]=useState(false);
+const [commLoading,setCommLoading]=useState(false);
+const [commErr,setCommErr]=useState(null);
 const {IS,BR,BG2}=styles();
 const player=players.find(p=>p.id===game.playerId);
 
 // Also allow editing shared game fields (scores, names, location, date)
 function setF(k,v){setForm(f=>({...f,[k]:v}));}
+
+async function genCommentary(){
+if(commLoading)return;
+setCommLoading(true);setCommErr(null);
+try{
+const patched={...form};STAT_KEYS.forEach(k=>{patched[k]=parseFloat(form[k])||0;});
+const result=await generatePerfCommentary(patched,player?.name||"speler");
+setForm(f=>({...f,aiCommentary:result}));
+}catch(e){setCommErr(e&&e.message?e.message:String(e));}
+setCommLoading(false);
+}
 
 async function save(){
 setSaving(true);
@@ -5525,6 +5644,17 @@ value={form[k]||""} onChange={e=>setF(k,e.target.value)}/>
 </div>
 ))}
 </div>
+{/* ESPN commentary */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:16,marginBottom:10}}>📺 ESPN COMMENTARY</div>
+<textarea placeholder="Coach commentaar (optioneel) — AI schrijft er ESPN-stijl commentaar omheen" value={form.commentaryHint||""} onChange={e=>setF("commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
+<button onClick={genCommentary} disabled={commLoading} style={{marginTop:8,background:"transparent",border:`1px solid ${RED}55`,color:RED,borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:commLoading?"default":"pointer",width:"100%",opacity:commLoading?0.6:1}}>{commLoading?"Bezig...":form.aiCommentary?"🔄 Regenereer commentary":"✨ Genereer commentary"}</button>
+{commErr&&<div style={{color:RED,fontSize:12,marginTop:6}}>{commErr}</div>}
+{form.aiCommentary&&(
+<div style={{marginTop:10,background:"#111",borderRadius:10,padding:"10px 12px"}}>
+<div style={{fontWeight:800,fontSize:13,marginBottom:3}}>{form.aiCommentary.headline}</div>
+<div style={{fontSize:12,color:"#ccc",lineHeight:1.4}}>{form.aiCommentary.body}</div>
+</div>
+)}
 <div style={{display:"flex",gap:10,marginTop:16}}>
 <button onClick={onClose} style={BG2}>Annuleer</button>
 <button onClick={save} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
@@ -5545,6 +5675,8 @@ const [tAS,setTAS]=useState(""),[tBS,setTBS]=useState("");
 const [statForms,setStatForms]=useState({});
 const [activeP,setActiveP]=useState(null);
 const [saving,setSaving]=useState(false);
+const [matchHint,setMatchHint]=useState("");
+const [commStatus,setCommStatus]=useState("");
 const {IS,BR,BG2}=styles();
 
 function togA(pid){if(teamB.includes(pid)||chams.includes(pid))return;setTeamA(t=>t.includes(pid)?t.filter(x=>x!==pid):[...t,pid]);}
@@ -5559,13 +5691,32 @@ setSaving(true);
 const mid=Date.now().toString();
 const newGames=all.map((pid,i)=>{
 const sf=statForms[pid]||{};
-const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||""};
+const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||"",commentaryHint:sf.commentaryHint||""};
 if(teamA.includes(pid)){g.team="A";g.opponent=tBN;}
 else if(teamB.includes(pid)){g.team="B";g.opponent=tAN;}
 else{g.team="chameleon";g.opponent="";}
 STAT_KEYS.forEach(k=>{g[k]=parseFloat(sf[k])||0;});
 return g;
 });
+// Fire off ESPN-style AI commentary: per-player (where a hint was given or a milestone was hit)
+// and one match-level recap. Failures here should never block saving the actual stats.
+try{
+setCommStatus("✨ AI commentary genereren...");
+await Promise.all(newGames.map(async g=>{
+if(!g.commentaryHint&&detectMilestones(g).length===0)return;
+try{
+const p=players.find(x=>x.id===g.playerId);
+g.aiCommentary=await generatePerfCommentary(g,p?.name||"speler");
+}catch(e){console.error("perf commentary error",e);}
+}));
+if(matchHint||newGames.some(g=>detectMilestones(g).length>0)){
+try{
+const matchCommentary=await generateMatchCommentary(newGames,players,tAN,tBN,matchHint);
+newGames.forEach(g=>{g.matchCommentaryHint=matchHint;g.matchAiCommentary=matchCommentary;});
+}catch(e){console.error("match commentary error",e);}
+}
+}catch(e){console.error(e);}
+setCommStatus("");
 await onSave(newGames);
 // Show local notification to this device
 const firstPlayer=players.find(p=>p.id===all[0]);
@@ -5582,6 +5733,7 @@ return(
 <div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>Log Game</div>
 <input type="date" style={{...IS,marginBottom:12}} value={gameDate} onChange={e=>setGameDate(e.target.value)}/>
 <input placeholder="📍 Locatie (optioneel, bijv. Sporthal Noord)" style={{...IS,marginBottom:12}} value={location} onChange={e=>setLocation(e.target.value)}/>
+<textarea placeholder="📺 Coach commentaar over de wedstrijd (optioneel) — AI maakt er een ESPN-stijl recap van" value={matchHint} onChange={e=>setMatchHint(e.target.value)} rows={2} style={{...IS,marginBottom:12,resize:"vertical",fontFamily:"inherit"}}/>
 <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
 <div><input placeholder="Team A naam" style={{...IS,marginBottom:6}} value={tAN} onChange={e=>setTAN(e.target.value)}/><input type="text" inputMode="decimal" placeholder="0.0" style={IS} value={tAS} onChange={e=>setTAS(e.target.value)}/></div>
 <div style={{color:GREY,fontSize:20,fontWeight:700,textAlign:"center",paddingTop:6}}>–</div>
@@ -5640,15 +5792,136 @@ return(
 </div>
 ))}
 </div>
+<div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar (optioneel)</div>
+<textarea placeholder="bijv. domineerde onder de basket" value={sf.commentaryHint||""} onChange={e=>setStat(activeP,"commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
 </div>
 );
 })()}
+{commStatus&&<div style={{color:RED,fontSize:12,textAlign:"center",marginTop:10}}>{commStatus}</div>}
 <div style={{display:"flex",gap:10,marginTop:14}}>
 <button onClick={()=>setStep("setup")} style={BG2}>← Terug</button>
 <button onClick={saveAll} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
 </div>
 </>
 )}
+</div>
+</div>
+);
+}
+
+// ── Edit Full Match Modal (edit every player's stats for a full match at once, plus ESPN recap)
+function EditFullMatchModal({matchGames,players,onSave,onClose}){
+const s=matchGames[0]||{};
+const [shared,setShared]=useState({date:s.date||"",location:s.location||"",teamAName:s.teamAName||"Team A",teamBName:s.teamBName||"Team B",teamAScore:s.teamAScore||"",teamBScore:s.teamBScore||""});
+const [statForms,setStatForms]=useState(()=>{
+const init={};
+matchGames.forEach(g=>{init[g.playerId]={...g};});
+return init;
+});
+const [activeP,setActiveP]=useState(matchGames[0]?.playerId||null);
+const [matchHint,setMatchHint]=useState(s.matchCommentaryHint||"");
+const [matchAiCommentary,setMatchAiCommentary]=useState(s.matchAiCommentary||null);
+const [saving,setSaving]=useState(false);
+const [commLoading,setCommLoading]=useState(false);
+const [commErr,setCommErr]=useState(null);
+const {IS,BR,BG2}=styles();
+function setSh(k,v){setShared(f=>({...f,[k]:v}));}
+function setStat(pid,k,v){setStatForms(f=>({...f,[pid]:{...(f[pid]||{}),[k]:v}}));}
+
+async function genMatchCommentary(){
+if(commLoading)return;
+setCommLoading(true);setCommErr(null);
+try{
+const previewGames=matchGames.map(g=>{const sf=statForms[g.playerId]||{};const pg={...g,...sf};STAT_KEYS.forEach(k=>{pg[k]=parseFloat(sf[k])||0;});return pg;});
+const result=await generateMatchCommentary(previewGames,players,shared.teamAName,shared.teamBName,matchHint);
+setMatchAiCommentary(result);
+}catch(e){setCommErr(e&&e.message?e.message:String(e));}
+setCommLoading(false);
+}
+
+async function save(){
+setSaving(true);
+const updated=matchGames.map(g=>{
+const sf=statForms[g.playerId]||{};
+const ug={...g,...sf,...shared,matchCommentaryHint:matchHint,matchAiCommentary};
+STAT_KEYS.forEach(k=>{ug[k]=parseFloat(sf[k])||0;});
+return ug;
+});
+await onSave(updated);
+setSaving(false);
+onClose();
+}
+
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:350}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"94vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:20,marginBottom:16,textAlign:"center"}}>✏️ Volledige game bewerken</div>
+{/* Shared game info */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>GAME INFO</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+<input type="date" style={IS} value={shared.date} onChange={e=>setSh("date",e.target.value)}/>
+<input placeholder="📍 Locatie (optioneel)" style={IS} value={shared.location} onChange={e=>setSh("location",e.target.value)}/>
+<div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center"}}>
+<div><input placeholder="Team A naam" style={{...IS,marginBottom:6}} value={shared.teamAName} onChange={e=>setSh("teamAName",e.target.value)}/><input type="text" inputMode="decimal" placeholder="0" style={IS} value={shared.teamAScore} onChange={e=>setSh("teamAScore",e.target.value)}/></div>
+<div style={{color:GREY,fontSize:18,fontWeight:700,paddingTop:16,textAlign:"center"}}>–</div>
+<div><input placeholder="Team B naam" style={{...IS,marginBottom:6}} value={shared.teamBName} onChange={e=>setSh("teamBName",e.target.value)}/><input type="text" inputMode="decimal" placeholder="0" style={IS} value={shared.teamBScore} onChange={e=>setSh("teamBScore",e.target.value)}/></div>
+</div>
+</div>
+{/* Per-player stats */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SPELERS</div>
+<div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
+{matchGames.map(g=>{
+const p=players.find(x=>x.id===g.playerId);const ia=activeP===g.playerId;
+const team=g.team==="A"?shared.teamAName.slice(0,3):g.team==="B"?shared.teamBName.slice(0,3):"🦎";
+return(
+<button key={g.playerId} onClick={()=>setActiveP(g.playerId)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"8px 10px",borderRadius:10,border:"none",cursor:"pointer",flexShrink:0,background:ia?RED:INPUTBG,color:ia?WHITE:GREY}}>
+<Avatar player={p} size={26}/>
+<span style={{fontSize:10,fontWeight:600,whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]||"?"}</span>
+<span style={{fontSize:9,opacity:0.7}}>{team}</span>
+</button>
+);
+})}
+</div>
+{activeP&&(()=>{
+const g=matchGames.find(x=>x.playerId===activeP);
+const p=players.find(x=>x.id===activeP);
+const sf=statForms[activeP]||{};
+const team=g?.team==="A"?shared.teamAName:g?.team==="B"?shared.teamBName:"🦎 Kameleon";
+return(
+<div key={activeP}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,padding:"10px 12px",background:"#111",borderRadius:10}}>
+<Avatar player={p} size={38}/>
+<div><div style={{fontWeight:700,fontSize:15}}>{p?.name||"?"}</div><div style={{color:RED,fontSize:12}}>{team}</div></div>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+{STAT_KEYS.map(k=>(
+<div key={k}>
+<div style={{color:GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
+<input type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>setStat(activeP,k,e.target.value)}/>
+</div>
+))}
+</div>
+<div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar over deze speler (optioneel)</div>
+<textarea value={sf.commentaryHint||""} onChange={e=>setStat(activeP,"commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
+</div>
+);
+})()}
+{/* Match-level ESPN recap */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginTop:20,marginBottom:10}}>📺 ESPN MATCH RECAP</div>
+<textarea placeholder="Coach commentaar over de wedstrijd (optioneel) — AI maakt er een ESPN-stijl recap van" value={matchHint} onChange={e=>setMatchHint(e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
+<button onClick={genMatchCommentary} disabled={commLoading} style={{marginTop:8,background:"transparent",border:`1px solid ${RED}55`,color:RED,borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:commLoading?"default":"pointer",width:"100%",opacity:commLoading?0.6:1}}>{commLoading?"Bezig...":matchAiCommentary?"🔄 Regenereer recap":"✨ Genereer recap"}</button>
+{commErr&&<div style={{color:RED,fontSize:12,marginTop:6}}>{commErr}</div>}
+{matchAiCommentary&&(
+<div style={{marginTop:10,background:"#111",borderRadius:10,padding:"10px 12px"}}>
+<div style={{fontWeight:800,fontSize:13,marginBottom:3}}>{matchAiCommentary.headline}</div>
+<div style={{fontSize:12,color:"#ccc",lineHeight:1.4}}>{matchAiCommentary.body}</div>
+</div>
+)}
+<div style={{display:"flex",gap:10,marginTop:16}}>
+<button onClick={onClose} style={BG2}>Annuleer</button>
+<button onClick={save} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
+</div>
 </div>
 </div>
 );
@@ -8033,6 +8306,8 @@ catch(e){console.error(e);showError();}
 }
 async function saveGames(gs){setSaveStatus("saving");try{await Promise.all(gs.map(g=>fbSave("games",g)));showSaved();}catch(e){console.error(e);showError();}}
 async function saveGameEdit(g){setSaveStatus("saving");try{await fbSave("games",g);showSaved();}catch(e){console.error(e);showError();}}
+async function updateGameCommentary(gameId,patch){const g=games.find(x=>x.id===gameId);if(!g)return;setSaveStatus("saving");try{await fbSave("games",{...g,...patch});showSaved();}catch(e){console.error(e);showError();}}
+async function updateMatchCommentary(matchId,patch){const matchGames=games.filter(g=>(g.matchId||g.id)===matchId);if(!matchGames.length)return;setSaveStatus("saving");try{await Promise.all(matchGames.map(g=>fbSave("games",{...g,...patch})));showSaved();}catch(e){console.error(e);showError();}}
 async function deleteGame(gid){setSaveStatus("saving");try{await fbDel("games",gid);showSaved();}catch(e){console.error(e);showError();}}
 async function addComment(c){setSaveStatus("saving");try{await fbSave("comments",c);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteCommentAndReplies(id){
@@ -8256,7 +8531,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 {tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
 
 {/* FULL GAMES TAB */}
-{tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} isAdmin={isAdmin}/>}
+{tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} onSaveFullMatch={saveGames} isAdmin={isAdmin}/>}
 
 {/* LARP TAB */}
 {tab==="larp"&&<LarpSection posts={larpPosts} replies={larpReplies} games={games} players={players} onCreatePost={createLarpPost} onDeletePost={deleteLarpPost} onPinPost={pinLarpPost} onLikePost={likeLarpPost} onAddReply={addLarpReply} onDeleteReply={deleteLarpReply} isAdmin={isAdmin} onOpenPerf={gid=>setModal({type:"perfDetail",gameId:gid})} botSettings={botSettings} onSaveBotSettings={saveBotSettings}/>}
@@ -8382,7 +8657,7 @@ onViewAllHighlights={(items,name)=>setHighlightsList({items,title:`Highlights ·
 isAdmin={isAdmin} onClose={()=>setModal(null)} onDelete={deleteGame}
 onEdit={g=>{setEditingGame(g);setModal(null);}} onAddComment={addComment} onDeleteComment={deleteCommentAndReplies}
 onAddHighlight={defaults=>setHighlightForm({existing:null,defaults})}
-onOpenHighlight={hl=>setHighlightView(hl)}/>
+onOpenHighlight={hl=>setHighlightView(hl)} onUpdateCommentary={updateGameCommentary}/>
 )}
 {highlightForm&&<HighlightFormModal existing={highlightForm.existing} defaults={highlightForm.defaults} players={players} onSave={saveHighlight} onClose={()=>setHighlightForm(null)}/>}
 {highlightView&&(() => {

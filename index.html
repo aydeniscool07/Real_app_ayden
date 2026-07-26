@@ -1134,8 +1134,10 @@ return(
 // ── Admin Dashboard — central hub for admin-only settings & quick actions
 function AdminDashboardModal({appSettings,botSettings,players,games,scheduledGames,larpPosts,triviaUsers,manualAwards,onSaveAppSettings,onSaveBotSettings,onClose,onQuickAction}){
 const [showBotSettings,setShowBotSettings]=useState(false);
-const {BG2}=styles();
+const {BG2,IS}=styles();
 const triviaEnabled=appSettings?.triviaEnabled!==false;
+const nbaPredictionsEnabled=appSettings?.nbaPredictionsEnabled!==false;
+const [bdlKeyInput,setBdlKeyInput]=useState(appSettings?.balldontlieApiKey||"");
 const stats=[
 {label:"Players",value:players?.length||0,icon:"👥"},
 {label:"Games",value:games?.length||0,icon:"🏀"},
@@ -1178,6 +1180,25 @@ return(
 <button onClick={()=>onSaveAppSettings({triviaEnabled:!triviaEnabled})} style={{background:triviaEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
 {triviaEnabled?"Uitschakelen":"Inschakelen"}
 </button>
+</div>
+
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🔮 NBA Predictions tab</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{nbaPredictionsEnabled?"Zichtbaar voor iedereen":"Verborgen voor niet-admins"}</div>
+</div>
+<button onClick={()=>onSaveAppSettings({nbaPredictionsEnabled:!nbaPredictionsEnabled})} style={{background:nbaPredictionsEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+{nbaPredictionsEnabled?"Uitschakelen":"Inschakelen"}
+</button>
+</div>
+
+<div style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600,marginBottom:2}}>🔑 BALLDONTLIE API key</div>
+<div style={{color:GREY,fontSize:11,marginBottom:8}}>Nodig om het NBA-schema te verversen (gratis account op balldontlie.io).</div>
+<div style={{display:"flex",gap:8}}>
+<input value={bdlKeyInput} onChange={e=>setBdlKeyInput(e.target.value)} placeholder="API key" style={{...IS,padding:"9px 10px",fontSize:13}}/>
+<button onClick={()=>onSaveAppSettings({balldontlieApiKey:bdlKeyInput.trim()})} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"9px 14px",fontWeight:700,fontSize:12,cursor:"pointer",flexShrink:0}}>Opslaan</button>
+</div>
 </div>
 
 <div onClick={()=>setShowBotSettings(true)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer"}}>
@@ -7379,16 +7400,16 @@ onClose={()=>setShowPredictions(false)}/>
 
 
 // ── Trivia: auth card (reuses fantasy_users accounts)
-function TriviaAuthCard({onLogin,onRegister,error}){
+function TriviaAuthCard({onLogin,onRegister,error,icon,title,subtitle}){
 const {IS,BR}=styles();
 const [mode,setMode]=useState("login");
 const [username,setUsername]=useState("");
 const [password,setPassword]=useState("");
 return(
 <div style={{padding:"40px 20px",maxWidth:380,margin:"0 auto"}}>
-<div style={{textAlign:"center",fontSize:40,marginBottom:8}}>🧠</div>
-<div style={{textAlign:"center",fontWeight:800,fontSize:22,marginBottom:4}}>LBA Trivia</div>
-<div style={{textAlign:"center",color:GREY,fontSize:13,marginBottom:24}}>Log in om mee te doen aan de dagelijkse quiz over onze league en te strijden voor de topplek.</div>
+<div style={{textAlign:"center",fontSize:40,marginBottom:8}}>{icon||"🧠"}</div>
+<div style={{textAlign:"center",fontWeight:800,fontSize:22,marginBottom:4}}>{title||"LBA Trivia"}</div>
+<div style={{textAlign:"center",color:GREY,fontSize:13,marginBottom:24}}>{subtitle||"Log in om mee te doen aan de dagelijkse quiz over onze league en te strijden voor de topplek."}</div>
 <div style={{display:"flex",background:INPUTBG,borderRadius:12,padding:4,marginBottom:16}}>
 <button onClick={()=>setMode("login")} style={{flex:1,background:mode==="login"?RED:"transparent",border:"none",color:WHITE,borderRadius:9,padding:"8px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>Inloggen</button>
 <button onClick={()=>setMode("register")} style={{flex:1,background:mode==="register"?RED:"transparent",border:"none",color:WHITE,borderRadius:9,padding:"8px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>Account maken</button>
@@ -7650,6 +7671,240 @@ return(
 );
 }
 
+// ══════════════════════════════════════════
+// ── NBA PREDICTIONS (Scorito-stijl poule) — reuses fantasy_users accounts
+// ══════════════════════════════════════════
+const BDL_BASE="https://api.balldontlie.io/nba/v1";
+async function bdlFetch(path,apiKey){
+const res=await fetch(BDL_BASE+path,{headers:{Authorization:apiKey}});
+const rawText=await res.text();
+if(!res.ok)throw new Error("BALLDONTLIE fout "+res.status+": "+rawText.slice(0,200));
+return JSON.parse(rawText);
+}
+async function fetchNbaTeams(apiKey){
+const data=await bdlFetch("/teams",apiKey);
+return (data.data||[]).map(t=>({id:t.id,name:t.name,fullName:t.full_name,abbr:t.abbreviation,conference:t.conference,division:t.division}));
+}
+async function fetchNbaGamesRange(apiKey,startDate,endDate){
+let all=[],cursor=null,pages=0;
+do{
+const qs=new URLSearchParams({start_date:startDate,end_date:endDate,per_page:"100"});
+if(cursor)qs.set("cursor",cursor);
+const data=await bdlFetch("/games?"+qs.toString(),apiKey);
+all=all.concat(data.data||[]);
+cursor=data.meta?.next_cursor||null;
+pages++;
+}while(cursor&&pages<6);
+return all.map(g=>({
+id:g.id,date:g.date,status:g.status,
+homeTeamId:g.home_team?.id,awayTeamId:g.visitor_team?.id,
+homeTeamAbbr:g.home_team?.abbreviation,awayTeamAbbr:g.visitor_team?.abbreviation,
+homeTeamName:g.home_team?.full_name,awayTeamName:g.visitor_team?.full_name,
+homeScore:g.home_team_score,awayScore:g.visitor_team_score,
+postseason:g.postseason
+}));
+}
+
+function NbaGameCard({game,myPick,onPick,locked}){
+const isFinal=game.status==="Final";
+const started=game.status!=="Scheduled";
+const homeWon=isFinal&&(+game.homeScore>+game.awayScore);
+const awayWon=isFinal&&(+game.awayScore>+game.homeScore);
+const canPick=!locked&&game.status==="Scheduled";
+return(
+<div style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:8}}>{game.date?new Date(game.date).toLocaleDateString("nl-NL",{weekday:"short",day:"numeric",month:"short"}):""}{isFinal?" · EINDSTAND":started?" · LIVE":""}</div>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<button disabled={!canPick} onClick={()=>onPick(game.awayTeamId)} style={{flex:1,textAlign:"left",background:myPick===game.awayTeamId?RED:"#1C1C1E",opacity:canPick||myPick===game.awayTeamId||isFinal?1:0.55,border:awayWon?`1px solid ${RED}`:"1px solid transparent",borderRadius:10,padding:"10px 12px",color:WHITE,cursor:canPick?"pointer":"default"}}>
+<div style={{fontWeight:700,fontSize:13}}>{game.awayTeamAbbr||"?"}</div>
+<div style={{fontSize:11,color:myPick===game.awayTeamId?"#fff":GREY}}>{game.awayTeamName||""}</div>
+{isFinal&&<div style={{fontSize:16,fontWeight:800,marginTop:2}}>{game.awayScore}</div>}
+</button>
+<div style={{color:GREY,fontSize:11,fontWeight:700}}>@</div>
+<button disabled={!canPick} onClick={()=>onPick(game.homeTeamId)} style={{flex:1,textAlign:"left",background:myPick===game.homeTeamId?RED:"#1C1C1E",opacity:canPick||myPick===game.homeTeamId||isFinal?1:0.55,border:homeWon?`1px solid ${RED}`:"1px solid transparent",borderRadius:10,padding:"10px 12px",color:WHITE,cursor:canPick?"pointer":"default"}}>
+<div style={{fontWeight:700,fontSize:13}}>{game.homeTeamAbbr||"?"}</div>
+<div style={{fontSize:11,color:myPick===game.homeTeamId?"#fff":GREY}}>{game.homeTeamName||""}</div>
+{isFinal&&<div style={{fontSize:16,fontWeight:800,marginTop:2}}>{game.homeScore}</div>}
+</button>
+</div>
+{myPick&&!isFinal&&<div style={{color:GREY,fontSize:11,marginTop:6}}>Jouw pick: {myPick===game.homeTeamId?game.homeTeamAbbr:game.awayTeamAbbr}</div>}
+{isFinal&&myPick&&<div style={{color:(myPick===game.homeTeamId&&homeWon)||(myPick===game.awayTeamId&&awayWon)?"#30d158":RED,fontSize:11,fontWeight:700,marginTop:6}}>{(myPick===game.homeTeamId&&homeWon)||(myPick===game.awayTeamId&&awayWon)?"✓ Goed voorspeld":"✗ Fout voorspeld"}</div>}
+</div>
+);
+}
+
+function NbaWeekPicks({games,myPredictions,onPick}){
+const upcoming=games.filter(g=>g.status==="Scheduled").sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+const finished=games.filter(g=>g.status==="Final").sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+const myPickMap={};(myPredictions||[]).forEach(p=>{myPickMap[p.gameId]=p.pickedTeamId;});
+if(!games.length)return <div style={{padding:"40px 20px",textAlign:"center",color:GREY,fontSize:13}}>Nog geen schema geladen. Vraag de admin om te verversen.</div>;
+return(
+<div>
+{upcoming.length>0&&<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,margin:"4px 0 8px"}}>AANKOMEND</div>}
+{upcoming.map(g=><NbaGameCard key={g.id} game={g} myPick={myPickMap[g.id]} onPick={tid=>onPick(g,tid)}/>)}
+{finished.length>0&&<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,margin:"16px 0 8px"}}>AFGELOPEN</div>}
+{finished.slice(0,20).map(g=><NbaGameCard key={g.id} game={g} myPick={myPickMap[g.id]} onPick={()=>{}} locked/>)}
+{!upcoming.length&&!finished.length&&<div style={{padding:"20px 0",textAlign:"center",color:GREY,fontSize:13}}>Geen wedstrijden in het geladen bereik.</div>}
+</div>
+);
+}
+
+function NbaTeamSelect({teams,value,onChange,exclude,placeholder}){
+return(
+<select value={value||""} onChange={e=>onChange(e.target.value?+e.target.value:null)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"8px 10px",fontSize:13,width:"100%"}}>
+<option value="">{placeholder||"Kies team..."}</option>
+{teams.filter(t=>!exclude||!exclude.includes(t.id)||t.id===value).map(t=><option key={t.id} value={t.id}>{t.fullName}</option>)}
+</select>
+);
+}
+
+function NbaSeasonForm({teams,myPrediction,onSave,locked}){
+const east=teams.filter(t=>t.conference==="East");
+const west=teams.filter(t=>t.conference==="West");
+const [eastSeeds,setEastSeeds]=useState(myPrediction?.eastSeeds||Array(8).fill(null));
+const [westSeeds,setWestSeeds]=useState(myPrediction?.westSeeds||Array(8).fill(null));
+const [cupWinner,setCupWinner]=useState(myPrediction?.cupWinner||null);
+const [champion,setChampion]=useState(myPrediction?.champion||null);
+const [mvp,setMvp]=useState(myPrediction?.mvp||"");
+const [dpoy,setDpoy]=useState(myPrediction?.dpoy||"");
+const [roy,setRoy]=useState(myPrediction?.roy||"");
+function setSeed(list,setList,i,val){const copy=[...list];copy[i]=val;setList(copy);}
+function save(){onSave({eastSeeds,westSeeds,cupWinner,champion,mvp:mvp.trim(),dpoy:dpoy.trim(),roy:roy.trim()});}
+const inputStyle={background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"10px 12px",fontSize:13,width:"100%"};
+if(!teams.length)return <div style={{padding:"40px 20px",textAlign:"center",color:GREY,fontSize:13}}>Nog geen teams geladen. Vraag de admin om te verversen.</div>;
+return(
+<div>
+{locked&&<div style={{background:"#2C1500",border:"1px solid #5a3200",borderRadius:10,padding:"10px 12px",color:"#f5a524",fontSize:12,marginBottom:14}}>🔒 Seizoensvoorspellingen zijn gesloten door de admin.</div>}
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+<div>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,marginBottom:8}}>Oost — playoffvolgorde</div>
+{eastSeeds.map((v,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+<div style={{color:GREY,fontSize:11,width:14}}>{i+1}</div>
+<NbaTeamSelect teams={east} value={v} exclude={eastSeeds.filter((x,j)=>j!==i)} onChange={val=>setSeed(eastSeeds,setEastSeeds,i,val)}/>
+</div>
+))}
+</div>
+<div>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,marginBottom:8}}>West — playoffvolgorde</div>
+{westSeeds.map((v,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+<div style={{color:GREY,fontSize:11,width:14}}>{i+1}</div>
+<NbaTeamSelect teams={west} value={v} exclude={westSeeds.filter((x,j)=>j!==i)} onChange={val=>setSeed(westSeeds,setWestSeeds,i,val)}/>
+</div>
+))}
+</div>
+</div>
+<div style={{marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🏆 NBA CUP WINNAAR</div>
+<NbaTeamSelect teams={teams} value={cupWinner} onChange={setCupWinner}/>
+</div>
+<div style={{marginBottom:16}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🏆 KAMPIOEN</div>
+<NbaTeamSelect teams={teams} value={champion} onChange={setChampion}/>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:16}}>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>👑 MVP</div><input value={mvp} onChange={e=>setMvp(e.target.value)} placeholder="bv. Nikola Jokić" style={inputStyle}/></div>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🛡️ DEFENSIVE PLAYER OF THE YEAR</div><input value={dpoy} onChange={e=>setDpoy(e.target.value)} placeholder="bv. Victor Wembanyama" style={inputStyle}/></div>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🌱 ROOKIE OF THE YEAR</div><input value={roy} onChange={e=>setRoy(e.target.value)} placeholder="bv. ..." style={inputStyle}/></div>
+</div>
+{!locked&&<button onClick={save} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%"}}>Voorspelling opslaan</button>}
+</div>
+);
+}
+
+function NbaPredictionsLeaderboard({predictions,games}){
+const finalMap={};games.forEach(g=>{if(g.status==="Final"){finalMap[g.id]=(+g.homeScore>+g.awayScore)?g.homeTeamId:g.awayTeamId;}});
+const stats=useMemo(()=>{
+const m={};
+(predictions||[]).forEach(p=>{
+if(!finalMap[p.gameId])return;
+if(!m[p.userId])m[p.userId]={userId:p.userId,username:p.username||p.userId,correct:0,total:0};
+m[p.userId].total+=1;
+if(finalMap[p.gameId]===p.pickedTeamId)m[p.userId].correct+=1;
+});
+return Object.values(m).sort((a,b)=>b.correct-a.correct||(b.correct/Math.max(b.total,1))-(a.correct/Math.max(a.total,1)));
+},[predictions,games]);
+if(!stats.length)return <div style={{padding:"40px 20px",textAlign:"center",color:GREY,fontSize:13}}>Nog geen afgeronde voorspellingen om te scoren.</div>;
+return(
+<div>
+{stats.map((s,i)=>(
+<div key={s.userId} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{width:24,textAlign:"center",fontWeight:800,color:i===0?"#f5a524":i===1?"#c0c0c0":i===2?"#cd7f32":GREY}}>{i+1}</div>
+<div style={{flex:1}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{s.username}</div>
+<div style={{color:GREY,fontSize:11}}>{s.total} voorspellingen</div>
+</div>
+<div style={{textAlign:"right"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{s.correct}/{s.total}</div>
+<div style={{color:GREY,fontSize:10}}>{s.total?Math.round(s.correct/s.total*100):0}%</div>
+</div>
+</div>
+))}
+</div>
+);
+}
+
+function NbaPredictionsTab({teams,games,predictions,seasonPredictions,authUserId,authError,onLogin,onRegister,isAdmin,enabled,onToggleEnabled,onPickGame,onSaveSeason,apiKeySet,onRefreshSchedule,refreshing,refreshError,seasonLocked,onToggleSeasonLock}){
+const [sub,setSub]=useState("week");
+const adminToggleBar=isAdmin&&(
+<div style={{marginBottom:14}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:"10px 14px",marginBottom:8}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🔮 Predictions tab {enabled?"actief":"uitgeschakeld"}</div>
+<button onClick={()=>onToggleEnabled(!enabled)} style={{background:enabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>{enabled?"Uitschakelen":"Inschakelen"}</button>
+</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:"10px 14px",marginBottom:8}}>
+<div>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>📅 Schema & uitslagen</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{games.length} wedstrijden geladen{refreshError?` · ${refreshError}`:""}</div>
+</div>
+<button onClick={onRefreshSchedule} disabled={refreshing||!apiKeySet} style={{background:apiKeySet?"#2C2C2E":"#1a1a1a",color:apiKeySet?WHITE:GREY,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:apiKeySet?"pointer":"default"}}>{refreshing?"Bezig...":"Ververs"}</button>
+</div>
+{!apiKeySet&&<div style={{color:GREY,fontSize:11,marginBottom:8}}>Stel eerst een BALLDONTLIE API key in bij Admin Dashboard → Instellingen.</div>}
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:"10px 14px"}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🔒 Seizoensvoorspellingen</div>
+<button onClick={()=>onToggleSeasonLock(!seasonLocked)} style={{background:seasonLocked?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>{seasonLocked?"Ontgrendelen":"Vergrendelen"}</button>
+</div>
+</div>
+);
+
+if(!enabled&&!isAdmin){
+return(
+<div style={{padding:"60px 20px",textAlign:"center"}}>
+<div style={{fontSize:40,marginBottom:12}}>🔮</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:16,marginBottom:6}}>Predictions is tijdelijk uitgeschakeld</div>
+<div style={{color:GREY,fontSize:13}}>We zijn bezig met een update. Kom later terug!</div>
+</div>
+);
+}
+
+if(!authUserId){
+return(
+<div>
+{adminToggleBar}
+<TriviaAuthCard icon="🔮" title="LBA Predictions" subtitle="Log in met je Trivia-account om NBA wedstrijden en het seizoen te voorspellen." onLogin={onLogin} onRegister={onRegister} error={authError}/>
+</div>
+);
+}
+
+const myPredictions=predictions.filter(p=>p.userId===authUserId);
+const mySeason=seasonPredictions.find(s=>s.userId===authUserId);
+
+return(
+<div>
+{adminToggleBar}
+<div style={{display:"flex",background:INPUTBG,borderRadius:12,padding:4,marginBottom:16}}>
+{[["week","Deze week"],["season","Seizoen"],["leaderboard","Klassement"]].map(([id,label])=>(
+<button key={id} onClick={()=>setSub(id)} style={{flex:1,background:sub===id?RED:"transparent",border:"none",color:WHITE,borderRadius:9,padding:"8px 0",fontWeight:700,fontSize:12,cursor:"pointer"}}>{label}</button>
+))}
+</div>
+{sub==="week"&&<NbaWeekPicks games={games} myPredictions={myPredictions} onPick={(g,tid)=>onPickGame(g,tid)}/>}
+{sub==="season"&&<NbaSeasonForm teams={teams} myPrediction={mySeason} locked={seasonLocked} onSave={onSaveSeason}/>}
+{sub==="leaderboard"&&<NbaPredictionsLeaderboard predictions={predictions} games={games}/>}
+</div>
+);
+}
+
 // ── Splash Screen
 const SPLASH_SRC = "data:image/jpeg;base64,/9j/4QDKRXhpZgAATU0AKgAAAAgABgESAAMAAAABAAEAAAEaAAUAAAABAAAAVgEbAAUAAAABAAAAXgEoAAMAAAABAAIAAAITAAMAAAABAAEAAIdpAAQAAAABAAAAZgAAAAAAAABIAAAAAQAAAEgAAAABAAeQAAAHAAAABDAyMjGRAQAHAAAABAECAwCgAAAHAAAABDAxMDCgAQADAAAAAQABAACgAgAEAAAAAQAAAbSgAwAEAAAAAQAAAOOkBgADAAAAAQAAAAAAAAAAAAD/4gIoSUNDX1BST0ZJTEUAAQEAAAIYYXBwbAQAAABtbnRyUkdCIFhZWiAH5gABAAEAAAAAAABhY3NwQVBQTAAAAABBUFBMAAAAAAAAAAAAAAAAAAAAAAAA9tYAAQAAAADTLWFwcGwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAApkZXNjAAAA/AAAADBjcHJ0AAABLAAAAFB3dHB0AAABfAAAABRyWFlaAAABkAAAABRnWFlaAAABpAAAABRiWFlaAAABuAAAABRyVFJDAAABzAAAACBjaGFkAAAB7AAAACxiVFJDAAABzAAAACBnVFJDAAABzAAAACBtbHVjAAAAAAAAAAEAAAAMZW5VUwAAABQAAAAcAEQAaQBzAHAAbABhAHkAIABQADNtbHVjAAAAAAAAAAEAAAAMZW5VUwAAADQAAAAcAEMAbwBwAHkAcgBpAGcAaAB0ACAAQQBwAHAAbABlACAASQBuAGMALgAsACAAMgAwADIAMlhZWiAAAAAAAAD21QABAAAAANMsWFlaIAAAAAAAAIPfAAA9v////7tYWVogAAAAAAAASr8AALE3AAAKuVhZWiAAAAAAAAAoOAAAEQsAAMi5cGFyYQAAAAAAAwAAAAJmZgAA8qcAAA1ZAAAT0AAACltzZjMyAAAAAAABDEIAAAXe///zJgAAB5MAAP2Q///7ov///aMAAAPcAADAbv/bAIQAAQEBAQEBAgEBAgMCAgIDBAMDAwMEBQQEBAQEBQYFBQUFBQUGBgYGBgYGBgcHBwcHBwgICAgICQkJCQkJCQkJCQEBAQECAgIEAgIECQYFBgkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJ/90ABAAc/8AAEQgA4wG0AwEiAAIRAQMRAf/EAaIAAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKCxAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6AQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgsRAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A/hDAITkUAZGCKCCfwpjYyAtAC4+XC+lAYZwKOhz2NAQqcECgBcKpxQvHHpT+owOo9KjOec/pQAi49OlNxuO4dKcR2FLkEccYoAqlR95fypMEqCeKnPPJqJhu+lAELLwCe1Rnnr3qbvj0pmzvgUAQY7dqQehqfY3B708x4AH8qAIfLIAp+0H73WnkHHNJgbs0AM24YU0qc4A4qbv6e1AAJxQBWKZP+FLs2nFWtu0AdhTSB0HSgCqVB4oO7b9OKsBSG9cUKuBQBX29BTcZ49Km2nPApMc4NAEHlrnNGwA7e1WNo79KTaducUAQEZbFOKrnFSlccmhVzyOooAiA5/pTsZHApx680mOOf0oAaUyfajvuA4p49qPpQA05BwKjKkVZCH8KcNo4xQBVCZ5PajYetWSqg0pVe1AFcplqaU7d6soMCkG3djtQBXK9ARx7UmParBUHkU0+tAEO05pMGp8Yp6jPFAEKAHhadsG2p1jUHihoj17UAVtg609Ac81LgKcYppQAgUAIQAdo/Kl3AjgU7aFOacFYncAKAGbX6elSYP4U5gVbFOAA6UARcilGQQSMY7U/YMfN0pMcZHagCTIA+WjzACOKjUEc0m0k/SgCU7P4jik/d/3v0pgwBzR8tAH/0P4Q8dqAF6mnH5hwOlNZeOKAEXJG79KcAAc+tR5bPTipQVztPSgB6Dr+lR8E4NOxj5T0NIcdMUAQ428t07U0MelPYjgd6iyfTigBfl6mm7d3PakB4yaNv8Lc0AJ0YUMhA3DoaXavRvwo5HGOlADVAoEY45pT83AoCfKPWgB2M9e1RgADNP4xhqQBOAKAIsZbpTlQn5e4p+CTupWOKAI9uMCl4BwRTtueRTNnzYoAQCjgcYpyp+lPGCMEUAQBWHSkIbII/KpSi5+bil2At04oAZs5yKY2NvNWAvI5pGUHtQBUPTawpcDGQOlTcY5qIgHgjFADOp+tO2jp6UgTJ46UbCOBQAm3v2p2NrY60AYGG4FKg70AO+8NrCn/AFpdo/Cm9OlADT6UgwCeMCnqR/DQx2nkUARHHc03j0/ClcDNOAC/WgBOq5HHtSY9B0pQGB29KXktjHFADV+992pMc4Haj6cAU9D144oAcQwOelOYEcikUArtpzfKposBGcuMmm4BPSpVPYDilC89MUAIq4GDTQo3H2qUKB06UKAowOKAIxs3ZJqQEde1AAA+UUz7pBJ6UAPPTFJ04xTx9OBSbdoBbigCPB7dPSpMelJuB4AxQRx6YoAco4p3HoPypoU9hS7W9P0/+tQB/9H+EM4xgUHjoKTI6LTuvFAEPGNmaec5wMUgUH6Cl5PsKAJBkKOvH5U3jrikTaBgdulLx36e1ADNig5x0qIjaOlTdvlqHrxQBERkZXpTzkDIp2zIwBSBcY9KAFHIytM2gD5jUjY6U0BWwF7UARBflDUqnb1HHavVPD/wR+Lni3R4fEPhjw5qF9Y3GfLngh3xvtO04I9CMVtr+zb8fC3PhDVMf9cP/r15dTO8FB8sq0U15o+zw3hxxDWpxq0cBVlFpNNU5tNdLWjtbY8SJIxkZpAWPSvdW/Zq+Pe3jwfqn/fj/wCvXlvinwZ4r8CasNF8ZadPpl2YxIIbhdrbDwDjnjj9K0w2a4WtLko1It9k0/yOTNuB86y+j9Yx2DqU4bXlTlFel2kjnwDxj8qcMDoOKjLcgUE5bFegfLjtydhijA+8KT73GOaQMDwKAEXGcinDH8WeOKXNSBtw2npQBEOTg/hTtvI7VIsDykRoMk9K+/vhT/wSx/4KF/Gz4c6P8W/hR8HfFXiDw1rsRn0/UbGyWS3uIgxXdG3mKduR6CkB+f3l7+Ow5pOc+3pX6lD/AIIt/wDBVKT5U+AnjP8A8F6D/wBrVMn/AARN/wCCrcpG34B+Mv8AwBjH/tamB+VjY7CmOnav1ib/AIIf/wDBWAf80D8Y/wDgHD/8fqm3/BEX/gq/nH/Cg/GI/wC3KP8A+PUAflKFC8CnAHp3r9UpP+CJH/BVxeT8BPGX/gDH/Saqh/4Iqf8ABVcNsHwE8Z/+AC//AB2gD8t9p6dadtOcAV+qI/4Ilf8ABVsrkfATxln/AK8Y/wD49Xj3xS/4Jg/8FDPgxpL6/wDE34LeNNIsIhukuZNGuJIYwO7vbiUIPdsCgD4QKtjA6U0jbwR+FaMlnJF97Bxxx0yOo9j6jtVJ15waAIwMj0NAGDkU5gAaauD1FIAPAz1phG7jocU888N07UqhT2oQDCDxjinKOwr6j/Zs/Yw/ai/a/wBQ1bSv2ZvAms+N59Ciim1BdItxN9mjnZliMhLIF3lWCjOTtbAwDX1kP+CJP/BVwNgfAPxj/wCAMf8A8eoA/K4oc4pFj+bNfqjN/wAESv8Agq6q5PwD8Zf+AEf/AMepqf8ABE//AIKshf8AkgnjP/wAT/49TA/LIbh/9ao+VNfbn7Qn/BOb9uL9lfwEnxP/AGh/hd4h8HeH5LuKwW/1S1WGA3Myu0cWQ7HcwRscdjXxPsA69qAFUY4I4pQu04pCKXg5x9KAHY4pPpSYHbtT2xjmgBhK5wPyoJHSnZ4wMUpxu5/CgBB0/pSdselDAk7abjkCgB/fAGMUAEjOMUFT0WkUtj6cUASrgDFO4/z/APqqEqo4JApPk/vCgD//0v4RFXvil25+YdKRcD734VKMFcCgCMps+U855pMALj8qf8mMc/WkYcY7UARjaOF49aBxx+VIDgAdulH06UAJnI46f56U0qxx7UpU59qQ47DigBMECkJOdtOXhhx06Um3Iz+mKAGbecmnxRqc+vpQQcgV6D8JvC48bfFLw74SCeYl9qFvHIB/zz3gv+SA/hXPiq8aNKVWWyV/uPTyXKqmOxlHA0V71SUYr1k0kf0IfBzwufAnwj8OeFF/dtZ6dAsijgeYy75P/HmNd550mcbj+ZqPeXJwML2HtTxHxX8HYqvKrVlVnu3c/wClrK8BTwmEpYKgrQpxjFekUkvwRbiklkHl7j+Zr8Av2xvESeJv2iPEEkbb4rB47FPb7OgVv/H91fvbeahDpNjNqV0QsVtG0rn0WNSx/QV/Mf4j8Q3XirxJqPiW7/1moXMty31lct/Wv2bwRy/mxdbE/wAsUvvf/AP4C/aI8UeyyHAZQnrUqOb9KcbfnP8AAw9gx14oACnmngevSkVcjJr+kz/I8aMbj3pAFb2FBwDwcUmDsoAVVPVeanTGcGoM4AHSpVYE4Xt0oA0LSG8upxb2KF53+SJVHJkf5EAH+8RX+25+wD8D7L9mz9jL4Xfs92DHb4S8L6ZYPjjMi26NIfxdjX+RF/wSk+CB/aR/4KN/BX4MCMSxav4t0+W4jIyptrB/ts4b/Z2QYPtX+0raQLFK0kYADcDHAwOn6UAWcBWxk4+pqTjoCaQxM33qcsSr07UAO2j+8aaFB7kYokIVe1U/MXqTQBbZSo4JNN2NjOT+Zp0Th+9TjGcCgCEJgYLH8zUNxAs0RjL8EYIPII9MHinyfe4qEHnmgD+XT/gvF/wQS+B37bPwc8RfH39mzw7a+GvjXoNrJqEbadCkEPiGOBN0lneRIFQ3DKP9HnwGV8KxKEiv8uKS2nRyk6lGHBDDBBHBBHYg8EdjX+9YYYjOCVHTFf4n3/BSrwz4V8F/8FAPjb4T8FbF0vTvHfiGG2RMbUQX0rbFxxhGLKB2AoA+DgAeB26CmHpjH/6qfL945qLHrQADEnQVdigeUhY1JPooyT7AD9BVXa/av6Pf+DZf/gnAP25f29bP4nfEew874d/CB7bXdV8xcxXepbidLsTkYYGVDcSL0McO0/fFJAf3O/8ABvv/AME4p/8AgnH/AME/9B8PeMLBbb4gePvL8SeKmIxLDPPGPstgx6gWVvtjZegmMrD71fu1EGcDk/nSWsHlhmZtwfmnunl/dpgS+V6sahYEfKCfzp0cm773FTgbutAH82v/AAdXfDs+O/8Agjj441RUMz+FNW0TWR32bLv7KzfQC5xX+UtLEFdwelf7J/8AwWu+GbfFn/glz8ffBCguZPBl9eKAM86fsvR+XkV/jdbN0SS44dFb8xQBmD5W20/12ipJUYnA6U0AgYosAowOKRouAD2oHFPDcYPFADPQGk4zjNMYkcDikG7gjnFADnPGV4pQMEHPFKM5IFKo5xQA5eu4fKPSmtjOQKd8o/Cm/LjK8e1ACDjpS8/5/wD1UmD6UYPp/KgD/9P+EPjpT15/CmglSccUmcCgCQk5weR7VGAu7OeBTdx25HFA+YZ6YoAcBnJAppHenfw9eKYeMEdKAIyRjJNGeMDn6UrjjkCmDd06UAOJbqaXo3NMV8gUuRmgCTjgEV9mfsEeFDrnx4GvSDMei2M9xntvlAgT/wBDJ/CvjXpgEV+sf/BOzwv9j8G6/wCM5F+a+vI7RD/sW6b2x7FpB+VfDeI+P+r5NWa3kuX79PyP6R+iTwv/AGrx9gINe7SbqP8A7cV4/wDk3KfpFuwtOjYngVX5PSnodhx6V/HXLof7yqep4J+1X4pPg79n7xNqsZxLPa/Y4/8AeuiIePoGJ/Cv57Ej8vGBxX68/wDBR7xebHwDoPgmFsHUbx7mQD+5bJgfhuk/SvyGjbcu2v6k8G8u9llTrP7cn9y0/Rn+NX0+eKfrnGcMvg/dw9KMf+3pe+/wcfuJTk9/ypR8i8dKjzhcNT+BX6yfw8GB/hSMoPFIWAxto3nqtMCIA7sZ4qVcA4AqP6dKfEcNQB/VP/waM/Ah/iT/AMFNrz4s3Nt5tn8OvCl9fh8cJeX7raW/0+QSYr/UKsSTZozDnFfxQ/8ABmP8Ax4c/Zx+Lf7SOpQ+XL4p1600K1fH3rfSYN7ke3nTOMe1f2txZRdi0BYvsyha/PT/AIKgft2aH/wTm/Yv8XftW6xpa64/h8W0VpprTfZxdXN3MsMcXmAHb1J4Havv2SJ/LL+lfxo/8Hjvx2k8NfsY/Db4DWc6+Z4z8Vtf3EWeTa6PblwcenmyAfUe1AHxvef8HofiyKVkh+ANqQvHPiFv6RUlv/wef+LpPv8AwCs1/wC5gf8A+NV/DN9pDLkVB9pdRjPWhAf3NXf/AAekeK7T/mgdlj/sYH/+NV+jH/BKb/g6I0P9v79rjRP2UPiB8LX8GXniuOddJv7PUTqERuLeMymKdGRSiuqkK44Bxniv8z6fN0dv4V/VL/waI/AKb4j/APBS7V/izeIHtvh14TvLmMlcgXOqOtlFt9GCu5HsKAR/qA2ciXcC3C9Gq35a/lWdpx+zwCFv4avvKNvFAHjvxt+KWjfBj4ZeJ/iz4ll8jTfDGj3mqXMh/gjtIWkY/htr/Dl+Ifj/AFr4k+ONY+IviZ/M1DxDfXWq3Tes19M9xIf++pK/1jf+Dkn48j4Gf8Ef/ipPp04h1HxjFa+FLUZwX/tWdIZ1H0t/MJ9hX+R7dRIkz46Z4+g6fpQAxmDE0BOitVXeAfcVaikycUAdBonh7V/Emq2nh/w9aSX2oX88dta20ClpJp5nEcUUajks7kKoHev9h/8A4Izf8E4NL/4Jn/sNeFvgLPFE/iu/X+2vFl3Hg+frN2imZAw6x2yBLaLsVj3dWNfxb/8ABqP/AMEyz+0V+03N+3X8U9PM3gn4T3KpoyyJmO98SOgaIrngrp0TCc+kzwehr/S2srf7NDtBznkZpJgEKvGMV5B+0H8ePAX7NHwO8W/H/wCKFwLXQPBuk3Wr3z5APk2sRkKpngu5ARF7sQB1r2Se4W3QyN2r+Gf/AIO9v+Ci0Hh/wNoH/BNX4YX/APp/ikRa/wCMPLbmLT4m/wCJdZNjobiZTcOp5CRRHo9MD+1T4RfELTfi78K/DXxX0aB7a08S6XaapDFIQXSO7hWZFYjjIVgDivRxJg4r82/+CR3jyX4kf8EwP2f/ABlI++S68BaEspJz+9hs44pP/HkNfpAi+lAHhH7SXgb/AIWT8D/HPw+27v7f8ParpmAOv2qymhx/49X+HJc2EunsdNm4a2Z4Dnt5TlP6V/vF3GyLDv03L1+or/D4/bB+Gs3wc/av+KHwlnPz+GvFus6d0xxDdyAfpQB80PwcVAQM4AzU7/3ahb1WgCEgA46VH8w+WpCMnbimgAHaPpQAw8njnFOVBjJOKUjHKjFNY85FAEq8EbsY7e1LhVPAqAHJHYVNgsdooAdx9KbjIyacflA446CmAY6cUAAZv4RS75P7v8qXy2PNHlN6CgD/1P4QgeT7035s9sU/ikXBHy9KAI2ODx+VOXh/alYBRn9Kagbj0oAcvp1Hv1pwAHFMLYbIpu4D7vFAAeQccVGOBil35OAcgUmcDGaAABhx0HtUqgKuO1RhxjbQCfu9qAJi4Cc9BX75/sq+FD4N+A3h3T5F2y3Vv9tk/wB66PmD8k2ivwj8M6JP4m8Q6f4btOZdQuYbZB7yuFH86/pfsdMttKsodKsQFgtI0hjA6BI1CL+gFfhvjXmPLRoYRdW392i/M/0f/Z4cKe0x+Y53JfBGNNf9vPmf4Rj95eiwRUhUgZ9KjRcVY+XZ83AFfzrM/wBWII/EP/goF4r/ALc+OCaDE2YtGsYocDtJKTK3H0KiviOLrkdK9H+NHilvHHxZ8ReKC25Lu/mMZ/6Zq2yPH/AVFearleK/t7hfL/qmXUcP2ivv6n/Or4z8U/21xXmGZp3U6krf4U+WP/kqRMwGMilAH5/pTUYD71POcZFe8fmRExAOPSkxu6dqPQd6OmBQALjoelWbYR+arv8AcXk/7q8n9Kh2gnHSu7+GngLVvib8QNC+Guhf8fviPUbPSbcDvLfTpboB+L0gP9b7/g3u+AT/AAC/4JF/Bbw/dR+Ve63pkniO7GMMZdYla6G73CMo9sYr9v22ocgV5j8IfB2mfDj4caD8NdHgWC18O6baadDGg+VFtoUjCj6ba9LAZ+tMCOW5QqUbgV/mpf8AB338VtS+IP8AwUC8I/BvRrO7ntfAPhGMyGKGWSMXWrzG4b7ikbvJVR9K/wBLAwDr1rAu9A0+6naeSGMs3UlFJ4+oosB/hInwv4lX5k029/8AAWb/AOIqM+F/FbthdKvf/AWb/wCIr/dq/wCEQ0ZxzbQ/9+o//iaaPCGjRNuFtED/ANc0/wDiaAP8K/TfA/jCedIodJv3kkIVUWznLEnoAAnWv9JT/g0+/YA+Nn7J/wCzn47+PHx48MXHhrVviZqFj/ZVlqMZhvU0mwifbLJE2GjWeV9yKwBKqDjBFf1lweH7GNlkjSJWQ5BEaDBHpxxW9HCkZyBknvQBR2ndyKt7UK/N6USoMcV+X3/BQz/grJ+xf/wTc8DXHiD9oTxXbnWjC0mneGdNkS41nUHA+VIrZTmNCeDNLsiTu1AH80H/AAeffH6LQ/hp8G/2V7G5BuNS1O/8VXsKEZWKyh+yWpcejyXDFfUofSv8+d5ZHya/RT/goz+3r8V/+Ck37VHiH9qT4tqlrNqmy107TIW3waZplvn7NZxMQCwTczyPgb5XZsAYA/Pe4h+b5OlAGVmvSvg98KvH3x2+Knh34LfCzT31PxJ4s1K20nTLVBzLc3UgijX2GTlj0AGTwK4QWbP2r+4H/g0J/wCCZk3iXxtrP/BS/wCLdj/xLdCNxoHgpJl4lvZF2ajqCg/wwxN9mjboWkkxzHQB/al/wTx/Yz8EfsBfsieCP2UPAQjntPC2nrHd3irtN9qEv729vG4zmadnZQeVTanRRX3PxgAVnWcEUMIiqWZ1gXcxwKAPEv2kPjl8P/2afgr4q+PvxWulsvDPg/S7jVdQlyAfKt0LbEBxmSQgRxr1Z2VR1r/F4/aw/aY+IH7Yv7UfjL9qb4qPnWPGerSajJEDlLaEkLbWsef+WdtAqQoPRa/s0/4O+v8AgpJ/Y+j+G/8Agml8NtQ3Saj5PiXxkYm+7bo2dMsHx/z0dTdSKeQEgPQ1/BkbvzSNtAH+t7/wbjeObfxt/wAEY/ghcxSb302zv9Jk/wBlrDULiDb+CoK/dwAdDX8o/wDwaN+OW8Tf8Erp/DDNn/hGPHOs2O3+6LhYb0fgfPzX9XJ45oAwvEKs1gwTrX+QH/wX7+HB+Gn/AAWG+POjFPLXUdeTWlA6Y1S2jus/jvzX+wRfJ58IUiv8un/g7Y+HJ8G/8FYpPFvl7F8X+DdHvt3982gexJ/AQgfhQB/L1JgHCn8KrkgDmrEpyelVzjGPWgCI8/WmsT1FSYXOKZ1GKAIt2eScCk4K59KceRjvSoDjAoAUYzyPpTwDnjmkA9TmnjgZFACZG7NM747UjkrTgRnigB4LYpctTRtx81L+7oA//9X+EKl6dKUNgHbxTe3PagCNz8/pSgsOBTTg/hSFsnPSgBcdzQ3AGaFUEZH5UmM9ulADMg/dNIjDbilwfw9qF6ewoARQRwKVBualxQpAPy96APqr9jDwuvib9ofRGkTdFpXm6g/oDAhMf/kTbX7yKBjmvyp/4JyeFt+o+JfHEi8Rxw6fEfd2818fQIo/Gv1ZUZz6V/KHi7mHts3dNbQSX6/qf7afQZ4X/s/gSniZKzxE5z+WkF/6RdeoigZ4rzz4weKV8F/CrxF4pLBDY6fPIh/29hCD/voivRtmOa+IP2+fFP8AYXwKOhLw+s3sNv1x8kf75v8A0AD8a+K4cwH1vMKOH7yX3dfwP6G8V+J/7E4Zx+a7OnSm162tH/yayPxEDMcbv8mlVQB6U9sA59KYD2HSv7kP+cVslU4XApc4XNIG2gKtHUnFADASepwBT19F6UvQ+1PA6UAPjAzk9q/aD/g34/Z9X9or/grb8GvC95bG607RtVk8R3oH8EWjwtPGx9vPMVfjAu5Tiv7P/wDgzW+BH/CR/tTfFb9oi6jYDwh4YtdFtm2/KZtZnMsuD2Kx2yZ+ooA/0ZrKDY7y/wB/n86vED6VnWm5oFz6VK0rRdqALTEKnzVREobhhxX4if8ABe//AIKS/En/AIJo/sNv8ZvgvLpy+M9X17T9F0iPUoftEP73dJcuYty7gkS+vUiv4tR/wds/8FYApJl8EH/uBP8A/JdAH+ogs0YA5qGWVccc1/lxXP8Awdx/8FZIXDRt4JP/AHApP/kui3/4O5/+CsczBHPgj/wRSf8AyZSuB/qLpIWOBVqKUH5a/wA7b9hD/g7D/bf8SftO+Dfhz+034e8M+IfCPivWLPSLl9IsprC/tPtkghSaA/aJY5AjEFo3T5hwGWv9DiOcySNEP4CR+XFNagaksSSIUfkMCCPY1/Fp/wAF6/8Ag3E+CHj/AOFHjD9sb9iPTp/D/wAQdDtptZ1jQo5Zbiz123hzJcGJZS8kN6qZaMIxik27Cik7x/aKk2PlrmPFiafLompDUgvkfY5hLu6bDG27PtigD/B7W9dG8tDlWAI7cEZFSLKGfLdq7j4gaToi+MNVl8NgDT/t159lC9Ps/wBok8rHt5e3HtXnLxyhtgG2gD67/Y5/Ze+If7av7S3gv9lz4UR7ta8Z6lHYpLtLJbQffubuTbyIraFXlc44Va/2fv2YP2dvh3+yn8CfCf7OPwkthbeF/B2lwabYpgbmWJfnlkIABlmkLSyHHLuxr+Pb/g0L/wCCbTfD34W6z/wUe+Kunn+1/GqS6N4RSVPmg0eKTF3eKD0N3MnlIwwfLif+GSv7g7QxxwiJeAKdgEljKcivnf8Aai/aO+HX7KH7PvjD9or4vzfZvDXgvS59UvGyAzrCvyQx56yzPtiiX+J2UV9Jsdy7R1r+Z7/g42/ZB/4KM/t5fA/wr+yr+xv4dtNQ8K3F6dZ8U3dzqttYGd7Q4sLFUlYM8ayFriTI27khx0NF9LAf5nf7VH7QnxB/a9/aH8ZftOfFWXzNe8bapNqdyoOUhEhxDbx56R28QSGMdlQCvnqMPC27sK/oX/4hdf8Ags5HMQPh5pTL2x4h07H/AKHWsP8Ag1x/4LJSx7T8PdJGf+ph07/4upA/ob/4MuPGserfs3/G34eO/Gl+KdO1JU9PtunpET+Jtv0r+1svkV/I3/wbH/8ABLj9un/gmt4u+MVt+1h4btNE0rxjaaK2nSWupWt8HuLB7sSKVgYlcJMnJAHpX9ciRnYN1MBcZUE9q/zxf+D0XwC1v+0L8D/ivGPl1Hw/q2jE+9ndi5A/AXFf6HhH7sgelfxXf8HlXw0l1f8AZD+EnxUWPP8Awj3jK4sGf+6uqWQwPoTbfpQB/nWSkYqqScYP4VbmG07RVOQd6AGdPwpvTtml74B6U0ngqD1oAYRk4xzTVIFK6jpTBhSFoAtAggVJk8c//XqAZ4J6VJwenagBDjNMDYPt0qUt0JpucngcUAIMetLx60qrTttID//W/hCzxx1phO7gde9O4BpDktxx2oAg7n0FPpzY3dOlG35gDQAoJBHQUjDnjpTflxg04N2xQAjDaaZzz6VIxyfpTCec9KAEHPIpnJOBxipAG288U6KGa4lS2t/mklIRQPViAKTdlcqEW2ox3P3N/Yg8JP4a/Z+028mTbLq88983+6xEUf8A47HkfWvsBM9K57wN4Xi8HeCdH8JRDaNNsre2I9441Df+PZrpSoUcV/C2e5h9axlXEfzNv5dPwP8ApG8OeFVkmQYLKoq3sacI/NRSf43JGdQuWr8iP+CkHiwXXi7w54Pib5bO1lu3Uf3p2CL+kZr9cPvrtr8UP2qvhn8aviP8cNZ8QaJ4Y1G6sYjHa20iQ5RooVAyvPQtuIr7Xwpp0VmyrV5KKgnu0vL9T+fPprYvHy4Jll2XUZVJ15wjaEXJ8q99/CtvdS+Z8OqBSfKB06V7JH+zt8ehw3hDVR/27n/Gpj+zr8dT/wAyjqg/7Yf/AF6/p/8At7A/8/o/+BI/xx/4hnxJ/wBC+t/4Kn/8ieJEjtTwc8ivYj+zz8dV4HhDVP8Avx/9epYv2d/jqeP+ER1T/vx/9en/AG7gf+f0f/AkL/iGnEf/AEL63/gqf/yJ43huB2pynFe3n9nP475A/wCES1T/AL8f/XrkvE3wy8f+BoIrjxjo13pcUzbI3uI9iswGcA564rSjnGEqSUKdWLfZNHLj+As9wlF4jFYKrCEd3KnNJeraSRwUWXkEajrxX+nZ/wAGinwLk+Gn/BM/UPi5fqPP+Jniu+1CHjDfZNOVdPiH+7uhZl+tf5l1tClsGu8ZMSM4HqVHA/E4Ff7SP/BMX9naL9ln9gL4NfAv7OttP4d8LafHeKO95LCstyxx3aV2Jr0UfJn33EfLGDT7k5t2ZeoFRSbc81UmeZUJUduBQB/n/f8AB6D8cp7vxV8EP2b7d12Wlrqfim5QEZDystlblh/uoxWv4ZUvCTtY8V/X5/wcT/sa/wDBQf8AbL/4KheLfG/wo+D/AIu17wnoGnadoGlX1nY+bbzpaxb5pIm3jKtK5wR6V+FMn/BGX/gqS5zH8B/Gg/7hv/2ygD84DhqqFJIz5idq/TW3/wCCOH/BUmJh5vwG8an6ab/9sq/J/wAEfP8Agp90HwD8b/8Ags/+2UAet/8ABAD4JN+0R/wVo+DPhG/t1ubDRdVk8SXySDKfZ9Hha4+Yem8L+PFf7BVoscqi4UfeHP1r+If/AINh/wDgit+0/wDsn/FzxJ+2b+1x4ck8G3F1oraH4e0e9ZDflbp1e5u544mdYU2KI40LbzkkgADP9u1rCbeJYvSiwFh0xyOK/OD/AIKuftAr+yz/AME7/jP8dPPEE+k+FL+OyOcZvbqM29so+srqK/SOTHlZ9BX8kf8Awd8fH8+AP+CbOifBixlAuPiR4rs7aWIfeNnpatfSN/uiSOMH64oA/wA1l0SKKK0Bz5Max/8AfChf6V9q/wDBOL9hXxh/wUQ/bK8FfsreFC9vb67defrF6oyLHSLX97e3JzxlYgVjBxukZVHJr4FttQKSF5W46mv9LX/g1G/4Juz/ALOv7L99+2r8VdOMPi74wQxjSo5VxLZ+HIW3wdQCDfSjzyOhjSEjrSA/qj+E3wx8HfB74faH8Lvh7Yx6Z4f8O2Ftpmm2kX3YLW0iWKGMf7qKBnueetelNB6dKVIFhiEadFpnn7OG4pgA+Q4p7Q28/wDrEDfWqj6nZq21t2fZT/hUf9pWqn5A3/fLf4UAJc6bbk5jQDHtUcVlbIfnjU/hUp1SA84b/vlv8KjOp255Ct/3y3+FO4GlHFbwD90gXPpxU2eMisqG+glbaM/kR/StGM7eDSAkYlkwK/mt/wCDqn4aS+N/+CO/jLWoU3HwprWia3n+75dybYn8rjFf0qAA5r8rP+C1Hwzf4w/8Eufjx8O4ozK8/g6/u0RRzusNl6MfTyM0Af4192MStjtWe3yjmrZdprdJv76Kf0qnIO9AFcnA4pgYryKc5xnjrULdPTFAEoPOaAQCPamVIocYIoAMHdtNPIGAVpBndTs8fyoAGGcc9KDigEijpz6UAOXAH+RS5X1/U0buPlHFG5vT9aAP/9f+EHGBxSk9h6flTMk4A60owOAMmgBcccdaawwdp7U4fKc8ZpRz2+lAEYXA6ZpQFHFSAY6UmDn0oAiJ+bB6CjHqad8rcUxlB49KAFGFPWvcv2aPCo8ZfHjwvorr5kIvkuJQenl2/wC9bPtha8NGW4xiv0G/4J1eEzqPxO1jxbMny6Tp/lI3pJcuE/8ARYavmeMsw+q5VXrdotL1eiP1/wAAeFv7Z40y3L2rp1Yt/wCGHvy/8liz9kjJI+ZH6nn86hxk1YVkxTcrX8SH/RHJEW0jmjew/iP5mnFieKZjimRbsKZXA++351GZZD/G350hBPtTCCO1UjPmYrO/95vzNCs4P3m/Oog3Y0vBNaJEXLbTNt++cfWvx6/4KNeLZX8ZeH/CUMhKWdrJduM9GnfavH+7GK/Xh45WUqo+lfgD+1dr3/CZ/tA+IbqI74LOYWMfpi2URnHsWBNfqPg9lqq5t7X+SLf6fqfxf9PHit4Hgn6kt69SEPlH33/6Sl8z03/gnF8GJ/2oP24/hJ8BRB9pi8S+K9LtrmMDObSKdbi649PIhfPoK/2w9Lt0SI2luoSKDEcajsqDao/ICv8ALo/4NLP2f1+JP/BVm0+Il/ButPh14Z1LWBJ2W5utljAPbKyTH8K/1LLWIQrtTvX9Uo/xXGrHzhqnaEYxUuwd6djnNAGXJaIf4mHsGIpY7SJvvM//AH0au7QDk0zYcZ6UAR/YoP7z/wDfZ/xqq9soOAz/APfRq7tPalWPuKAC2gWJflp5IU1Io4qpdSwRpiRwn14oAdNPEEwTgNxX+cd/weH/ALQOjePf2vfh9+zRoN0Jx8OvD09/qCIwIS91uVfLRgOjrbwFsdlkHrX9h3/BVL/gqt+zt/wS5+Bl18Q/irfRX/iu8hkHhvwxDIPtupXQGEynWK1RsGWZgFCggZOBX+RV8e/2kfiP+038a/FHx/8AjFqH9o+I/FuoTanqE/O3zJeiRr/DHEgWKJf4UVRQ7dAPuD/gj3/wTu1X/go/+3p4T+AdxDJ/wili/wDbfiu6j48nR7NwZUDD7r3L7beP/acdhX+xZ4U0Gx8LaJaaBodtFZWFjDHb2ttAgSKCGJQkcUajhURAFUDgAAV/OZ/wbIf8E4F/Yv8A2HIPjB8SdO8j4gfGNYNbvd6jfZ6UFzplmfQ+WxuHAxzIoIylf0yrCqxiMdulADElXo1fJH7cH7XPw4/Yg/ZZ8c/tR/E4g6b4N057pLcMFe7umxHaWkf+3cTskS+hbPQV9T3haIHHBFf51v8Awdzf8FK2+Jnxs0L/AIJ2/Di+8zRvh+0es+KWhb5J9ani/wBEtWx1FnbOZD28yZeA0dAH8/PxA/4LGf8ABT/xj4z1bxbcfHTxrps+r3k97JaadrE9vZwNO7SGK3iU4jhjzsjUcBQBXASf8FW/+Cl0pw/x/wDH5P8A2Hbn/GvgG5mMh3d6pLwctQB+gS/8FTv+ClG/I+Pnj76/27df/FVfh/4Kpf8ABSjftHx+8f57Y125/wAa/PMMrHinI+DkcYosB/Sn/wAEbv8Agpx+3H4m/wCCoPwP8LfGD4x+MPEfh3V/Eqabeadqmrz3FpOt3bTwoskTHa2JChAPcCv9VIZA8sdq/wARr9gLxrP4A/bm+DPjovsXR/Hfh26YngBF1KBW/wDHWNf7cEMu+dscg8j6UAXFfaMV458b/A0fxN+GXif4fyruTXtGv9MI9Rd2skGP/H69ekjPaoGi2nzG6Aj9CKAP8H/W9Il0DVbrQphtfT7ie1IPYwStHj8Ntc8446Zr7N/b9+HDfBn9uD4x/CuZdraD411u0wOmBduwx7YNfGkrBsnpQgKZBPFRcZ4qfK9OxqPG3r+lIBCpBxU2DxilKBsUpC9BTAT2ppBzmjIPbpSkbgMjFADWB6rSgsOetJgE+9L8vpzQAoHtS49qaAFGBn8KX86AP//Q/g/IyN1J2AFAwCc0qDqCKADG44Qc04bR8vpTB0OBQgI+lAEvHem4BPzYxS5B6jFNxn+lADQPm4xTduHy3/6qmCgjp0oxn+lAEceAea+w/wBnP9qSw/Z/8O6jpUfh4anPqNwszz+f5WFRNqJtweBkn8a+OdrA/NUiL615mb5Ph8dQeGxUbxdtNtvSx9jwHx7mnDWYxzbJqihWimk+WMrJqz0kmttNj9Qk/wCCk8TNz4QOfa7/APrVbT/gpJGRj/hD/wDyc/8ArV+Wipt+6anwV4Ar5H/iF2Sf8+f/ACaX+Z+5f8Tm+IvTHr/wVS/+QP1J/wCHj8f/AEKA/wDAz/61Qj/gpAg+94QH4Xn/ANavy6xxnvUTfd54pf8AELMj/wCfP/k0v8x/8Tn+I3/Qev8AwVS/+QP1JP8AwUkth9/weeP+nv8A+tULf8FJbfoPCBHp/pf/ANavy39/SmqnPND8L8k/58/+TS/zD/ic7xF/6Dl/4Kpf/IH6if8ADx5M4HhD/wAnP/saen/BR2Dd83hE8el5/wDY1+XsSEHH5VJgdD+VV/xC/JP+fP8A5NL/ADJX0y/ET/oOX/gql/8AIH6pQf8ABSe2TBj8H52463np0/hr8yrzV59T1C41O8O6W6leVz/tO24/zrmXXr2xUQZsj+le7kHCeAyxylgocvNa+re3qz828TPG/iXjCnRpcQYj2kaV3FKMI2va/wAMVfZb7dD+gr/giv8A8FhvA/8AwSbv/H/iDVfhvP421TxvFYWguodRjsvstpZeY/lBXByZJZCxI7ADtX9ADf8AB6L4Gt4gkfwF1LKjvr1vj/0Gv4AIrps7elTmYt8hNfRWPyY/vl/4jUfCu7B+A17/AOD6H/4irCf8HqHg5uD8Br/8Neg/+Ir+AthhqemW4HFMD+/n/iNL8Edf+FDah/4Prf8A+JqMf8Hpng89fgNf4/7D8H/xFfwGEHoeKQnAAagD+/c/8HpngfGV+A2og/8AYet//iKgH/B6d4RD7T8Br/H/AGHoP/iK/gLL08OF5bnFAH99Gsf8Hpnh9LBm0P4C3bXGPl8/X4Qmf+AJmvzg/aR/4O8f+CiPxe0+XQvghofhz4XWs0bR/abaOTVdQQH+JJrnbEjY7iM4r+TlmGMrUCNJuy1AHtPxp+MXxP8A2hPHt/8AFP41+JNQ8V+I9Tbddalqk7XFxJznG5uFQdkQKo7Co/2d/Fnwv+F3x48KfEH4yeGG8Z+FtD1KG+1DQ0uBafb44DvWBpsHZGzAb+OVyK8gLnvwBUUsmV4/KgD+9XT/APg9G8J6fbrBD8BblMDhE12FUUDsqiPAUdAB0HFacX/B6h4fc5/4ULdEf9h+L/4iv4DQihskc0/c6fMtK4H99mt/8HoXhm50ucaT8CryG+EMgt2k12B4lm2nyy6hcsobGQOo6V/Ct8TPiJ4w+Lvj/W/in8RL59T8QeI7+41PUruT7091dSGWaQ+mXY4HQDAHArzwykLgUbgR89AD2OeDQBnpSe2KXC4pgKT3I6UDrmhkwKjyVI2/pSA6zwhr934Y8S6f4isRmXTrq3u4+cfNbypKvPblBX951l/web+FYVSW5+At9vCKp26/bgfKoHA2+1fwIxuUHFEk5I2ZoA/v5f8A4PSfBvSP4DX/AP4P7f8A+JrJ1H/g9E8MzQGCP4D3ihh31+H+iV/AwhZhtHarI+ZcHtTA+sP29f2ldF/bF/bL+Iv7Unh7RJPDlr471d9W/s2WdbloJJlHmDzUAVgWGRgcV8gOo6Y4qyyoVzULFTQBAO4HOOlO98DNPIGcAYqPG47T0FAEnI6U3IBwad2pnIOOvpQA7JfgfWkzSbio5GPpSkjgmgBAvc0pAPFHB6UhYZHHFADl6cGl59f0pgO0Y6Uu8f5//VQB/9H+ETYwx2HekYZbC9KOe9NKk8jpQAHgALkmmoQODQTuGOlJtU8YxxQArsAcDpXd6R8LviPrPw61f4u6Rol3ceFtAurWx1HVEj/0a1ub3d9mhkfs8oRto9j6VwqJlguK/dDwV+yf+0l8Sf8Agjp4P8Pfs3eAPE3jq7+I3xN1XXtR/wCEf024v1gtfDtiunWcc32eNgu+a6kdQ3XbkdKAPwta5QA5PCjJ/Cv0Lu/+CV//AAUR0X4YS/GnXvg/4gsfCdvpI12XU7iKOOBNNMQmFy25gwjMRDjjOK+TPg/8FfE3xJ/aF8M/s/zWr22ra74hs9BeCddjQzS3SwSrIpxtMZDBh2xiv6D/APguB8PL65+LXxV+NOr/ALLXj7wnbWep23h/TfiHqmoXkWjvBpaw6VaTLZPpaweTdxW6+REt5j5gwJ6EA/nc8JeAvE3xB8R6d4K8B6ZdazrOrzx2tjYWMLT3NzNLgJHFFGCzu3YAV7f+0h+w7+1j+yG+kr+0x8Pdb8EDXEkbT31S3McVx5O3zUjkGUMke4b4870yMgV98f8ABGaTxDP4n+OifBRS/wAabj4WatafDeCCTy9Rl1S5ngivxpZBVmv10trkwrH+8OD5YLYFeo/to/BKx/ZK/wCCZ3w++EfiS98b+DfGHjHxc+uat4A8U3NhLA39n2DxHX4rGKEXelM8lwLSOKeXfcpueQHYoUE2fkv+zj+x5+07+1v4h1Lw1+zT4K1LxpfaNbpd30WnIp+zQSOIkkkZyqqGchRz1qh+0V+zT8eP2S/Glv8ADb9o3wpe+D9furKPUYrG+2ea1rKzpHMNjMNrNG4H+7X7pf8ABOL4L6jqv/BKH4wa/bfBLxd8dIfid4/0DwzJo3g6ee0uoLTw9bTarLPLcQWOobYftL2yFGhwzFcMCK/A39pbw9pnhL43+I/CGieAtY+GaabOtqvhjX7t73UtPlSNQ8VzM9rZszlyWANvHtDBcHGSMEcj4h+GHxS8Mab4Y1rxF4ev7Cz8aW32zQJ54GSPUrcXD2hktWIxKouI2iO3owxWF8QfBnjf4U+OdY+GPxK0u40TxB4eu5rDUrC6TZPa3VuxSWGVf4XjYFWHYjFf2LeAtC+EPx3/AGpfh5/wTL+J09jps/7LOneBPFHh+4uVSMT2+nWMGsePdNMgG5nuRcG4jjbhZLDAKhmB/l68PWOvft1ftu2UN2jf2v8AF/x2jSqnzOJfEGqbnx7jzz+VNoDc8bf8E4f29fhj8MZPjV8RfhF4o0nwjBawX02rT2En2WG1uVRoZ5XUHZE4dMOwC/MOa+YdC8L6x4i1S08P6DaTX9/fTR21tbW0bSyzTSsEjjjjUEu7sQqqBknpX9Tnjb4a/tD/ALNf/BST9or/AIKL/tNeFdW+HfwxtrTxzpGixeIYJdPTxMmo6beaH4e0Sxt5Qpv43RreaRVR4obeEysV2qa/FD/gmne/tBeHP2zPBHjn9lXSNN8SePfB0k2vaXo2pSpGuqNp1u7y2dsrPG8t3NCX+zxQHzzIAYQZFWkM8d/aS/Ye/a7/AGPLLSdU/ac+HOueB7XW2eOym1S28uOWWJVaSHeMqsyKwLRNhwO2K+TA6Od2a/bL/gop8GbX4Tfsm6L460Xw/wCN/gbc/Erxjcz638K/GepPqL3k2l25a38R2ZuLa0vFgVr2e0zdQl2cttmlAYL+IUCbKALUqZxtqvsbHHbtXRafoWralpN9rlpEHtdMWJrhtyqUEz7EwpIZskfwg4+lZLIqfLiojOLbSe39fkdFXCVacYTnFpSV1purtaeV016qx0/wy+FPxP8AjV8Q9J+FXwh0S78ReJNduFtNP02xjMtxczMCwjjQdThSfoK9n/aF/Yk/bG/ZHsNN1v8AaX+HGu+CrHV5pLayutTtWit55olDPEkoyhkVSCUznHOMV+lv/BArwTqOvft4S/EvSNA1DxVP8OPBXirxNHoukl0vtQmj01rC3trZ4ld0mlkvcRuiMyEb1UlcV7Z/wUI8L6L8Af8AgmD4R+C/h74a6r+z/qHjTx/NrOseBvFWoNrGvapFptiIrPWvPkhs3tLOJ55rcRNZRmZ8sJZAoC2c5/P94E8HeKviV4t0vwF4F0241jW9au4bCwsLSMyz3NzcOI4YYkXlndiAAK0fG/w78Z/DLxpq3w4+IOl3Oi69oN3LYajp95GYri1uYG2SwyoeVdGGCK/Yj/gmT4O+Gn7NHwf8X/t0/GPx7a/DTxJqEF74S+FepXlhf35j1p4lGqaxHDYW88oGnWshghm2FFuJW/ijxXnP/BaKy8Dr/wAFB/EfxQ+H2qLrXhz4k6RoHjex1ARyQ/aotZ02GaWYxTKssZeRWJSRQwJ5FAH5k6t8M/Hnh/wNpHxL1vRby18Pa9Nc2um6lLEy2t3NZEC5jgkI2u0JIDgfdyK5LS9E1TxBqlromiQPdXl5NHbwQxrueSWVgkcaAdWZiFA9TX7q/tUfsN/tk+Pf2Kf2YtF+Bnwu8VeK/C2g/D698UX+q6bptxcWUd54gv59Qud8yL5YMMCIHGcoB6V8Of8ABJH4cN8aP+Cjnwa8DLbPdqPEttqbQxruMiaUr32wADks0KqB3JAoA+F/HPgjxZ8NvFmpeAfHenT6TrWjXMlnfWVyuya3uIjiSKRezKeCO1enfs5/sj/tQ/tc6pq2k/s1+CNU8YzaDDHcaj/Z8QZbWKZ/LjaV2KqgdvlUE8npXvf7aH7Of7XPw8+IWr/Gv9p/4a+JfAsXj3XtTv7afX9OnsUuZ7m4kuXSMzKu5kRwSB0FfrP/AME8/gDfav8A8EmfiJqlx8DvGfxxtfiT8R9K0uPSvBc81nPBb+G7OS5luLm4hsNQxE08yxpGYRubo64FAH4MfHL9nL43/stePl+Fv7Q/hy68LeIGtIb4WN5s80W8+fKk/dlgA+0457V9L/D/AP4Jift//FH4TWnx0+Gvwd8T654T1G0e/s9SsrMypc2sW4PNAgPmSIuxslFPSvmX9pjwbpvgv45eKfCuh+BdY+G8VjdG2i8L65O13qemOI1Bt7qZre1Z5dxzzBHgMBjvX9XWp+J/2SPhZ+0Pocfhfw94g8Q/Hz9kP4PaFf8Ah+wOsx2fh++vdKshqd/F5EVm9159it887RJOFuWiZCUxyJCP46JrS6urqOw0yF5p52WOOONSzu7HCqqgZLE8BRznivpP9oH9gz9tX9lXwjpfj79o/wCGev8Ag3RtZl8i0u9TtGiiM+zzPIc/8spig3CKTa+AcDg12f7EVz8e/iX+2/4K8QfBCTR5viFB4g/4SHR01mSG2srzU7WRr5LfEpRGe5cFIYQQXdlROcV+p/8AwUI+H9x4d/ZE8Q/tDal4U8Zfs3eKvit40ii8R/DXxHq8t9a+KtvmahJrVnaXdvb6hbpp14NrtdLKpMwSO4Yh1IB/OzEvygUEqpqVtqghaXT9E1fVre+1HT4w8OmxCe4bKrsjLiMHBIJ+ZgMLk+2KidSMVeTsdGGwtStLkpRu9dEuiV39yV/RFZgzdKhZZEPNWogT8rjpX3n/AME8v2aPhz+0b+0PaD4+avH4a+E3gyH/AISPx7rMzFVtdCtZEWSGPYrO1zfSvHZWscaM7TTLhTiqsYHyt4/+DXxW+EkPh+f4oeHb/wAPp4s0i38QaKb6Foft2lXTOlveQbgN0MpjcI3Q7fTFdP8AAr9nX43ftMePofhd8APCmpeMPEM8TzrY6XAZpFhi/wBZNJj5Y4k/idyFHrX7lf8ABZHxh4E/aU/ZW+Ev7VngDx1p3xATSPFvi3wfd3Ol6bfaXa6ZZzfZNX0XSIbfUIYJxBY2rywQHZs8tNqklWrwH9mrwL8bfil/wSN+IPgT9i3QtR8TeOPEHxHsbTx1YeHYnudXfwpBpm/SYnt4Mztp02pNcGfYuwyxRCT+EGgPyl+OfwF+Mn7NHxGu/hL8fPDN/wCEvElisckun6jEYpRHKu6KRP4XikXlHQlWHQ1yev8Awy+JHhb4faF8W/EWhXll4Y8UT3tto+pyx7ba9l00ot4kD9GMBkQPjpuFfTn7Y3gj9on4Q+KvCH7Nn7S3ia11jU/h9oENnb6ZbXKXjeHIL2WW+fRriZU+W4tpJmaWDfItuX8oFdpRf158XW/7Jlh8N/2P/wBgT44fCbX/AIg+L7vwxY3ySad4rGgR2938QdXkvoYWtTpd75kggntiXMsfy4Qrhd1JAfzw/EH4ffED4XeJG8G/EXRrrQ9WS3trtrO8jMcogvYEubeQqf4ZYZEkT1VgaseOPhN8TvhlLocfxF0O80NvE2lWuuaWLuPyzd6bejdbXcQ7xSgZRu49q+yf+Cmni6z+Mn/BSH4yan4Ci87TrjxXe6NosMRDZtLKT+zrFEI4I8uONVr13/gsjrOhaR/wUJ8U/DTwrIs+mfCrStC8CWxXG3/il9Kt7GXbjjDTwuePWiwI8t+DH/BLD/goV8fPh1pPxZ+DXwf8R+IvDGvCRtO1O2gUW90sUjROYmdl3KrqVJHGRXyx4I+EPxE+JnxEtvhJ8N9Du9c8TXs8tpb6XZR+bcyzQq7yRog6sqxuSB/dNf0rfty/A2x8Ofs7/DXwl41/ZT+IfjyL4X/B3RrSL4gadql3ZeH7S4u7A6ncXH2ePSrmJks7y6cTH7VHv2EHZ1r+ez9iL46xfAX9sH4V/G6/uRb2/hTxXo2p3Uh+79mhu4/tOevymBnz7UIDyPw98L/iT480zxHrPgrQr3U7PwfYNqmtzwRFo9Ps1mS2M9w2MRp5zpGM9WOBVv4Dfs7/AB//AGoPHTfDX9nnwjqXjDXktJb9rHTITNKlrBgSTMBgLGhZQScAZAr9fv8AgpLpmgfsJeAPE3/BPXwFdQzeK/HPiu48YeP7mymWWKPTVlkk8MaIsqDDCK3ma+uVBIWacIeYuL3/AASn+A2u65+yN+0b8SU+Ffin4uWmp22geC00XwjJLb6gzX902o3E5nhtL4xwwR28W8GBg5dRxjIAPyi/aE/ZJ/aa/ZM1jSPD/wC0p4Ov/B17rtu91YQX4QPPBG/ls6hC3yhxt5717R8Ef+CZn7e/7R/w4tvi/wDAf4S+I/Fnhm+eeK11DTrbzIriS2YxzJAMhpGjYbSqA88VwX7WngXQvhR8d9Q8Iab8NPEPwkTTbe2MnhjxRdPeapbSGISPJLI9pZELN99E8hdq4GT1r+kr4faT+xNNJ+yh+yp8S/DnifWPi38L/hcPHXh+2tNXt9L0S91y8eXxNFpd4Psk93HJKsQ3TwurHCxBR98AH8j+s6JqWg6hcaRq9vJaXVnI8E8MyFJIpYmKPG6EZVkYFSpGQeK+uPit/wAE7P25PgX8F7L9or4wfC3X/Dvgu++z7NTvLbYkf2sZtjcJzJbrOMeUZVQPxjtWTpPxE+Lv7Xf7bS/EbTJdHsPGnj/xgNYhbUpobLS4tTuroXMUcstyViSESqsf7xgG4DHmv3J/bw8M/EbXP2bfjh+2f8XfA3jT9mT4seL9W07QPEWj6lq8k+g/EU3k27UI7Cxv4Y76P7I8S3QKSXVrHHhVlTKigD+XrkHHeky3KgV6f42+DPxS+H/gzwr8RvHWiXGnaL45tbi/0G8lChL+2tpvs80sQBJ2rKCnIHI4ryvnPpmgBxLNwR0pDxgU5SVO0jNO25PPegBEAC0/j0/ShVAGAKdgelAH/9L+EHgfypucGn9f4cUg6YNADAGJx/8Aqp2ATnp9KTPy7e/9KcCMdOlAA+cYHGK6LRvGPi/QYxDoOrX1ii/w291NCo9eI3UVzmcckUife4AxQA4vctdfbhK4m3b/ADNx3b853buuc85zmtW717X9Qg+y6lf3VzFwRHLPLIvHT5WYj9OKxz029hQOOlAGjaX9zYzx3Nq5jlhYOjqSrKy9GVhgqR2IwRTr3Ur3UriW9vJGmmnbfLI5LOzHuzNlmPuTWcBt5ag4HQdaAOp0Txj4x8OW8lp4d1e+0+KX76Wt1NArf7yxuoP5Vzl7JLqM73N9I80sh3O8jF2YnuWbJP41D84waUZxnFAB+++1G8Mj+a3V9x3cjB+br04+nHSrljOdPlSe1JjZCCrKdpBHTBGCMdsVRB9BRuYnr0oA6nVfE+sazsfVbqe6MQ2oZ5XlKj0XeWwOOgrnFu50lWdGKMjBlZSQVK9CCMEEdiORVUSd+vtTPvCgDa1zXtc8Vam+teJr241G7cKrT3crzykLwoLyFmwOwzx2rKVB24pgAHH8qk3YOF6UAGz+8MU5SwO003OSM8Cl4Ix6UBc09M1nVtFuvtejXU1nLtK+ZbyPE2D1G6Mqce3Smy6jc3tw13eyPNNJjc8jF2OPVmyTWbx1ApmcUAXLm5uLqGO1mkcxxZ2KWJVdxy21TwMnrgDNUpRcSEGeRmMaiNdxJwq8Koz0A7AcCnbuRnmg884oA3bPxP4nsLYWlnqd5DGF2BI7mZVC4wV2qwGMcYxisS1eayuEu7N3gkj5Vo2KMv0K4I/CojxzShh0FAG5f+IfEOqxRwaxqFzeJHygnmklC57qHYgfhWx4e8feNfCqGLw3q19pwOSRaXU8A568ROo571xw+U0oIXnpQBtanrOpa3ey6nq88t1dTHfJNM7SSO3qzuSxPA5JzxWNMbiS7N80rmVskvuO854+915H6U3J+9SFyfuigBkMYg+4On9On5dq09T1fWNcvPtus3U15NtCeZPI8r7V6Dc5JwPToKzMZOc49qcQCvpQBK2O2BTCiAdOaUDtjFOJGccYFAIaF7jirMd1dQRSQRSOiSgB1ViFbacjcBwcEZGeh5FVup4p3y4wRwKAFM0zW/2YyNsJ3bcnbnGM7emccZxnHFanh/xBr/hHUhq/hm+udNu1VkE9nNJbyhWGGUPEVbaRwRnBrJyM8DpUe4r70ATmRy5YnOcknryev51OdRvpLlLxppGlj27HLtuUIMLhs5G3AAweMcVUIP0qM9KALAmdX3gkMDnI656j/wDXUNxJJdO0srF2bJZmOSc+pPJqPIJ4pmR9KANRtc8QCyOnLqFyLcjaYhPLsx6bd23HtisSOyWNst/kVaGw8DilbGOKANc37zO9xcu0jscszkszH1JPJNdBoPxC8Z+E9/8Awier3+l+Zy32K6mtt2BjnynTPHHPauJ3KeMUjZ24XFAGlrOr6pr9/Jqut3U15cy8vLcSNLI2Bj5nkJY8ccmsySS5nuheGV2kUAByx3YAwMHrwOB6UhQE5PWnjd06UAV44Qvygce/TFdBqmva5rrwvrd7cXjW8YiiNxK8vlxjoiGQnao/ujA9qxgd30p+f0oASUyOVyS2wbV56D0HoPamdQMik4Y4FIwOfWgBFPenLuPQg0wAYyf0py0AO3OOlG+T/OP8KXYx/wBWOKNkvp/n8qAP/9P+EJW3YU9BSBfX6VEMdT1p+AvagAUYbbRuZeKUBcbQOBSlSDuxQBHzikFOI54pvoB1oAU/Io/Smj1ajbgc0L6EYoAXPrUhJ4B4pu0bOOaU42jPWgBM5HA6UvUccU08e1KPmwOmKAGUwrgfKMVNyevSgqOFHWgCDYVPFJjjcKkwPSk6jHTFACg4Pp7Ck54xTE9B0oIHU0AKGwAtSA4O0UxRtNIp5zigCWmDdnkcClxgil4DAUARru3Y9Kcc+nApm1Rz3pGBxk9aAHKobkCn8BsDrTFGBgdv0qTHcDmgBTycjgU3I708ZH0pDwMt3oAYQze1GM89MU7gduaMAnPpQA0jK88e1LyBxzTcqG5FOz6UAJuXJJ7U4Ff4aaPm7UmwZwOKAJQP7tPw3c8VGcVLyMjtQBAR3NNyN27tT8D8aY+N2BwBQBIeePSgde1RjDcDrT8ArigCFiRwBioSQBVhlAqPap7UAHGMdqewHQCmbduFqfGFwOMGkAwZxhaVAOtKTgdqd2oAaADnjpSAqBxUh96YTnCrTAUk9RQAMYNRn5Rto27eT0oAf/tY+lIoBHIoHIyQPapRnOR2oAjC4OAPyo+Un5vwpcDr60uCOCKAG+UT93IH0o8l/f8ASnIcjpTvwoA//9T+EDo3FNwv4UuecA/h2pXA6fpQAiliPSgfIdtR45H+eKUc0AOAO35elA96UA9uq0EkkLnmgBpABINOCkCgkdCKQY4FADuB900pAyDTRtxgjP8ASmkCgB7DK5pAAME8D2pS2OB+tIBn5vTtQAoIXAHSgHd8o7U3dwOnFNBxyOKAHHBphHGCPSlHHbil6gdjQBGvrTiMDgc0uAvApF46d6ADa3pQiktgdBS5GODyKco6c8UAOOd/HGKa3BGak6jgVC3TigCI4bgcUhXnnkU8pkAd6RPyxQA4Lt+tP25+UU0Y+lKcDpwKQB264o4PPpRSkc0wGhuPl4pvse1KSFpM5IoAOC2COKagGeKdtH0pwwDt6UABIzinKRjbik+XccdqUnJ3YxQA8L8p4pr5B20mCX7UgyVwB0oAXgfQUzbzjtQCCKfxt20AR7e57UkmfvDpUjrnHb6VHg49qAGkqAQKT5R9aTJzxTs4Ibt/KgBA2Dlh0FPxnvzRgHk0jHBHegAkHHAzihCQeeKcSQDikDA/KKAAbg+0UjbfugVEGGTt6VIuMfLQAMDn5vSnA7BjFCJmnjB6Hj0oAQJznt/KnAMMEim8dfSl68dRQA4HcT7dKT5cYbrTc4479qbuwAooAcqKB0p21fQ0m1lwAAaT5/7ooA//1f4P8DJpZQBjFHdqWboKAIWY4Bo/gzTW+6v+fWnf8sx9BQBKnHSkT7maFoj/ANXQAD5lOadtXylbHWmJ0NS/8sVpICOPkAGmjrinRdqb/FTAcQMqO1OdQDikP3lpz9aAK5A2ij/lpilP3R9KT/lrUsBB/rMe1SDqKiH+tH0qUdVqLjYOoG0CkwAMelOk6rSVoIQfeIp6D5N3emD79PT/AFdMB0fzMAaQfMpzRD98fhQv3TQBAvf60EnK/jQvf/epD/D+NA2KnIZj2zilt/m60kf3G+hpbboaBDz97Hp0psnCAjuacfvH8KbL/q1+tAD2GCoFMwFPFSP95fpTGpMBo5bHamy/Ivy8dKcPv02f7v5UwJFAJyaPX2pV6/59KT1oAdgVCpPPtip6rr/F+FIaLGBuxSIAc57U7+P86SPvQ9hEfSlPpSdqU/1oWwCFRg0ADZSt0NA+5TAbHzyajICkleKki6Uxu9JgC8hiae/y4ApifdanydqHsA2U7c7eP/1VE5xDxUk/f6f0qKT/AFP5UwAMeKsv/q81VHarTf6v8KlgIPvYoY8A/wCelA+8KRvuj/Pam9hoWUDgUgA8sj0NOl6j/PakX/Vt9aYh3lp6UeWnpT6KAP/Z";
 const LBA_LOGO_SRC=(()=>{const l=document.querySelector('link[rel="apple-touch-icon"]');return l?l.href:"";})();
@@ -7710,6 +7965,12 @@ const [triviaAuthError,setTriviaAuthError]=useState("");
 const [triviaQuestions,setTriviaQuestions]=useState([]);
 const [botSettings,setBotSettings]=useState(null);
 const [appSettings,setAppSettings]=useState(null);
+const [nbaTeams,setNbaTeams]=useState([]);
+const [nbaGames,setNbaGames]=useState([]);
+const [nbaPredictions,setNbaPredictions]=useState([]);
+const [nbaSeasonPredictions,setNbaSeasonPredictions]=useState([]);
+const [nbaRefreshing,setNbaRefreshing]=useState(false);
+const [nbaRefreshError,setNbaRefreshError]=useState("");
 
 // Fetch user IP for wallet identification
 useEffect(()=>{
@@ -7754,6 +8015,13 @@ setLarpPosts(s.docs.map(d=>d.data()));
 _onSnapshot(_col(_db,"fantasy_users"),s=>{setTriviaUsers(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia users error:",err));
 _onSnapshot(_col(_db,"trivia_results"),s=>{setTriviaResults(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia results error:",err));
 _onSnapshot(_col(_db,"trivia_questions"),s=>{setTriviaQuestions(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia questions error:",err));
+_onSnapshot(_col(_db,"nba_cache"),s=>{
+const docs=s.docs.map(d=>d.data());
+setNbaTeams((docs.find(d=>d.id==="teams")||{}).teams||[]);
+setNbaGames((docs.find(d=>d.id==="games")||{}).games||[]);
+},(err)=>console.error("NBA cache listener error:",err));
+_onSnapshot(_col(_db,"nba_predictions"),s=>{setNbaPredictions(s.docs.map(d=>d.data()));},(err)=>console.error("NBA predictions error:",err));
+_onSnapshot(_col(_db,"nba_season_predictions"),s=>{setNbaSeasonPredictions(s.docs.map(d=>d.data()));},(err)=>console.error("NBA season predictions error:",err));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
@@ -8405,6 +8673,44 @@ function triviaLogout(){setTriviaAuthUserId(null);try{localStorage.removeItem("l
 async function saveTriviaResult(result){setSaveStatus("saving");try{await fbSave("trivia_results",{...result,id:result.id+"_"+result.date});showSaved();}catch(e){console.error(e);showError();}}
 async function saveTriviaQuestions(dayQuestions){try{await fbSave("trivia_questions",dayQuestions);}catch(e){console.error("Trivia question cache error:",e);}}
 
+// ── NBA Predictions: save a single game pick, save/update a season-long prediction,
+// and the admin-only action that pulls fresh teams+schedule from BALLDONTLIE into a
+// shared Firestore cache (so regular users never need their own API key).
+async function saveNbaPrediction(game,teamId){
+if(!triviaAuthUserId)return;
+const me=triviaUsers.find(u=>u.id===triviaAuthUserId);
+setSaveStatus("saving");
+try{
+await fbSave("nba_predictions",{id:triviaAuthUserId+"_"+game.id,userId:triviaAuthUserId,username:me?.username||triviaAuthUserId,gameId:game.id,pickedTeamId:teamId,date:game.date,createdAt:new Date().toISOString()});
+showSaved();
+}catch(e){console.error(e);showError();}
+}
+async function saveNbaSeasonPrediction(payload){
+if(!triviaAuthUserId)return;
+const me=triviaUsers.find(u=>u.id===triviaAuthUserId);
+const season=appSettings?.nbaSeason||new Date().getFullYear();
+setSaveStatus("saving");
+try{
+await fbSave("nba_season_predictions",{id:triviaAuthUserId+"_"+season,userId:triviaAuthUserId,username:me?.username||triviaAuthUserId,season,...payload,createdAt:new Date().toISOString()});
+showSaved();
+}catch(e){console.error(e);showError();}
+}
+async function refreshNbaSchedule(){
+const apiKey=appSettings?.balldontlieApiKey;
+if(!apiKey)return;
+setNbaRefreshing(true);setNbaRefreshError("");
+try{
+const teams=await fetchNbaTeams(apiKey);
+const start=new Date();start.setDate(start.getDate()-14);
+const end=new Date();end.setDate(end.getDate()+10);
+const games=await fetchNbaGamesRange(apiKey,start.toISOString().slice(0,10),end.toISOString().slice(0,10));
+await fbSave("nba_cache",{id:"teams",teams,fetchedAt:new Date().toISOString()});
+await fbSave("nba_cache",{id:"games",games,fetchedAt:new Date().toISOString()});
+showSaved();
+}catch(e){console.error(e);setNbaRefreshError(e.message||"Fout bij ophalen");showError();}
+setNbaRefreshing(false);
+}
+
 function getSorted(){
 let gs=[...games];
 if(filterPos!=="All positions"){const ids=players.filter(p=>p.position===filterPos).map(p=>p.id);gs=gs.filter(g=>ids.includes(g.playerId));}
@@ -8604,6 +8910,31 @@ onToggleTrivia={(v)=>saveAppSettings({triviaEnabled:v})}
 />
 )}
 
+{/* NBA PREDICTIONS TAB */}
+{tab==="nbapred"&&(
+<NbaPredictionsTab
+teams={nbaTeams}
+games={nbaGames}
+predictions={nbaPredictions}
+seasonPredictions={nbaSeasonPredictions}
+authUserId={triviaAuthUserId}
+authError={triviaAuthError}
+onLogin={triviaLogin}
+onRegister={triviaRegister}
+isAdmin={isAdmin}
+enabled={appSettings?.nbaPredictionsEnabled!==false}
+onToggleEnabled={(v)=>saveAppSettings({nbaPredictionsEnabled:v})}
+onPickGame={(game,teamId)=>saveNbaPrediction(game,teamId)}
+onSaveSeason={saveNbaSeasonPrediction}
+apiKeySet={!!appSettings?.balldontlieApiKey}
+onRefreshSchedule={refreshNbaSchedule}
+refreshing={nbaRefreshing}
+refreshError={nbaRefreshError}
+seasonLocked={!!appSettings?.nbaSeasonLocked}
+onToggleSeasonLock={(v)=>saveAppSettings({nbaSeasonLocked:v})}
+/>
+)}
+
 {/* Pinned LARP Banner — bottom (above tabs) */}
 {(() => {
 const pinnedLarp = larpPosts.find(p => p.pinned);
@@ -8623,7 +8954,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"}].filter(({id})=>id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false).map(({id,icon,label})=>(
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"},{id:"nbapred",icon:"🔮",label:"Predicts"}].filter(({id})=>(id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false)&&(id!=="nbapred"||isAdmin||appSettings?.nbaPredictionsEnabled!==false)).map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>

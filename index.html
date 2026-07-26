@@ -7758,7 +7758,32 @@ return(
 );
 }
 
-function NbaSeasonForm({teams,myPrediction,onSave,locked}){
+// ── NBA Predictions: score a season prediction against the admin-confirmed actual
+// results. 3pts exact seed position, 1pt if the team just made the actual top-8 in
+// the wrong spot, 5pts cup winner, 10pts champion, 5pts each for MVP/DPOY/ROY (loose
+// case-insensitive name match).
+function computeNbaSeasonScore(pred,actual){
+if(!pred||!actual)return null;
+let pts=0;
+const detail={seeds:0,cup:0,champion:0,mvp:0,dpoy:0,roy:0};
+["eastSeeds","westSeeds"].forEach(key=>{
+(pred[key]||[]).forEach((tid,i)=>{
+if(!tid)return;
+const actualArr=actual[key]||[];
+if(actualArr[i]===tid){detail.seeds+=3;pts+=3;}
+else if(actualArr.includes(tid)){detail.seeds+=1;pts+=1;}
+});
+});
+if(pred.cupWinner&&actual.cupWinner&&pred.cupWinner===actual.cupWinner){detail.cup=5;pts+=5;}
+if(pred.champion&&actual.champion&&pred.champion===actual.champion){detail.champion=10;pts+=10;}
+const norm=s=>(s||"").trim().toLowerCase();
+if(pred.mvp&&actual.mvp&&norm(pred.mvp)===norm(actual.mvp)){detail.mvp=5;pts+=5;}
+if(pred.dpoy&&actual.dpoy&&norm(pred.dpoy)===norm(actual.dpoy)){detail.dpoy=5;pts+=5;}
+if(pred.roy&&actual.roy&&norm(pred.roy)===norm(actual.roy)){detail.roy=5;pts+=5;}
+return{total:pts,detail};
+}
+
+function NbaSeasonForm({teams,myPrediction,onSave,locked,actual}){
 const east=teams.filter(t=>t.conference==="East");
 const west=teams.filter(t=>t.conference==="West");
 const [eastSeeds,setEastSeeds]=useState(myPrediction?.eastSeeds||Array(8).fill(null));
@@ -7771,9 +7796,14 @@ const [roy,setRoy]=useState(myPrediction?.roy||"");
 function setSeed(list,setList,i,val){const copy=[...list];copy[i]=val;setList(copy);}
 function save(){onSave({eastSeeds,westSeeds,cupWinner,champion,mvp:mvp.trim(),dpoy:dpoy.trim(),roy:roy.trim()});}
 const inputStyle={background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"10px 12px",fontSize:13,width:"100%"};
+const myScore=actual?computeNbaSeasonScore(myPrediction,actual):null;
 if(!teams.length)return <div style={{padding:"40px 20px",textAlign:"center",color:GREY,fontSize:13}}>Nog geen teams geladen. Vraag de admin om te verversen.</div>;
 return(
 <div>
+{myScore&&<div style={{background:"#0a2e17",border:"1px solid #1f6b3a",borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+<div style={{color:"#30d158",fontWeight:800,fontSize:16,marginBottom:4}}>🏁 Eindscore: {myScore.total} punten</div>
+<div style={{color:GREY,fontSize:11}}>Seeds {myScore.detail.seeds} · Cup {myScore.detail.cup} · Kampioen {myScore.detail.champion} · MVP {myScore.detail.mvp} · DPOY {myScore.detail.dpoy} · ROY {myScore.detail.roy}</div>
+</div>}
 {locked&&<div style={{background:"#2C1500",border:"1px solid #5a3200",borderRadius:10,padding:"10px 12px",color:"#f5a524",fontSize:12,marginBottom:14}}>🔒 Seizoensvoorspellingen zijn gesloten door de admin.</div>}
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
 <div>
@@ -7813,6 +7843,84 @@ return(
 );
 }
 
+// ── NBA Predictions: admin-only form to lock in the real end-of-season results once
+// they're known, so every user's season prediction can be scored against one source of truth.
+function NbaSeasonActualsForm({teams,actual,onSave}){
+const east=teams.filter(t=>t.conference==="East");
+const west=teams.filter(t=>t.conference==="West");
+const [eastSeeds,setEastSeeds]=useState(actual?.eastSeeds||Array(8).fill(null));
+const [westSeeds,setWestSeeds]=useState(actual?.westSeeds||Array(8).fill(null));
+const [cupWinner,setCupWinner]=useState(actual?.cupWinner||null);
+const [champion,setChampion]=useState(actual?.champion||null);
+const [mvp,setMvp]=useState(actual?.mvp||"");
+const [dpoy,setDpoy]=useState(actual?.dpoy||"");
+const [roy,setRoy]=useState(actual?.roy||"");
+function setSeed(list,setList,i,val){const copy=[...list];copy[i]=val;setList(copy);}
+function save(){onSave({eastSeeds,westSeeds,cupWinner,champion,mvp:mvp.trim(),dpoy:dpoy.trim(),roy:roy.trim()});}
+const inputStyle={background:INPUTBG,border:"none",color:WHITE,borderRadius:8,padding:"10px 12px",fontSize:13,width:"100%"};
+if(!teams.length)return null;
+return(
+<div style={{background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:14,marginTop:20}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,marginBottom:2}}>⚙️ Admin: bevestig eindstand</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12}}>Vul dit pas in als het seizoen (of de betreffende award) definitief is. Punten worden meteen voor iedereen herberekend.</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+<div>
+<div style={{color:WHITE,fontWeight:700,fontSize:12,marginBottom:8}}>Oost — eindstand</div>
+{eastSeeds.map((v,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+<div style={{color:GREY,fontSize:11,width:14}}>{i+1}</div>
+<NbaTeamSelect teams={east} value={v} exclude={eastSeeds.filter((x,j)=>j!==i)} onChange={val=>setSeed(eastSeeds,setEastSeeds,i,val)}/>
+</div>
+))}
+</div>
+<div>
+<div style={{color:WHITE,fontWeight:700,fontSize:12,marginBottom:8}}>West — eindstand</div>
+{westSeeds.map((v,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+<div style={{color:GREY,fontSize:11,width:14}}>{i+1}</div>
+<NbaTeamSelect teams={west} value={v} exclude={westSeeds.filter((x,j)=>j!==i)} onChange={val=>setSeed(westSeeds,setWestSeeds,i,val)}/>
+</div>
+))}
+</div>
+</div>
+<div style={{marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🏆 NBA CUP WINNAAR</div>
+<NbaTeamSelect teams={teams} value={cupWinner} onChange={setCupWinner}/>
+</div>
+<div style={{marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🏆 KAMPIOEN</div>
+<NbaTeamSelect teams={teams} value={champion} onChange={setChampion}/>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:12}}>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>👑 MVP</div><input value={mvp} onChange={e=>setMvp(e.target.value)} placeholder="bv. Nikola Jokić" style={inputStyle}/></div>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🛡️ DPOY</div><input value={dpoy} onChange={e=>setDpoy(e.target.value)} style={inputStyle}/></div>
+<div><div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:4}}>🌱 ROY</div><input value={roy} onChange={e=>setRoy(e.target.value)} style={inputStyle}/></div>
+</div>
+<button onClick={save} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>Eindstand opslaan</button>
+</div>
+);
+}
+
+function NbaSeasonLeaderboard({seasonPredictions,actual}){
+if(!actual)return <div style={{padding:"30px 20px",textAlign:"center",color:GREY,fontSize:13}}>De admin heeft de eindstand nog niet bevestigd.</div>;
+const stats=(seasonPredictions||[]).map(p=>({userId:p.userId,username:p.username||p.userId,...computeNbaSeasonScore(p,actual)})).sort((a,b)=>b.total-a.total);
+if(!stats.length)return <div style={{padding:"30px 20px",textAlign:"center",color:GREY,fontSize:13}}>Nog geen seizoensvoorspellingen ingediend.</div>;
+return(
+<div>
+{stats.map((s,i)=>(
+<div key={s.userId} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+<div style={{width:24,textAlign:"center",fontWeight:800,color:i===0?"#f5a524":i===1?"#c0c0c0":i===2?"#cd7f32":GREY}}>{i+1}</div>
+<div style={{flex:1}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{s.username}</div>
+<div style={{color:GREY,fontSize:11}}>Seeds {s.detail.seeds} · Cup {s.detail.cup} · Kamp. {s.detail.champion} · Awards {s.detail.mvp+s.detail.dpoy+s.detail.roy}</div>
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{s.total}p</div>
+</div>
+))}
+</div>
+);
+}
+
 function NbaPredictionsLeaderboard({predictions,games}){
 const finalMap={};games.forEach(g=>{if(g.status==="Final"){finalMap[g.id]=(+g.homeScore>+g.awayScore)?g.homeTeamId:g.awayTeamId;}});
 const stats=useMemo(()=>{
@@ -7845,8 +7953,9 @@ return(
 );
 }
 
-function NbaPredictionsTab({teams,games,predictions,seasonPredictions,authUserId,authError,onLogin,onRegister,isAdmin,enabled,onToggleEnabled,onPickGame,onSaveSeason,apiKeySet,onRefreshSchedule,refreshing,refreshError,seasonLocked,onToggleSeasonLock}){
+function NbaPredictionsTab({teams,games,predictions,seasonPredictions,seasonActual,onSaveSeasonActual,authUserId,authError,onLogin,onRegister,isAdmin,enabled,onToggleEnabled,onPickGame,onSaveSeason,apiKeySet,onRefreshSchedule,refreshing,refreshError,seasonLocked,onToggleSeasonLock}){
 const [sub,setSub]=useState("week");
+const [lbView,setLbView]=useState("week");
 const adminToggleBar=isAdmin&&(
 <div style={{marginBottom:14}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#1C1C1E",border:`1px solid ${DIVIDER}`,borderRadius:12,padding:"10px 14px",marginBottom:8}}>
@@ -7899,8 +8008,22 @@ return(
 ))}
 </div>
 {sub==="week"&&<NbaWeekPicks games={games} myPredictions={myPredictions} onPick={(g,tid)=>onPickGame(g,tid)}/>}
-{sub==="season"&&<NbaSeasonForm teams={teams} myPrediction={mySeason} locked={seasonLocked} onSave={onSaveSeason}/>}
-{sub==="leaderboard"&&<NbaPredictionsLeaderboard predictions={predictions} games={games}/>}
+{sub==="season"&&(
+<div>
+<NbaSeasonForm teams={teams} myPrediction={mySeason} locked={seasonLocked} onSave={onSaveSeason} actual={seasonActual}/>
+{isAdmin&&<NbaSeasonActualsForm teams={teams} actual={seasonActual} onSave={onSaveSeasonActual}/>}
+</div>
+)}
+{sub==="leaderboard"&&(
+<div>
+<div style={{display:"flex",gap:8,marginBottom:12}}>
+<button onClick={()=>setLbView("week")} style={{flex:1,background:lbView==="week"?"#2C2C2E":"transparent",border:`1px solid ${DIVIDER}`,color:WHITE,borderRadius:9,padding:"7px 0",fontWeight:700,fontSize:12,cursor:"pointer"}}>Weekpicks</button>
+<button onClick={()=>setLbView("season")} style={{flex:1,background:lbView==="season"?"#2C2C2E":"transparent",border:`1px solid ${DIVIDER}`,color:WHITE,borderRadius:9,padding:"7px 0",fontWeight:700,fontSize:12,cursor:"pointer"}}>Seizoen</button>
+</div>
+{lbView==="week"&&<NbaPredictionsLeaderboard predictions={predictions} games={games}/>}
+{lbView==="season"&&<NbaSeasonLeaderboard seasonPredictions={seasonPredictions} actual={seasonActual}/>}
+</div>
+)}
 </div>
 );
 }
@@ -7969,6 +8092,7 @@ const [nbaTeams,setNbaTeams]=useState([]);
 const [nbaGames,setNbaGames]=useState([]);
 const [nbaPredictions,setNbaPredictions]=useState([]);
 const [nbaSeasonPredictions,setNbaSeasonPredictions]=useState([]);
+const [nbaSeasonActuals,setNbaSeasonActuals]=useState(null);
 const [nbaRefreshing,setNbaRefreshing]=useState(false);
 const [nbaRefreshError,setNbaRefreshError]=useState("");
 
@@ -8022,6 +8146,10 @@ setNbaGames((docs.find(d=>d.id==="games")||{}).games||[]);
 },(err)=>console.error("NBA cache listener error:",err));
 _onSnapshot(_col(_db,"nba_predictions"),s=>{setNbaPredictions(s.docs.map(d=>d.data()));},(err)=>console.error("NBA predictions error:",err));
 _onSnapshot(_col(_db,"nba_season_predictions"),s=>{setNbaSeasonPredictions(s.docs.map(d=>d.data()));},(err)=>console.error("NBA season predictions error:",err));
+_onSnapshot(_col(_db,"nba_season_actuals"),s=>{
+const docs=s.docs.map(d=>d.data());
+setNbaSeasonActuals(docs[0]||null);
+},(err)=>console.error("NBA season actuals error:",err));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
@@ -8710,6 +8838,14 @@ showSaved();
 }catch(e){console.error(e);setNbaRefreshError(e.message||"Fout bij ophalen");showError();}
 setNbaRefreshing(false);
 }
+async function saveNbaSeasonActuals(payload){
+const season=appSettings?.nbaSeason||new Date().getFullYear();
+setSaveStatus("saving");
+try{
+await fbSave("nba_season_actuals",{id:String(season),season,...payload,confirmedAt:new Date().toISOString()});
+showSaved();
+}catch(e){console.error(e);showError();}
+}
 
 function getSorted(){
 let gs=[...games];
@@ -8917,6 +9053,8 @@ teams={nbaTeams}
 games={nbaGames}
 predictions={nbaPredictions}
 seasonPredictions={nbaSeasonPredictions}
+seasonActual={nbaSeasonActuals}
+onSaveSeasonActual={saveNbaSeasonActuals}
 authUserId={triviaAuthUserId}
 authError={triviaAuthError}
 onLogin={triviaLogin}

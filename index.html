@@ -1142,13 +1142,25 @@ const ann=appSettings?.announcement||null;
 const [annIcon,setAnnIcon]=useState(ann?.icon||"📢");
 const [annTitle,setAnnTitle]=useState(ann?.title||"");
 const [annBody,setAnnBody]=useState(ann?.body||"");
+const [annEmbeds,setAnnEmbeds]=useState(ann?.embeds||[]);
 const [annPreview,setAnnPreview]=useState(false);
+const [annPickerType,setAnnPickerType]=useState(null); // "performance"|"game"|"award"|"streak"|"special"
+function addEmbed(embed){setAnnEmbeds(list=>[...list,embed]);setAnnPickerType(null);}
+function removeEmbed(i){setAnnEmbeds(list=>list.filter((_,idx)=>idx!==i));}
 function sendAnnouncement(){
-if(!annTitle.trim()&&!annBody.trim())return;
-onSaveAppSettings({announcement:{icon:annIcon.trim()||"📢",title:annTitle.trim(),body:annBody.trim(),enabled:true,updatedAt:Date.now()}});
+if(!annTitle.trim()&&!annBody.trim()&&annEmbeds.length===0)return;
+onSaveAppSettings({announcement:{icon:annIcon.trim()||"📢",title:annTitle.trim(),body:annBody.trim(),embeds:annEmbeds,enabled:true,updatedAt:Date.now()}});
 }
 function toggleAnnouncement(){
 onSaveAppSettings({announcement:{...(ann||{}),enabled:!(ann?.enabled),updatedAt:ann?.updatedAt||Date.now()}});
+}
+function embedLabel(em){
+if(em.type==="performance"){const g=games.find(x=>x.id===em.gameId);const p=g&&players.find(pl=>pl.id===g.playerId);return`🏀 ${p?.name||"?"} · ${g?.date||""}`;}
+if(em.type==="game"){const mg=games.find(x=>(x.matchId||x.id)===em.matchKey);return`🏀 ${mg?.teamAName||"Team A"} vs ${mg?.teamBName||"Team B"} · ${mg?.date||""}`;}
+if(em.type==="award"){const a=manualAwards.find(x=>x.id===em.awardDocId);const at=a?getAwardType(a.awardId):null;return`🏆 ${at?.label||"Award"} · ${a?.lbl||""}`;}
+if(em.type==="streak"){const p=players.find(pl=>pl.id===em.playerId);return`🔥 ${p?.name||"?"} hot streak`;}
+if(em.type==="special"){const p=players.find(pl=>pl.id===em.playerId);return`⭐ ${p?.name||"?"} · ${em.key}`;}
+return"?";
 }
 const stats=[
 {label:"Players",value:players?.length||0,icon:"👥"},
@@ -1222,17 +1234,38 @@ return(
 </button>
 )}
 </div>
-<div style={{color:GREY,fontSize:11,marginBottom:10}}>Verschijnt eenmalig als popup wanneer een gebruiker de app opent — trofeeën, laatste games, prestaties, of wat je maar wilt.</div>
+<div style={{color:GREY,fontSize:11,marginBottom:10}}>Verschijnt eenmalig als popup wanneer een gebruiker de app opent. Voeg tekst toe en/of koppel awards, volledige games, performances, hot streaks of speciale prestaties — één of meerdere tegelijk.</div>
 <div style={{display:"flex",gap:8,marginBottom:8}}>
 <input value={annIcon} onChange={e=>setAnnIcon(e.target.value)} placeholder="🏆" maxLength={4} style={{...IS,padding:"9px 10px",fontSize:16,width:56,textAlign:"center",flexShrink:0}}/>
-<input value={annTitle} onChange={e=>setAnnTitle(e.target.value)} placeholder="Titel (bv. Nieuwe trofee!)" style={{...IS,padding:"9px 10px",fontSize:13}}/>
+<input value={annTitle} onChange={e=>setAnnTitle(e.target.value)} placeholder="Titel (optioneel)" style={{...IS,padding:"9px 10px",fontSize:13}}/>
 </div>
-<textarea value={annBody} onChange={e=>setAnnBody(e.target.value)} placeholder="Bericht... (trofeeën, laatste games, prestaties, etc.)" rows={3} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,color:WHITE,fontSize:13,padding:"9px 10px",outline:"none",resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
+<textarea value={annBody} onChange={e=>setAnnBody(e.target.value)} placeholder="Bericht (optioneel)..." rows={2} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,color:WHITE,fontSize:13,padding:"9px 10px",outline:"none",resize:"vertical",fontFamily:"inherit",marginBottom:10}}/>
+
+{annEmbeds.length>0&&(
+<div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+{annEmbeds.map((em,i)=>(
+<div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"#141414",border:"1px solid #262626",borderRadius:10,padding:"8px 10px"}}>
+<div style={{flex:1,minWidth:0,color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{embedLabel(em)}</div>
+<button onClick={()=>removeEmbed(i)} style={{background:"transparent",border:"none",color:GREY,fontSize:16,cursor:"pointer",padding:"0 2px"}}>✕</button>
+</div>
+))}
+</div>
+)}
+
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>TOEVOEGEN</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:10}}>
+<button onClick={()=>setAnnPickerType("performance")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"8px 4px",fontWeight:600,fontSize:11,cursor:"pointer"}}>🏀 Performance</button>
+<button onClick={()=>setAnnPickerType("game")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"8px 4px",fontWeight:600,fontSize:11,cursor:"pointer"}}>📅 Volledige game</button>
+<button onClick={()=>setAnnPickerType("award")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"8px 4px",fontWeight:600,fontSize:11,cursor:"pointer"}}>🏆 Award</button>
+<button onClick={()=>setAnnPickerType("streak")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"8px 4px",fontWeight:600,fontSize:11,cursor:"pointer"}}>🔥 Hot streak</button>
+<button onClick={()=>setAnnPickerType("special")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"8px 4px",fontWeight:600,fontSize:11,cursor:"pointer"}}>⭐ Prestatie</button>
+</div>
+
 <div style={{display:"flex",gap:8}}>
 <button onClick={()=>setAnnPreview(true)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,fontSize:12,cursor:"pointer",flex:1}}>👁️ Preview</button>
 <button onClick={sendAnnouncement} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,fontSize:12,cursor:"pointer",flex:1}}>Versturen naar iedereen</button>
 </div>
-{ann?.enabled&&ann?.title&&<div style={{color:GREY,fontSize:10,marginTop:8}}>Laatst verstuurd: "{ann.title}"</div>}
+{ann?.enabled&&(ann?.title||(ann?.embeds||[]).length>0)&&<div style={{color:GREY,fontSize:10,marginTop:8}}>Laatst verstuurd: {ann.title?`"${ann.title}"`:`${(ann.embeds||[]).length} item(s)`}</div>}
 </div>
 
 <div onClick={()=>setShowBotSettings(true)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer"}}>
@@ -1246,22 +1279,35 @@ return(
 <button onClick={onClose} style={{...BG2,marginTop:8}}>Sluiten</button>
 </div>
 {showBotSettings&&<BotSettingsModal settings={botSettings} onSave={(s)=>{onSaveBotSettings&&onSaveBotSettings(s);setShowBotSettings(false);}} onClose={()=>setShowBotSettings(false)}/>}
-{annPreview&&<AnnouncementModal announcement={{icon:annIcon,title:annTitle,body:annBody}} onClose={()=>setAnnPreview(false)}/>}
+{annPreview&&<AnnouncementModal announcement={{icon:annIcon,title:annTitle,body:annBody,embeds:annEmbeds}} players={players} games={games} manualAwards={manualAwards} onClose={()=>setAnnPreview(false)}/>}
+{annPickerType==="performance"&&<PerfPicker games={games} players={players} onSelect={g=>addEmbed({type:"performance",gameId:g.id})} onClose={()=>setAnnPickerType(null)}/>}
+{annPickerType==="game"&&<MatchPicker games={games} players={players} onSelect={matchKey=>addEmbed({type:"game",matchKey})} onClose={()=>setAnnPickerType(null)}/>}
+{annPickerType==="award"&&<AwardPicker manualAwards={manualAwards} players={players} onSelect={a=>addEmbed({type:"award",awardDocId:a.id})} onClose={()=>setAnnPickerType(null)}/>}
+{annPickerType==="streak"&&<StreakPicker players={players} games={games} onSelect={playerId=>addEmbed({type:"streak",playerId})} onClose={()=>setAnnPickerType(null)}/>}
+{annPickerType==="special"&&<SpecialPicker players={players} games={games} manualAwards={manualAwards} onSelect={(playerId,key)=>addEmbed({type:"special",playerId,key})} onClose={()=>setAnnPickerType(null)}/>}
 </div>
 );
 }
 
 // ── Announcement popup (admin-configured "what's new" style popup shown to users)
-function AnnouncementModal({announcement,onClose}){
+function AnnouncementModal({announcement,players,games,manualAwards,onClose}){
 const{BG2}=styles();
+const embeds=announcement.embeds||[];
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:310}}>
-<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{fontSize:40,textAlign:"center",marginBottom:10}}>{announcement.icon||"📢"}</div>
-<div style={{fontWeight:800,fontSize:19,marginBottom:10,textAlign:"center",color:WHITE}}>{announcement.title||"Nieuw"}</div>
-<div style={{color:"#ddd",fontSize:14,lineHeight:1.5,whiteSpace:"pre-wrap",marginBottom:20,textAlign:"center"}}>{announcement.body}</div>
-<button onClick={onClose} style={BG2}>Sluiten</button>
+{announcement.title&&<div style={{fontWeight:800,fontSize:19,marginBottom:announcement.body?6:10,textAlign:"center",color:WHITE}}>{announcement.title}</div>}
+{announcement.body&&<div style={{color:"#ddd",fontSize:14,lineHeight:1.5,whiteSpace:"pre-wrap",marginBottom:14,textAlign:"center"}}>{announcement.body}</div>}
+{embeds.length>0&&(
+<div style={{marginBottom:14}}>
+{embeds.map((em,i)=>(
+<AnnouncementEmbedCard key={i} embed={em} players={players} games={games} manualAwards={manualAwards}/>
+))}
+</div>
+)}
+<button onClick={onClose} style={{...BG2,marginTop:6}}>Sluiten</button>
 </div>
 </div>
 );
@@ -1597,20 +1643,20 @@ const won=awards.filter(a=>Array.isArray(a.playerIds)?a.playerIds.includes(playe
 const myGames=allGames.filter(g=>g.playerId===player.id);
 const special=[];
 const c30=myGames.filter(g=>(+g.pts||0)>=7).length;
-if(c30>0)special.push({icon:"🔥",label:`7+ punten game`,count:c30});
+if(c30>0)special.push({key:"pts7",icon:"🔥",label:`7+ punten game`,count:c30});
 const c20r=myGames.filter(g=>(+g.reb||0)>=8).length;
-if(c20r>0)special.push({icon:"💪",label:`8+ rebounds`,count:c20r});
+if(c20r>0)special.push({key:"reb8",icon:"💪",label:`8+ rebounds`,count:c20r});
 const c10a=myGames.filter(g=>(+g.ast||0)>=5).length;
-if(c10a>0)special.push({icon:"🎯",label:`5+ assists`,count:c10a});
+if(c10a>0)special.push({key:"ast5",icon:"🎯",label:`5+ assists`,count:c10a});
 const c5s=myGames.filter(g=>(+g.stl||0)>=4).length;
-if(c5s>0)special.push({icon:"🦅",label:`4+ steals`,count:c5s});
+if(c5s>0)special.push({key:"stl4",icon:"🦅",label:`4+ steals`,count:c5s});
 const c5b=myGames.filter(g=>(+g.blk||0)>=4).length;
-if(c5b>0)special.push({icon:"🚫",label:`4+ blocks`,count:c5b});
+if(c5b>0)special.push({key:"blk4",icon:"🚫",label:`4+ blocks`,count:c5b});
 const td=myGames.filter(g=>{
 const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=5).length;
 return ten>=3;
 }).length;
-if(td>0)special.push({icon:"💎",label:`Triple-double`,count:td});
+if(td>0)special.push({key:"td",icon:"💎",label:`Triple-double`,count:td});
 return{won,special};
 }
 
@@ -5009,6 +5055,251 @@ return(
 <div style={{color:GREY,fontSize:11}}>{game.pts||0} pts · {game.reb||0} reb · {game.ast||0} ast · {game.date}</div>
 </div>
 <div style={{color:RED,fontSize:14,fontWeight:800}}>{calcFps(game)}</div>
+</div>
+);
+}
+
+// ── Full Match Embed Card (used in announcements — mirrors the Past Games look)
+function MatchEmbed({matchGames,players}){
+if(!matchGames||!matchGames.length)return null;
+const s=matchGames[0];
+const tAN=s.teamAName||"Team A",tBN=s.teamBName||"Team B";
+const hasScore=s.teamAScore&&s.teamBScore;
+const aS=parseFloat(s.teamAScore),bS=parseFloat(s.teamBScore);
+const aWon=hasScore&&aS>bS,bWon=hasScore&&bS>aS;
+const top=matchGames.slice().sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
+const topPlayer=top?players.find(pl=>pl.id===top.playerId):null;
+return(
+<div style={{background:"#0d0d0d",border:`1px solid ${RED}55`,borderRadius:12,marginTop:8,overflow:"hidden"}}>
+<div style={{padding:"6px 12px",display:"flex",alignItems:"center",gap:2,background:"#111"}}>
+<span style={{color:RED,fontSize:9,fontWeight:700,letterSpacing:1}}>🏀 VOLLEDIGE GAME</span>
+</div>
+{hasScore?(
+<div style={{padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"center",gap:12}}>
+<div style={{textAlign:"right",flex:1}}><span style={{fontWeight:700,fontSize:12,color:aWon?WHITE:GREY}}>{tAN}</span></div>
+<div style={{display:"flex",alignItems:"center",gap:6}}>
+<span style={{fontSize:18,fontWeight:800,color:aWon?WHITE:GREY}}>{s.teamAScore}</span>
+<span style={{color:GREY,fontSize:12}}>–</span>
+<span style={{fontSize:18,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
+</div>
+<div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:12,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+</div>
+):(
+<div style={{padding:"10px 12px",textAlign:"center"}}><span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span></div>
+)}
+{topPlayer&&(
+<div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderTop:`1px solid ${DIVIDER}`}}>
+<Avatar player={topPlayer} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:600,fontSize:12,color:WHITE}}>{topPlayer.name} <span style={{color:GREY,fontWeight:400}}>· top performer</span></div>
+<div style={{color:GREY,fontSize:11}}>{top.pts||0} pts · {top.reb||0} reb · {top.ast||0} ast · {s.date}</div>
+</div>
+<div style={{color:RED,fontSize:12,fontWeight:700}}>{calcFps(top)}</div>
+</div>
+)}
+</div>
+);
+}
+
+// ── Award Embed Card (used in announcements)
+function AwardEmbed({award,players}){
+if(!award)return null;
+const at=getAwardType(award.awardId);
+const Icon=at.Icon;
+const names=(Array.isArray(award.playerIds)?award.playerIds:[award.playerId]).filter(Boolean).map(pid=>players.find(pl=>pl.id===pid)?.name||"?").join(", ");
+return(
+<div style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"10px 12px",marginTop:8}}>
+<Icon size={30} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
+<div style={{color:WHITE,fontSize:13,fontWeight:700}}>{names}</div>
+<div style={{color:GREY,fontSize:11}}>{award.lbl}</div>
+</div>
+</div>
+);
+}
+
+// ── Hot Streak Embed Card (used in announcements)
+function StreakEmbed({player,streak}){
+if(!player)return null;
+return(
+<div style={{display:"flex",alignItems:"center",gap:10,background:"#2a140a",border:"1px solid #f5752555",borderRadius:12,padding:"10px 12px",marginTop:8}}>
+<Avatar player={player} size={38} streak={streak}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#f57525",fontSize:9,fontWeight:700,letterSpacing:1}}>🔥 HOT STREAK</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{streak}-game hot streak</div>
+</div>
+</div>
+);
+}
+
+// ── Special Achievement Embed Card (used in announcements)
+function SpecialEmbed({player,special}){
+if(!player||!special)return null;
+return(
+<div style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,border:"1px solid #f5a52455",borderRadius:12,padding:"10px 12px",marginTop:8}}>
+<Avatar player={player} size={38}/>
+<div style={{fontSize:22}}>{special.icon}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#f5a524",fontSize:9,fontWeight:700,letterSpacing:1}}>⭐ SPECIALE PRESTATIE</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{special.label} · {special.count}×</div>
+</div>
+</div>
+);
+}
+
+// ── Renders any embed reference {type,...} to the correct card, resolving live data from games/players/manualAwards
+function AnnouncementEmbedCard({embed,players,games,manualAwards}){
+if(!embed)return null;
+if(embed.type==="performance"){
+const g=games.find(x=>x.id===embed.gameId);
+return g?<PerfEmbed game={g} players={players}/>:null;
+}
+if(embed.type==="game"){
+const mg=games.filter(x=>(x.matchId||x.id)===embed.matchKey);
+return mg.length?<MatchEmbed matchGames={mg} players={players}/>:null;
+}
+if(embed.type==="award"){
+const a=(manualAwards||[]).find(x=>x.id===embed.awardDocId);
+return a?<AwardEmbed award={a} players={players}/>:null;
+}
+if(embed.type==="streak"){
+const p=players.find(pl=>pl.id===embed.playerId);
+if(!p)return null;
+const pg=games.filter(g=>g.playerId===p.id).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+const streak=computeHotStreak(pg);
+return streak>=3?<StreakEmbed player={p} streak={streak}/>:null;
+}
+if(embed.type==="special"){
+const p=players.find(pl=>pl.id===embed.playerId);
+if(!p)return null;
+const t=computeTrophies(p,games,players,manualAwards);
+const sp=t.special.find(x=>x.key===embed.key);
+return sp?<SpecialEmbed player={p} special={sp}/>:null;
+}
+return null;
+}
+
+// ── Pickers for building announcement embeds (admin)
+function MatchPicker({games,players,onSelect,onClose}){
+const [q,setQ]=useState("");
+const {IS}=styles();
+const matchMap={};
+games.forEach(g=>{const key=g.matchId||g.id;if(!matchMap[key])matchMap[key]=[];matchMap[key].push(g);});
+const matches=Object.entries(matchMap).map(([key,mg])=>({key,mg,date:mg[0].date,tAN:mg[0].teamAName||"Team A",tBN:mg[0].teamBName||"Team B"})).sort((a,b)=>b.date.localeCompare(a.date));
+const filtered=matches.filter(m=>!q||m.tAN.toLowerCase().includes(q.toLowerCase())||m.tBN.toLowerCase().includes(q.toLowerCase())||m.date.includes(q));
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:550}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:12}}>🏀 Game koppelen</div>
+<input placeholder="Zoek op team of datum..." style={{...IS,marginBottom:14}} value={q} onChange={e=>setQ(e.target.value)}/>
+{filtered.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games gevonden</div>}
+{filtered.slice(0,30).map(m=>(
+<div key={m.key} onClick={()=>onSelect(m.key)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{m.tAN} vs {m.tBN}</div>
+<div style={{color:GREY,fontSize:11}}>{m.date} · {m.mg.length} spelers</div>
+</div>
+</div>
+))}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:12}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
+function AwardPicker({manualAwards,players,onSelect,onClose}){
+const sorted=(manualAwards||[]).slice().sort((a,b)=>b.month.localeCompare(a.month));
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:550}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:12}}>🏆 Award koppelen</div>
+{sorted.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen awards uitgereikt</div>}
+{sorted.map(a=>{
+const at=getAwardType(a.awardId);
+const Icon=at.Icon;
+const names=(Array.isArray(a.playerIds)?a.playerIds:[a.playerId]).filter(Boolean).map(pid=>players.find(pl=>pl.id===pid)?.name||"?").join(", ");
+return(
+<div key={a.id} onClick={()=>onSelect(a)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<Icon size={26} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:13,color:WHITE}}>{at.label}</div>
+<div style={{color:GREY,fontSize:11}}>{names} · {a.lbl}</div>
+</div>
+</div>
+);
+})}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:12}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
+function StreakPicker({players,games,onSelect,onClose}){
+const candidates=players.map(p=>{
+const pg=games.filter(g=>g.playerId===p.id).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+return{p,streak:computeHotStreak(pg)};
+}).filter(x=>x.streak>=3).sort((a,b)=>b.streak-a.streak);
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:550}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:12}}>🔥 Hot streak koppelen</div>
+{candidates.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Niemand zit momenteel op een hot streak (3+)</div>}
+{candidates.map(({p,streak})=>(
+<div key={p.id} onClick={()=>onSelect(p.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<Avatar player={p} size={36} streak={streak}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p.name}</div>
+<div style={{color:GREY,fontSize:11}}>{streak}-game hot streak</div>
+</div>
+</div>
+))}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:12}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
+function SpecialPicker({players,games,manualAwards,onSelect,onClose}){
+const [pid,setPid]=useState(null);
+const player=pid?players.find(p=>p.id===pid):null;
+const specials=player?computeTrophies(player,games,players,manualAwards).special:[];
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:550}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontWeight:700,fontSize:18,marginBottom:12}}>⭐ Speciale prestatie koppelen</div>
+{!player?(
+<>
+{players.map(p=>(
+<div key={p.id} onClick={()=>setPid(p.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<Avatar player={p} size={32}/>
+<div style={{fontWeight:700,fontSize:14,color:WHITE}}>{p.name}</div>
+</div>
+))}
+</>
+):(
+<>
+<div onClick={()=>setPid(null)} style={{color:RED,fontSize:12,fontWeight:600,marginBottom:10,cursor:"pointer"}}>‹ Andere speler</div>
+{specials.length===0&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen speciale prestaties voor {player.name}</div>}
+{specials.map(s=>(
+<div key={s.key} onClick={()=>onSelect(player.id,s.key)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
+<div style={{fontSize:22}}>{s.icon}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:13,color:WHITE}}>{s.label}</div>
+<div style={{color:"#f5a524",fontSize:11}}>{s.count}×</div>
+</div>
+</div>
+))}
+</>
+)}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:12}}>Sluiten</button>
+</div>
 </div>
 );
 }
@@ -8949,7 +9240,7 @@ if(loading)return(
 return(
 <div style={{background:BG,minHeight:"100vh",paddingBottom:80}}>
 {showSplash&&<SplashScreen onDone={dismissSplash}/>}
-{!showSplash&&showAnnouncement&&appSettings?.announcement&&<AnnouncementModal announcement={appSettings.announcement} onClose={dismissAnnouncement}/>}
+{!showSplash&&showAnnouncement&&appSettings?.announcement&&<AnnouncementModal announcement={appSettings.announcement} players={players} games={games} manualAwards={manualAwards} onClose={dismissAnnouncement}/>}
 {showConfetti&&<Confetti onDone={()=>setShowConfetti(false)}/>}
 {saveStatus&&(
 <div style={{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 8px)",right:12,zIndex:999,background:saveStatus==="error"?"#ff453a22":INPUTBG,border:`1px solid ${saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}`,borderRadius:20,padding:"5px 14px",fontSize:12,color:saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}}>

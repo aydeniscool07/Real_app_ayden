@@ -1138,6 +1138,18 @@ const {BG2,IS}=styles();
 const triviaEnabled=appSettings?.triviaEnabled!==false;
 const nbaPredictionsEnabled=appSettings?.nbaPredictionsEnabled!==false;
 const [bdlKeyInput,setBdlKeyInput]=useState(appSettings?.balldontlieApiKey||"");
+const ann=appSettings?.announcement||null;
+const [annIcon,setAnnIcon]=useState(ann?.icon||"📢");
+const [annTitle,setAnnTitle]=useState(ann?.title||"");
+const [annBody,setAnnBody]=useState(ann?.body||"");
+const [annPreview,setAnnPreview]=useState(false);
+function sendAnnouncement(){
+if(!annTitle.trim()&&!annBody.trim())return;
+onSaveAppSettings({announcement:{icon:annIcon.trim()||"📢",title:annTitle.trim(),body:annBody.trim(),enabled:true,updatedAt:Date.now()}});
+}
+function toggleAnnouncement(){
+onSaveAppSettings({announcement:{...(ann||{}),enabled:!(ann?.enabled),updatedAt:ann?.updatedAt||Date.now()}});
+}
 const stats=[
 {label:"Players",value:players?.length||0,icon:"👥"},
 {label:"Games",value:games?.length||0,icon:"🏀"},
@@ -1201,6 +1213,28 @@ return(
 </div>
 </div>
 
+<div style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>📢 Aankondiging (popup bij openen app)</div>
+{ann&&(
+<button onClick={toggleAnnouncement} style={{background:ann.enabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"4px 12px",fontWeight:700,fontSize:11,cursor:"pointer",flexShrink:0}}>
+{ann.enabled?"Actief":"Uit"}
+</button>
+)}
+</div>
+<div style={{color:GREY,fontSize:11,marginBottom:10}}>Verschijnt eenmalig als popup wanneer een gebruiker de app opent — trofeeën, laatste games, prestaties, of wat je maar wilt.</div>
+<div style={{display:"flex",gap:8,marginBottom:8}}>
+<input value={annIcon} onChange={e=>setAnnIcon(e.target.value)} placeholder="🏆" maxLength={4} style={{...IS,padding:"9px 10px",fontSize:16,width:56,textAlign:"center",flexShrink:0}}/>
+<input value={annTitle} onChange={e=>setAnnTitle(e.target.value)} placeholder="Titel (bv. Nieuwe trofee!)" style={{...IS,padding:"9px 10px",fontSize:13}}/>
+</div>
+<textarea value={annBody} onChange={e=>setAnnBody(e.target.value)} placeholder="Bericht... (trofeeën, laatste games, prestaties, etc.)" rows={3} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,color:WHITE,fontSize:13,padding:"9px 10px",outline:"none",resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
+<div style={{display:"flex",gap:8}}>
+<button onClick={()=>setAnnPreview(true)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,fontSize:12,cursor:"pointer",flex:1}}>👁️ Preview</button>
+<button onClick={sendAnnouncement} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"9px 0",fontWeight:700,fontSize:12,cursor:"pointer",flex:1}}>Versturen naar iedereen</button>
+</div>
+{ann?.enabled&&ann?.title&&<div style={{color:GREY,fontSize:10,marginTop:8}}>Laatst verstuurd: "{ann.title}"</div>}
+</div>
+
 <div onClick={()=>setShowBotSettings(true)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10,cursor:"pointer"}}>
 <div>
 <div style={{color:WHITE,fontSize:13,fontWeight:600}}>🤖 LARP Bot instellingen</div>
@@ -1212,6 +1246,23 @@ return(
 <button onClick={onClose} style={{...BG2,marginTop:8}}>Sluiten</button>
 </div>
 {showBotSettings&&<BotSettingsModal settings={botSettings} onSave={(s)=>{onSaveBotSettings&&onSaveBotSettings(s);setShowBotSettings(false);}} onClose={()=>setShowBotSettings(false)}/>}
+{annPreview&&<AnnouncementModal announcement={{icon:annIcon,title:annTitle,body:annBody}} onClose={()=>setAnnPreview(false)}/>}
+</div>
+);
+}
+
+// ── Announcement popup (admin-configured "what's new" style popup shown to users)
+function AnnouncementModal({announcement,onClose}){
+const{BG2}=styles();
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:310}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{fontSize:40,textAlign:"center",marginBottom:10}}>{announcement.icon||"📢"}</div>
+<div style={{fontWeight:800,fontSize:19,marginBottom:10,textAlign:"center",color:WHITE}}>{announcement.title||"Nieuw"}</div>
+<div style={{color:"#ddd",fontSize:14,lineHeight:1.5,whiteSpace:"pre-wrap",marginBottom:20,textAlign:"center"}}>{announcement.body}</div>
+<button onClick={onClose} style={BG2}>Sluiten</button>
+</div>
 </div>
 );
 }
@@ -8065,6 +8116,7 @@ const [highlightsList,setHighlightsList]=useState(null); // {items, title}
 const [loading,setLoading]=useState(true);
 const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
+const [showAnnouncement,setShowAnnouncement]=useState(false);
 const [tab,setTab]=useState("performances");
 const [modal,setModal]=useState(null);
 const [compareTarget,setCompareTarget]=useState(null); // {player} of null
@@ -8768,6 +8820,21 @@ async function deleteAward(id){setSaveStatus("saving");try{await fbDel("awards",
 async function likeHighlight(hl,delta){setSaveStatus("saving");try{await fbSave("highlights",{...hl,likes:Math.max(0,(hl.likes||0)+delta)});showSaved();}catch(e){console.error(e);showError();}}
 async function saveBotSettings(s){setSaveStatus("saving");try{await fbSave("bot_settings",{...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
 async function saveAppSettings(s){setSaveStatus("saving");try{await fbSave("app_settings",{...(appSettings||{}),...s,id:"config"});showSaved();}catch(e){console.error(e);showError();}}
+
+// ── Show admin-configured announcement popup once per version (per device)
+useEffect(()=>{
+if(loading)return;
+const ann=appSettings?.announcement;
+if(!ann||!ann.enabled||!ann.updatedAt)return;
+try{
+const seen=localStorage.getItem("lba_announcement_seen");
+if(seen!==String(ann.updatedAt))setShowAnnouncement(true);
+}catch(e){}
+},[loading,appSettings]);
+function dismissAnnouncement(){
+try{localStorage.setItem("lba_announcement_seen",String(appSettings?.announcement?.updatedAt||""));}catch(e){}
+setShowAnnouncement(false);
+}
 function handleAdminQuickAction(action){
 if(action==="logGame"){setModal("logGame");}
 else if(action==="addPlayer"){setModal("addPlayer");}
@@ -8882,6 +8949,7 @@ if(loading)return(
 return(
 <div style={{background:BG,minHeight:"100vh",paddingBottom:80}}>
 {showSplash&&<SplashScreen onDone={dismissSplash}/>}
+{!showSplash&&showAnnouncement&&appSettings?.announcement&&<AnnouncementModal announcement={appSettings.announcement} onClose={dismissAnnouncement}/>}
 {showConfetti&&<Confetti onDone={()=>setShowConfetti(false)}/>}
 {saveStatus&&(
 <div style={{position:"fixed",top:"calc(env(safe-area-inset-top,0px) + 8px)",right:12,zIndex:999,background:saveStatus==="error"?"#ff453a22":INPUTBG,border:`1px solid ${saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}`,borderRadius:20,padding:"5px 14px",fontSize:12,color:saveStatus==="error"?"#ff453a":saveStatus==="saved"?RED:GREY}}>

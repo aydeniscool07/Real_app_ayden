@@ -8295,7 +8295,428 @@ return(
 );
 }
 
-function NbaPredictionsTab({teams,games,predictions,seasonPredictions,seasonActual,onSaveSeasonActual,authUserId,authError,onLogin,onRegister,isAdmin,enabled,onToggleEnabled,onPickGame,onSaveSeason,apiKeySet,onRefreshSchedule,refreshing,refreshError,seasonLocked,onToggleSeasonLock}){
+// ══════════════════════════════════════════
+// ── NBA CAREER SIM (draft attributes from legends, then live a full career)
+// ══════════════════════════════════════════
+const CAREER_ATTRS=[
+{key:"sco",label:"Scoren",icon:"🎯"},
+{key:"plm",label:"Playmaking",icon:"🪄"},
+{key:"reb",label:"Rebounden",icon:"💪"},
+{key:"def",label:"Verdediging",icon:"🛡️"},
+{key:"ath",label:"Atletisch vermogen",icon:"⚡"},
+{key:"iq",label:"Basketbal IQ",icon:"🧠"},
+];
+const CAREER_POSITIONS=["PG","SG","SF","PF","C"];
+const CAREER_POS_WEIGHTS={
+PG:{sco:0.20,plm:0.30,reb:0.05,def:0.15,ath:0.15,iq:0.15},
+SG:{sco:0.30,plm:0.15,reb:0.05,def:0.15,ath:0.20,iq:0.15},
+SF:{sco:0.22,plm:0.18,reb:0.15,def:0.15,ath:0.15,iq:0.15},
+PF:{sco:0.18,plm:0.10,reb:0.25,def:0.20,ath:0.15,iq:0.12},
+C:{sco:0.15,plm:0.08,reb:0.30,def:0.25,ath:0.12,iq:0.10},
+};
+// Editorial attribute estimates for gameplay purposes only — not official ratings, used for identification/simulation only.
+const NBA_LEGENDS=[
+{name:"Michael Jordan",pos:"SG",sco:99,plm:85,reb:75,def:95,ath:96,iq:97},
+{name:"LeBron James",pos:"SF",sco:92,plm:95,reb:88,def:88,ath:97,iq:96},
+{name:"Magic Johnson",pos:"PG",sco:80,plm:99,reb:85,def:75,ath:85,iq:98},
+{name:"Larry Bird",pos:"SF",sco:90,plm:88,reb:85,def:80,ath:70,iq:97},
+{name:"Kareem Abdul-Jabbar",pos:"C",sco:90,plm:70,reb:92,def:90,ath:80,iq:92},
+{name:"Shaquille O'Neal",pos:"C",sco:88,plm:60,reb:95,def:85,ath:92,iq:78},
+{name:"Tim Duncan",pos:"PF",sco:82,plm:70,reb:93,def:96,ath:75,iq:95},
+{name:"Kobe Bryant",pos:"SG",sco:97,plm:82,reb:72,def:90,ath:90,iq:94},
+{name:"Stephen Curry",pos:"PG",sco:95,plm:90,reb:55,def:65,ath:78,iq:93},
+{name:"Kevin Durant",pos:"SF",sco:96,plm:78,reb:75,def:80,ath:88,iq:90},
+{name:"Hakeem Olajuwon",pos:"C",sco:88,plm:65,reb:90,def:97,ath:90,iq:92},
+{name:"David Robinson",pos:"C",sco:82,plm:62,reb:90,def:94,ath:88,iq:85},
+{name:"Charles Barkley",pos:"PF",sco:85,plm:72,reb:96,def:80,ath:85,iq:88},
+{name:"Karl Malone",pos:"PF",sco:88,plm:65,reb:90,def:82,ath:85,iq:85},
+{name:"John Stockton",pos:"PG",sco:65,plm:98,reb:55,def:82,ath:70,iq:96},
+{name:"Scottie Pippen",pos:"SF",sco:78,plm:85,reb:80,def:95,ath:88,iq:92},
+{name:"Dennis Rodman",pos:"PF",sco:45,plm:55,reb:99,def:96,ath:85,iq:82},
+{name:"Allen Iverson",pos:"PG",sco:92,plm:82,reb:55,def:70,ath:92,iq:82},
+{name:"Dirk Nowitzki",pos:"PF",sco:90,plm:68,reb:82,def:72,ath:65,iq:90},
+{name:"Chris Paul",pos:"PG",sco:78,plm:97,reb:55,def:85,ath:75,iq:96},
+{name:"James Harden",pos:"SG",sco:93,plm:88,reb:62,def:60,ath:78,iq:88},
+{name:"Giannis Antetokounmpo",pos:"PF",sco:88,plm:78,reb:90,def:88,ath:96,iq:82},
+{name:"Nikola Jokic",pos:"C",sco:85,plm:92,reb:90,def:68,ath:55,iq:97},
+{name:"Kevin Garnett",pos:"PF",sco:82,plm:78,reb:92,def:94,ath:85,iq:90},
+{name:"Isiah Thomas",pos:"PG",sco:82,plm:92,reb:55,def:78,ath:85,iq:92},
+{name:"Clyde Drexler",pos:"SG",sco:85,plm:78,reb:75,def:82,ath:88,iq:85},
+{name:"Reggie Miller",pos:"SG",sco:85,plm:65,reb:50,def:65,ath:72,iq:88},
+{name:"Patrick Ewing",pos:"C",sco:80,plm:55,reb:88,def:90,ath:78,iq:82},
+{name:"Russell Westbrook",pos:"PG",sco:85,plm:85,reb:80,def:75,ath:95,iq:78},
+{name:"Draymond Green",pos:"PF",sco:55,plm:85,reb:80,def:96,ath:78,iq:94},
+{name:"Klay Thompson",pos:"SG",sco:85,plm:55,reb:55,def:82,ath:78,iq:82},
+{name:"Damian Lillard",pos:"PG",sco:90,plm:88,reb:55,def:65,ath:78,iq:88},
+{name:"Ray Allen",pos:"SG",sco:85,plm:68,reb:55,def:72,ath:78,iq:85},
+{name:"Paul Pierce",pos:"SF",sco:85,plm:72,reb:70,def:78,ath:72,iq:88},
+{name:"Vince Carter",pos:"SG",sco:85,plm:62,reb:62,def:68,ath:96,iq:78},
+];
+const NBA_TEAMS_FALLBACK=["Atlanta Hawks","Boston Celtics","Brooklyn Nets","Charlotte Hornets","Chicago Bulls","Cleveland Cavaliers","Dallas Mavericks","Denver Nuggets","Detroit Pistons","Golden State Warriors","Houston Rockets","Indiana Pacers","LA Clippers","Los Angeles Lakers","Memphis Grizzlies","Miami Heat","Milwaukee Bucks","Minnesota Timberwolves","New Orleans Pelicans","New York Knicks","Oklahoma City Thunder","Orlando Magic","Philadelphia 76ers","Phoenix Suns","Portland Trail Blazers","Sacramento Kings","San Antonio Spurs","Toronto Raptors","Utah Jazz","Washington Wizards"];
+
+function careerOverall(attrs,pos){
+const w=CAREER_POS_WEIGHTS[pos]||CAREER_POS_WEIGHTS.SF;
+const raw=CAREER_ATTRS.reduce((s,a)=>s+attrs[a.key]*w[a.key],0);
+return Math.round(raw);
+}
+function careerAgeMult(age){
+if(age<=22)return 0.68+(age-19)*0.08;
+if(age<=29)return 1.0;
+if(age<=33)return 1.0-(age-29)*0.035;
+return Math.max(0.35,1.0-4*0.035-(age-33)*0.09);
+}
+function careerRoll(min,max){return min+Math.random()*(max-min);}
+function pickRandomTeam(arr){return arr[Math.floor(Math.random()*arr.length)];}
+function draftLegendTrio(pool,excludeNames){
+const avail=pool.filter(l=>!(excludeNames||[]).includes(l.name));
+const shuffled=avail.slice().sort(()=>Math.random()-0.5);
+return shuffled.slice(0,3);
+}
+function shouldRetireCareer(age,rating){
+if(age>=39)return true;
+if(age>=34&&rating<55)return true;
+if(age>=36)return Math.random()<0.4;
+return false;
+}
+function simulateCareerSeason(player,age,teamPool){
+const mult=careerAgeMult(age);
+const rating=Math.max(30,Math.min(99,Math.round(player.overall*mult+careerRoll(-4,4))));
+let role="Bank",minutesFactor=0.35;
+if(rating>=88){role="Ster";minutesFactor=1.0;}
+else if(rating>=78){role="Starter";minutesFactor=0.82;}
+else if(rating>=65){role="Rotatie";minutesFactor=0.6;}
+const injuryGames=Math.random()<0.12?Math.round(careerRoll(8,28)):Math.round(careerRoll(0,6));
+const gp=Math.max(10,82-injuryGames);
+const pts=Math.round((player.attrs.sco/99)*minutesFactor*30*careerRoll(0.85,1.15)*10)/10;
+const reb=Math.round((player.attrs.reb/99)*minutesFactor*13*careerRoll(0.85,1.15)*10)/10;
+const ast=Math.round((player.attrs.plm/99)*minutesFactor*10*careerRoll(0.85,1.15)*10)/10;
+const stl=Math.round((player.attrs.def/99)*minutesFactor*2.2*careerRoll(0.8,1.2)*10)/10;
+const blk=Math.round(((player.attrs.def+player.attrs.ath)/198)*minutesFactor*1.8*careerRoll(0.8,1.2)*10)/10;
+const team=pickRandomTeam(teamPool);
+const awards=[];
+const leagueAvg=75;
+if(rating>=leagueAvg+8&&Math.random()<0.55)awards.push("all-star");
+if(rating>=88&&Math.random()<0.35)awards.push("all-nba");
+if(rating>=95&&Math.random()<0.18)awards.push("mvp");
+if(player.attrs.def>=90&&rating>=85&&Math.random()<0.15)awards.push("dpoy");
+const champWinChance=0.04+(rating>=85?0.08:0)+(rating>=92?0.06:0);
+if(Math.random()<champWinChance)awards.push("championship");
+return{age,team,rating,role,gp,pts,reb,ast,stl,blk,awards};
+}
+function careerVerdict(score){
+if(score>=420)return{tier:"🐐 All-Time Great",color:"#f5a524"};
+if(score>=260)return{tier:"🏆 Hall of Famer",color:"#f5a524"};
+if(score>=150)return{tier:"⭐ Perennial All-Star",color:"#E8312A"};
+if(score>=80)return{tier:"💪 Solide starter",color:"#3498DB"};
+if(score>=35)return{tier:"🔄 Rotatiespeler",color:"#8E8E93"};
+return{tier:"📋 Journeyman",color:"#8E8E93"};
+}
+function computeCareerScore(seasons){
+let pts=0,reb=0,ast=0,gp=0,allStars=0,allNba=0,mvps=0,dpoys=0,champs=0,peak=0;
+seasons.forEach(s=>{
+pts+=s.pts*s.gp;reb+=s.reb*s.gp;ast+=s.ast*s.gp;gp+=s.gp;
+if(s.rating>peak)peak=s.rating;
+if(s.awards.includes("all-star"))allStars++;
+if(s.awards.includes("all-nba"))allNba++;
+if(s.awards.includes("mvp"))mvps++;
+if(s.awards.includes("dpoy"))dpoys++;
+if(s.awards.includes("championship"))champs++;
+});
+const score=Math.round(pts*0.015+reb*0.02+ast*0.03+allStars*15+allNba*20+mvps*60+dpoys*30+champs*35+peak*1.5+gp*0.04);
+return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast),gp,allStars,allNba,mvps,dpoys,champs,peak}};
+}
+
+// ── One season row (used in both the live sim recap and saved-career detail view)
+function CareerSeasonRow({season}){
+const awardIcons={"all-star":"⭐","all-nba":"🥇","mvp":"👑","dpoy":"🛡️","championship":"🏆"};
+return(
+<div style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"9px 12px",marginBottom:6}}>
+<div style={{width:28,textAlign:"center",color:GREY,fontSize:11,fontWeight:700}}>{season.age}j</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{season.team}</div>
+<div style={{color:GREY,fontSize:11}}>{season.gp} GP · {season.pts} ppg · {season.reb} rpg · {season.ast} apg</div>
+</div>
+{season.awards.length>0&&<div style={{fontSize:13}}>{season.awards.map(a=>awardIcons[a]||"").join(" ")}</div>}
+<div style={{color:RED,fontWeight:800,fontSize:13}}>{season.rating}</div>
+</div>
+);
+}
+
+// ── Retirement / share card
+function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,onDone}){
+return(
+<div style={{textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
+<div style={{fontSize:44,marginBottom:6}}>{(verdict.tier.split(" ")[0])}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:20,marginBottom:2}}>{player.name}</div>
+<div style={{color:GREY,fontSize:13,marginBottom:10}}>{player.pos} · Gestopt op {retiredAge}</div>
+<div style={{color:verdict.color,fontWeight:800,fontSize:16,marginBottom:18}}>{verdict.tier}</div>
+{totals&&(
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
+{[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["MVP's",totals.mvps]].map(([lbl,val])=>(
+<div key={lbl} style={{background:INPUTBG,borderRadius:10,padding:"10px 4px"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{val}</div>
+<div style={{color:GREY,fontSize:9}}>{lbl}</div>
+</div>
+))}
+</div>
+)}
+<div style={{color:RED,fontWeight:800,fontSize:22,marginBottom:20}}>{score} carrièrepunten</div>
+<div style={{maxHeight:220,overflowY:"auto",marginBottom:18,textAlign:"left"}}>
+{seasons.map((s,i)=>(<CareerSeasonRow key={i} season={s}/>))}
+</div>
+<button onClick={onDone} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Terug naar overzicht</button>
+</div>
+);
+}
+
+// ── Compact row for a saved career (hub list)
+function CareerHistoryCard({career,mine,onView,onDelete}){
+return(
+<div style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:12,padding:"10px 14px",marginBottom:8}}>
+<div onClick={onView} style={{flex:1,minWidth:0,cursor:"pointer"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{career.playerName} <span style={{color:GREY,fontWeight:400}}>· {career.pos}</span></div>
+<div style={{color:GREY,fontSize:11}}>{career.verdict} · {(career.seasons||[]).length} seizoenen</div>
+</div>
+<div style={{color:RED,fontWeight:800,fontSize:14}}>{career.careerScore}</div>
+{mine&&<button onClick={onDelete} style={{background:"transparent",border:"none",color:GREY,fontSize:15,cursor:"pointer",padding:"0 2px"}}>✕</button>}
+</div>
+);
+}
+
+// ── Full season-by-season view of any saved career
+function CareerDetailModal({career,onClose}){
+const verdict=careerVerdict(career.careerScore||0);
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{textAlign:"center",marginBottom:14}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:18}}>{career.playerName}</div>
+<div style={{color:GREY,fontSize:12}}>{career.pos} · {career.overall} OVR · {career.username}</div>
+<div style={{color:verdict.color,fontWeight:800,fontSize:15,marginTop:6}}>{career.verdict}</div>
+</div>
+{(career.seasons||[]).map((s,i)=>(<CareerSeasonRow key={i} season={s}/>))}
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:14}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
+// ── Main Career Sim orchestrator: hub (past careers + leaderboard) → create (name/pos/draft) → mode pick → live sim → result
+function CareerSimSection({teams,careerSims,authUserId,myUsername,onSaveCareerSim,onDeleteCareerSim}){
+const {IS}=styles();
+const [stage,setStage]=useState("hub"); // hub | create | modepick | sim
+const [viewingSim,setViewingSim]=useState(null);
+const [draftName,setDraftName]=useState("");
+const [draftPos,setDraftPos]=useState(null);
+const [draftStep,setDraftStep]=useState(0);
+const [draftAttrs,setDraftAttrs]=useState({});
+const [draftTrio,setDraftTrio]=useState(null);
+const [draftLegendNames,setDraftLegendNames]=useState([]);
+const [mode,setMode]=useState(null);
+const [player,setPlayer]=useState(null);
+const [seasons,setSeasons]=useState([]);
+const [simAge,setSimAge]=useState(19);
+const [decisionPending,setDecisionPending]=useState(false);
+const [retired,setRetired]=useState(false);
+const [saved,setSaved]=useState(false);
+
+const teamPool=(teams&&teams.length?teams.map(t=>t.fullName||t.name):NBA_TEAMS_FALLBACK);
+const myCareers=careerSims.filter(c=>c.userId===authUserId).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+const topCareers=careerSims.slice().sort((a,b)=>(b.careerScore||0)-(a.careerScore||0)).slice(0,15);
+
+function startCreate(){
+setDraftName("");setDraftPos(null);setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);
+setStage("create");
+}
+function choosePos(p){
+setDraftPos(p);
+setDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));
+}
+function pickLegendForAttr(legend){
+const attrKey=CAREER_ATTRS[draftStep].key;
+const newAttrs={...draftAttrs,[attrKey]:legend[attrKey]};
+const newNames=[...draftLegendNames,legend.name];
+setDraftAttrs(newAttrs);
+setDraftLegendNames(newNames);
+if(draftStep<5){
+setDraftStep(draftStep+1);
+setDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
+}else{
+const overall=careerOverall(newAttrs,draftPos);
+setPlayer({name:draftName.trim()||"Naamloos Talent",pos:draftPos,attrs:newAttrs,overall,legends:newNames});
+setStage("modepick");
+}
+}
+function runQuickToEnd(startPlayer){
+let age=19,list=[];
+for(let i=0;i<20;i++){
+const s=simulateCareerSeason(startPlayer,age,teamPool);
+list.push(s);
+if(shouldRetireCareer(age,s.rating))break;
+age++;
+}
+setSeasons(list);setSimAge(age);setRetired(true);
+}
+function beginSim(chosenMode){
+setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);
+setStage("sim");
+if(chosenMode==="quick")runQuickToEnd(player);
+}
+function simulateChunk(curAge,curSeasons){
+let age=curAge,list=curSeasons.slice(),stop=false;
+for(let i=0;i<2;i++){
+const s=simulateCareerSeason(player,age,teamPool);
+list.push(s);
+age++;
+if(shouldRetireCareer(age,s.rating)){stop=true;break;}
+}
+setSeasons(list);setSimAge(age);
+if(stop)setRetired(true);else setDecisionPending(true);
+}
+function resolveDecision(choice){
+setDecisionPending(false);
+if(choice==="move"){
+const bump=careerRoll(-3,3);
+setPlayer(p=>({...p,overall:Math.max(40,Math.min(99,Math.round(p.overall+bump)))}));
+}
+simulateChunk(simAge,seasons);
+}
+useEffect(()=>{
+if(stage==="sim"&&mode==="standard"&&seasons.length===0&&!decisionPending&&!retired&&player){
+simulateChunk(19,[]);
+}
+// eslint-disable-next-line
+},[stage,mode]);
+useEffect(()=>{
+if(retired&&!saved&&player&&seasons.length){
+const{score,totals}=computeCareerScore(seasons);
+const verdict=careerVerdict(score);
+onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge});
+setSaved(true);
+}
+// eslint-disable-next-line
+},[retired]);
+
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setDecisionPending(false);setRetired(false);}
+
+if(stage==="hub"){
+return(
+<div>
+{!authUserId&&<div style={{color:GREY,fontSize:12,marginBottom:12,textAlign:"center"}}>Log in via Trivia/Predictions om een carrière te starten en op te slaan.</div>}
+<button onClick={startCreate} disabled={!authUserId} data-testid="career-start-btn" style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:15,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:20,opacity:authUserId?1:0.4}}>🏀 Nieuwe carrière starten</button>
+{myCareers.length>0&&(
+<div style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>JOUW CARRIÈRES</div>
+{myCareers.map(c=>(<CareerHistoryCard key={c.id} career={c} mine onView={()=>setViewingSim(c)} onDelete={()=>onDeleteCareerSim(c.id)}/>))}
+</div>
+)}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>🏆 CARRIÈRE KLASSEMENT</div>
+{topCareers.length===0&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:20}}>Nog geen carrières gesimuleerd.</div>}
+{topCareers.map((c,i)=>(
+<div key={c.id} onClick={()=>setViewingSim(c)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"10px 14px",marginBottom:8,cursor:"pointer"}}>
+<div style={{width:22,textAlign:"center",fontWeight:800,color:i===0?"#f5a524":i===1?"#c0c0c0":i===2?"#cd7f32":GREY}}>{i+1}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{c.playerName} <span style={{color:GREY,fontWeight:400}}>· {c.pos}</span></div>
+<div style={{color:GREY,fontSize:11}}>{c.username} · {c.verdict}</div>
+</div>
+<div style={{color:RED,fontWeight:800,fontSize:15}}>{c.careerScore}</div>
+</div>
+))}
+{viewingSim&&<CareerDetailModal career={viewingSim} onClose={()=>setViewingSim(null)}/>}
+</div>
+);
+}
+
+if(stage==="create"){
+if(!draftPos){
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>NIEUWE CARRIÈRE</div>
+<input value={draftName} onChange={e=>setDraftName(e.target.value)} placeholder="Naam van je speler" style={{...IS,marginBottom:14}}/>
+<div style={{color:GREY,fontSize:12,marginBottom:8}}>Kies een positie:</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:20}}>
+{CAREER_POSITIONS.map(p=>(<button key={p} onClick={()=>choosePos(p)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:800,fontSize:14,cursor:"pointer"}}>{p}</button>))}
+</div>
+<button onClick={()=>setStage("hub")} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Terug</button>
+</div>
+);
+}
+const attrDef=CAREER_ATTRS[draftStep];
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>DRAFT · RONDE {draftStep+1}/6</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18,marginBottom:4}}>{attrDef.icon} {attrDef.label}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16}}>Kies een legend — jouw speler neemt hun {attrDef.label.toLowerCase()}-waarde over.</div>
+{(draftTrio||[]).map(l=>(
+<div key={l.name} onClick={()=>pickLegendForAttr(l)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{l.name}</div>
+<div style={{color:GREY,fontSize:11}}>{l.pos}</div>
+</div>
+<div style={{color:RED,fontWeight:800,fontSize:20}}>{l[attrDef.key]}</div>
+</div>
+))}
+<div style={{display:"flex",gap:6,justifyContent:"center",marginTop:6}}>
+{CAREER_ATTRS.map((a,i)=>(<div key={a.key} style={{width:8,height:8,borderRadius:4,background:i<draftStep?RED:i===draftStep?"#f5a524":"#2C2C2E"}}/>))}
+</div>
+</div>
+);
+}
+
+if(stage==="modepick"){
+return(
+<div style={{textAlign:"center"}}>
+<div style={{fontSize:44,marginBottom:10}}>🏀</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:19,marginBottom:4}}>{player.name}</div>
+<div style={{color:GREY,fontSize:13,marginBottom:16}}>{player.pos} · {player.overall} OVR</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:24}}>
+{CAREER_ATTRS.map(a=>(
+<div key={a.key} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px"}}>
+<div style={{fontSize:16}}>{a.icon}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:15}}>{player.attrs[a.key]}</div>
+<div style={{color:GREY,fontSize:9}}>{a.label}</div>
+</div>
+))}
+</div>
+<button onClick={()=>beginSim("quick")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
+<button onClick={()=>beginSim("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (keuzes elke 2 seizoenen)</button>
+<button onClick={backToHub} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer"}}>Annuleren</button>
+</div>
+);
+}
+
+if(stage==="sim"){
+if(!retired){
+if(mode==="standard"&&decisionPending){
+const last2=seasons.slice(-2);
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN {simAge-2}–{simAge-1} · LEEFTIJD {simAge}</div>
+{last2.map((s,i)=>(<CareerSeasonRow key={i} season={s}/>))}
+<div style={{color:WHITE,fontSize:13,fontWeight:600,margin:"18px 0 10px",textAlign:"center"}}>Wat nu?</div>
+<button onClick={()=>resolveDecision("stay")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>🤝 Bijtekenen bij {last2[last2.length-1]?.team}</button>
+<button onClick={()=>resolveDecision("move")} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>✈️ Naar een nieuwe club</button>
+</div>
+);
+}
+return(
+<div style={{textAlign:"center",padding:"60px 0"}}>
+<div style={{fontSize:36,marginBottom:10}}>🏀</div>
+<div style={{color:GREY,fontSize:13}}>Carrière wordt gesimuleerd...</div>
+</div>
+);
+}
+const{score,totals}=computeCareerScore(seasons);
+const verdict=careerVerdict(score);
+return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} onDone={backToHub}/>);
+}
+
+return null;
+}
+
+function NbaPredictionsTab({teams,games,predictions,seasonPredictions,seasonActual,onSaveSeasonActual,careerSims,onSaveCareerSim,onDeleteCareerSim,triviaUsers,authUserId,authError,onLogin,onRegister,isAdmin,enabled,onToggleEnabled,onPickGame,onSaveSeason,apiKeySet,onRefreshSchedule,refreshing,refreshError,seasonLocked,onToggleSeasonLock}){
 const [sub,setSub]=useState("week");
 const [lbView,setLbView]=useState("week");
 const adminToggleBar=isAdmin&&(
@@ -8345,7 +8766,7 @@ return(
 <div>
 {adminToggleBar}
 <div style={{display:"flex",background:INPUTBG,borderRadius:12,padding:4,marginBottom:16}}>
-{[["week","Deze week"],["season","Seizoen"],["leaderboard","Klassement"]].map(([id,label])=>(
+{[["week","Deze week"],["season","Seizoen"],["leaderboard","Klassement"],["career","Carrière"]].map(([id,label])=>(
 <button key={id} onClick={()=>setSub(id)} style={{flex:1,background:sub===id?RED:"transparent",border:"none",color:WHITE,borderRadius:9,padding:"8px 0",fontWeight:700,fontSize:12,cursor:"pointer"}}>{label}</button>
 ))}
 </div>
@@ -8365,6 +8786,16 @@ return(
 {lbView==="week"&&<NbaPredictionsLeaderboard predictions={predictions} games={games}/>}
 {lbView==="season"&&<NbaSeasonLeaderboard seasonPredictions={seasonPredictions} actual={seasonActual}/>}
 </div>
+)}
+{sub==="career"&&(
+<CareerSimSection
+teams={teams}
+careerSims={careerSims||[]}
+authUserId={authUserId}
+myUsername={(triviaUsers||[]).find(u=>u.id===authUserId)?.username||authUserId}
+onSaveCareerSim={onSaveCareerSim}
+onDeleteCareerSim={onDeleteCareerSim}
+/>
 )}
 </div>
 );
@@ -8436,6 +8867,7 @@ const [nbaGames,setNbaGames]=useState([]);
 const [nbaPredictions,setNbaPredictions]=useState([]);
 const [nbaSeasonPredictions,setNbaSeasonPredictions]=useState([]);
 const [nbaSeasonActuals,setNbaSeasonActuals]=useState(null);
+const [nbaCareerSims,setNbaCareerSims]=useState([]);
 const [nbaRefreshing,setNbaRefreshing]=useState(false);
 const [nbaRefreshError,setNbaRefreshError]=useState("");
 
@@ -8493,6 +8925,7 @@ _onSnapshot(_col(_db,"nba_season_actuals"),s=>{
 const docs=s.docs.map(d=>d.data());
 setNbaSeasonActuals(docs[0]||null);
 },(err)=>console.error("NBA season actuals error:",err));
+_onSnapshot(_col(_db,"nba_career_sims"),s=>{setNbaCareerSims(s.docs.map(d=>d.data()));},(err)=>console.error("NBA career sims error:",err));
 uLR=_onSnapshot(_col(_db,"larp_replies"),s=>{
 setLarpReplies(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp replies listener error:",err));
@@ -9181,6 +9614,20 @@ await fbSave("nba_season_predictions",{id:triviaAuthUserId+"_"+season,userId:tri
 showSaved();
 }catch(e){console.error(e);showError();}
 }
+async function saveNbaCareerSim(career){
+if(!triviaAuthUserId)return;
+const me=triviaUsers.find(u=>u.id===triviaAuthUserId);
+const id=Date.now().toString()+"_"+Math.random().toString(36).slice(2,7);
+setSaveStatus("saving");
+try{
+await fbSave("nba_career_sims",{id,userId:triviaAuthUserId,username:me?.username||triviaAuthUserId,...career,createdAt:new Date().toISOString()});
+showSaved();
+}catch(e){console.error(e);showError();}
+}
+async function deleteNbaCareerSim(id){
+setSaveStatus("saving");
+try{await fbDel("nba_career_sims",id);showSaved();}catch(e){console.error(e);showError();}
+}
 async function refreshNbaSchedule(){
 const apiKey=appSettings?.balldontlieApiKey;
 if(!apiKey)return;
@@ -9414,6 +9861,10 @@ predictions={nbaPredictions}
 seasonPredictions={nbaSeasonPredictions}
 seasonActual={nbaSeasonActuals}
 onSaveSeasonActual={saveNbaSeasonActuals}
+careerSims={nbaCareerSims}
+onSaveCareerSim={saveNbaCareerSim}
+onDeleteCareerSim={deleteNbaCareerSim}
+triviaUsers={triviaUsers}
 authUserId={triviaAuthUserId}
 authError={triviaAuthError}
 onLogin={triviaLogin}

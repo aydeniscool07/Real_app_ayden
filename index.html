@@ -8373,6 +8373,7 @@ const NBA_TEAMS_STATIC=[
 {name:"Dallas Mavericks",abbr:"DAL",conf:"West"},{name:"Denver Nuggets",abbr:"DEN",conf:"West"},{name:"Golden State Warriors",abbr:"GSW",conf:"West"},{name:"Houston Rockets",abbr:"HOU",conf:"West"},{name:"LA Clippers",abbr:"LAC",conf:"West"},{name:"Los Angeles Lakers",abbr:"LAL",conf:"West"},{name:"Memphis Grizzlies",abbr:"MEM",conf:"West"},{name:"Minnesota Timberwolves",abbr:"MIN",conf:"West"},{name:"New Orleans Pelicans",abbr:"NOP",conf:"West"},{name:"Oklahoma City Thunder",abbr:"OKC",conf:"West"},{name:"Phoenix Suns",abbr:"PHX",conf:"West"},{name:"Portland Trail Blazers",abbr:"POR",conf:"West"},{name:"Sacramento Kings",abbr:"SAC",conf:"West"},{name:"San Antonio Spurs",abbr:"SAS",conf:"West"},{name:"Utah Jazz",abbr:"UTA",conf:"West"},
 ];
 // Random season "vorm" events — nudge a season's rating up or down for narrative variety.
+// Ambient season "vorm" events — no choice, just flavor + a growth nudge.
 const CAREER_EVENTS=[
 {icon:"🔥",label:"In absolute vorm",mod:[6,14]},
 {icon:"📈",label:"Groeit met sprongen",mod:[3,8]},
@@ -8387,17 +8388,47 @@ const CAREER_EVENTS=[
 {icon:"😴",label:"Verloor wat scherpte",mod:[-5,-1]},
 {icon:"💥",label:"Explosief seizoen",mod:[5,12]},
 ];
+// Choice events — each presents two options with different growth/risk trade-offs, mid-season narrative moments.
+const CHOICE_EVENTS=[
+{id:"coach_trust",prompt:"De coach biedt je een grotere rol aan met meer minuten — meer druk, meer kans op blessures.",options:[
+{label:"Pak de kans",icon:"🔥",perfDelta:[4,9],injuryRisk:0.18},
+{label:"Blijf voorzichtig",icon:"🛡️",perfDelta:[-1,2],injuryRisk:0.05},
+]},
+{id:"minor_injury",prompt:"Je voelt lichte pijn opkomen tijdens het seizoen.",options:[
+{label:"Speel door de pijn",icon:"😬",perfDelta:[1,4],injuryRisk:0.3},
+{label:"Neem rust om te herstellen",icon:"🩹",perfDelta:[-4,-1],injuryRisk:0.02},
+]},
+{id:"trade_rumor",prompt:"Er gaan geruchten over een trade rond jouw naam.",options:[
+{label:"Vraag duidelijkheid van het management",icon:"🗣️",perfDelta:[-2,3]},
+{label:"Negeer het en focus op je spel",icon:"🎯",perfDelta:[1,5]},
+]},
+{id:"leadership",prompt:"Jongere teamgenoten kijken naar jou op als leider.",options:[
+{label:"Neem de leidersrol op je",icon:"🧠",perfDelta:[2,6]},
+{label:"Focus liever op je eigen spel",icon:"🎯",perfDelta:[0,3]},
+]},
+{id:"rivalry",prompt:"Een rivaliteit met een sterspeler van een ander team laait op.",options:[
+{label:"Ga de confrontatie aan",icon:"😤",perfDelta:[2,7]},
+{label:"Blijf professioneel en negeer het",icon:"😌",perfDelta:[0,2]},
+]},
+];
+const CONTRACT_OPTIONS=[
+{id:"resign",icon:"🤝",label:"Teken bij bij je huidige team"},
+{id:"testFA",icon:"🧳",label:"Test de vrije agent-markt"},
+{id:"discount",icon:"💍",label:"Neem korting bij een titelkandidaat"},
+{id:"demand",icon:"📣",label:"Eis een trade"},
+];
+// Contract length choices — shorter = more pressure/upside for growth this signing, longer = security but smaller bump, and a lower per-year rate.
+const CONTRACT_LENGTHS=[
+{years:2,label:"2 jaar — bewijsdrang, hogere druk",perfBonus:[1,4],salaryMult:1.06},
+{years:3,label:"3 jaar — balans tussen zekerheid en druk",perfBonus:[0,2],salaryMult:1.0},
+{years:4,label:"4 jaar — zekerheid voor de lange termijn",perfBonus:[-1,1],salaryMult:0.96},
+{years:5,label:"5 jaar max deal — volledige zekerheid",perfBonus:[-2,1],salaryMult:0.92},
+];
 
 function careerOverall(attrs,pos){
 const w=CAREER_POS_WEIGHTS[pos]||CAREER_POS_WEIGHTS.SF;
 const raw=CAREER_ATTRS.reduce((s,a)=>s+attrs[a.key]*w[a.key],0);
 return Math.round(raw);
-}
-function careerAgeMult(age){
-if(age<=22)return 0.68+(age-19)*0.08;
-if(age<=29)return 1.0;
-if(age<=33)return 1.0-(age-29)*0.035;
-return Math.max(0.35,1.0-4*0.035-(age-33)*0.09);
 }
 function careerRoll(min,max){return min+Math.random()*(max-min);}
 function pickRandom(arr){return arr[Math.floor(Math.random()*arr.length)];}
@@ -8405,6 +8436,62 @@ function draftLegendTrio(pool,excludeNames){
 const avail=pool.filter(l=>!(excludeNames||[]).includes(l.name));
 const shuffled=avail.slice().sort(()=>Math.random()-0.5);
 return shuffled.slice(0,3);
+}
+function freshTeamState(excludeName){
+const pool=excludeName?NBA_TEAMS_STATIC.filter(t=>t.name!==excludeName):NBA_TEAMS_STATIC;
+return{team:pickRandom(pool),strength:careerRoll(40,80)};
+}
+function teamTierLabel(strength){
+if(strength>=80)return"Titelkandidaat";
+if(strength>=65)return"Play-off team";
+if(strength>=48)return"Middenmoter";
+if(strength>=32)return"Rebuilding project";
+return"Tanking team";
+}
+function getTrainingOptions(){return CAREER_ATTRS.slice().sort(()=>Math.random()-0.5).slice(0,3);}
+function rollSeasonEvent(){
+if(Math.random()<0.55)return{kind:"choice",...pickRandom(CHOICE_EVENTS)};
+return{kind:"ambient",...pickRandom(CAREER_EVENTS)};
+}
+function makeContractOutcome(optId,curTeamState){
+const opt=CONTRACT_OPTIONS.find(o=>o.id===optId);
+let newTeamState=curTeamState;
+if(optId==="resign")newTeamState={...curTeamState,strength:Math.min(95,curTeamState.strength+careerRoll(2,7))};
+else if(optId==="testFA")newTeamState=freshTeamState(curTeamState.team.name);
+else if(optId==="discount")newTeamState={team:pickRandom(NBA_TEAMS_STATIC),strength:careerRoll(75,95)};
+else if(optId==="demand")newTeamState=freshTeamState(curTeamState.team.name);
+return{id:optId,icon:opt.icon,label:opt.label,newTeamState};
+}
+// ── Rookie-scale salary (millions/yr) for the first 4 seasons, before any negotiation — scales with draft ceiling, rises each year.
+function rookieScaleSalary(ceiling,yearIndex){
+const base=2+((ceiling-55)/40)*9;
+const mult=[1,1.08,1.17,1.3][yearIndex]||1.3;
+return Math.max(1,Math.round(base*mult*10)/10);
+}
+// ── Negotiated salary (millions/yr) for any post-rookie contract — driven by current true rating, deal type and chosen length.
+function negotiateSalary(trueRatingAtSigning,typeId,lengthMult){
+const marketValue=Math.pow(trueRatingAtSigning/99,2.2)*46;
+let mult=1;
+if(typeId==="discount")mult=0.62;
+else if(typeId==="demand")mult=1.05;
+else if(typeId==="testFA")mult=1.08;
+else if(typeId==="resign")mult=0.97+careerRoll(0,0.1);
+return Math.max(1.5,Math.round(marketValue*mult*lengthMult*10)/10);
+}
+function formatMoney(m){return"$"+m.toFixed(1)+"M";}
+// ── Growth model: true rating climbs toward the draft ceiling (fast early, flat mid-career, decline after 32), nudged each season.
+function growTrueRating(prev,ceiling,age,perfDelta){
+let rate;
+if(age<=21)rate=careerRoll(4,8);
+else if(age<=26)rate=careerRoll(2,5);
+else if(age<=29)rate=careerRoll(0,2);
+else if(age<=32)rate=careerRoll(-2,1);
+else if(age<=35)rate=careerRoll(-5,-1);
+else rate=careerRoll(-9,-3);
+let next=prev+rate+perfDelta;
+next=Math.min(ceiling+3,next);
+next=Math.max(30,next);
+return Math.round(next);
 }
 function shouldRetireCareer(age,rating){
 if(age>=39)return true;
@@ -8451,62 +8538,109 @@ const otherChampName=pickRandom(NBA_TEAMS_STATIC.filter(t=>t.conf===otherConf)).
 rounds.push({round:"NBA Finals",opponent:otherChampName,result:finalsRes.win?"win":"loss",gamesFor:finalsRes.gamesFor,gamesAgainst:finalsRes.gamesAgainst});
 return{made:true,rounds,champion:finalsRes.win,seed:mySeed};
 }
-// ── Simulate one season: rolls a random "vorm" event, team continuity/trade chance, full stat line, standings & playoffs.
-function simulateCareerSeason(player,age,teamState){
-let{team,strength}=teamState;
-if(Math.random()<0.08){team=pickRandom(NBA_TEAMS_STATIC);strength=careerRoll(35,88);}
-else{strength=Math.max(25,Math.min(95,strength+careerRoll(-6,6)));}
-const mult=careerAgeMult(age);
-const event=pickRandom(CAREER_EVENTS);
-const eventMod=careerRoll(event.mod[0],event.mod[1]);
-const rating=Math.max(30,Math.min(99,Math.round(player.overall*mult+eventMod+careerRoll(-3,3))));
+// ── Core season builder — shared by both the interactive (Standard) and auto-resolved (Quick) paths.
+// `pending` bundles whatever choices were made this season: {training,event,contract,nationalTeam,nationalFatigue}.
+function buildSeason(player,age,trueRatingBefore,teamStateBefore,pending,salary){
+const trainingDelta=pending.training?careerRoll(2,6):0;
+const eventDelta=pending.event?.perfDelta||0;
+const nationalDelta=pending.nationalTeam?careerRoll(1,4):0;
+const contractDelta=pending.contract?.perfBonus?careerRoll(pending.contract.perfBonus[0],pending.contract.perfBonus[1]):0;
+const perfDelta=trainingDelta+eventDelta+nationalDelta+contractDelta;
+const newTrue=growTrueRating(trueRatingBefore,player.overall,age,perfDelta);
+const seasonRating=Math.max(30,Math.min(99,Math.round(newTrue+careerRoll(-3,3))));
 let role="Bank",minutesFactor=0.35;
-if(rating>=88){role="Ster";minutesFactor=1.0;}
-else if(rating>=78){role="Starter";minutesFactor=0.82;}
-else if(rating>=65){role="Rotatie";minutesFactor=0.6;}
-const injuryGames=Math.random()<0.12?Math.round(careerRoll(8,28)):Math.round(careerRoll(0,6));
-const gp=Math.max(10,82-injuryGames);
+if(seasonRating>=88){role="Ster";minutesFactor=1.0;}
+else if(seasonRating>=78){role="Starter";minutesFactor=0.82;}
+else if(seasonRating>=65){role="Rotatie";minutesFactor=0.6;}
+let injuryGames=Math.random()<0.12?Math.round(careerRoll(8,28)):Math.round(careerRoll(0,6));
+if(pending.event?.extraInjury)injuryGames+=pending.event.extraInjury;
+if(pending.nationalTeam&&pending.nationalFatigue)injuryGames+=Math.round(careerRoll(5,12));
+const gp=Math.max(8,82-injuryGames);
 const pts=Math.round((player.attrs.sco/99)*minutesFactor*30*careerRoll(0.85,1.15)*10)/10;
 const reb=Math.round((player.attrs.reb/99)*minutesFactor*13*careerRoll(0.85,1.15)*10)/10;
 const ast=Math.round((player.attrs.plm/99)*minutesFactor*10*careerRoll(0.85,1.15)*10)/10;
 const stl=Math.round((player.attrs.def/99)*minutesFactor*2.2*careerRoll(0.8,1.2)*10)/10;
 const blk=Math.round(((player.attrs.def+player.attrs.ath)/198)*minutesFactor*1.8*careerRoll(0.8,1.2)*10)/10;
-const winsBase=41+((strength-55)/55)*30+((rating-75)/75)*12;
+let ts=teamStateBefore;
+if(pending.contract){ts=pending.contract.newTeamState;}
+else if(Math.random()<0.06){ts=freshTeamState(teamStateBefore.team.name);}
+else{ts={...teamStateBefore,strength:Math.max(25,Math.min(95,teamStateBefore.strength+careerRoll(-6,6)))};}
+const strength=ts.strength;
+const winsBase=41+((strength-55)/55)*30+((seasonRating-75)/75)*12;
 const wins=Math.max(9,Math.min(73,Math.round(winsBase+careerRoll(-4,4))));
 const losses=82-wins;
-const playoffs=simulatePlayoffs(team,strength,rating,wins);
+const playoffs=simulatePlayoffs(ts.team,strength,seasonRating,wins);
 const awards=[];
-const leagueAvg=75;
-if(rating>=leagueAvg+8&&Math.random()<0.55)awards.push("all-star");
-if(rating>=88&&Math.random()<0.35)awards.push("all-nba");
-if(rating>=95&&Math.random()<0.18)awards.push("mvp");
-if(player.attrs.def>=90&&rating>=85&&Math.random()<0.15)awards.push("dpoy");
+if(seasonRating>=83&&Math.random()<0.55)awards.push("all-star");
+if(seasonRating>=88&&Math.random()<0.35)awards.push("all-nba");
+if(seasonRating>=95&&Math.random()<0.18)awards.push("mvp");
+if(player.attrs.def>=90&&seasonRating>=85&&Math.random()<0.15)awards.push("dpoy");
 if(playoffs.champion)awards.push("championship");
-const season={age,team,wins,losses,seed:playoffs.seed,role,rating,gp,pts,reb,ast,stl,blk,event,awards,playoffs};
-return{season,teamState:{team,strength}};
+const teamTier=teamTierLabel(strength);
+const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,nationalTeam:!!pending.nationalTeam,awards,playoffs};
+return{season,newTrueRating:newTrue,newTeamState:ts};
+}
+// ── Auto-pick every choice for a season (used by Quick mode — no UI, just resolves). contractYearsLeft<=0 triggers a fresh negotiation.
+function autoPendingChoices(contractYearsLeft,curTeamState,curTrueRating){
+const pending={};
+if(contractYearsLeft<=0){
+const r=Math.random();
+const optId=r<0.55?"resign":r<0.75?"discount":r<0.9?"testFA":"demand";
+const base=makeContractOutcome(optId,curTeamState);
+const lenOpt=pickRandom(CONTRACT_LENGTHS);
+const salaryPerYear=negotiateSalary(curTrueRating,optId,lenOpt.salaryMult);
+pending.contract={...base,years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
+}
+const chosenTraining=pickRandom(getTrainingOptions());
+pending.training={key:chosenTraining.key,label:chosenTraining.label,icon:chosenTraining.icon};
+const evt=rollSeasonEvent();
+if(evt.kind==="choice"){
+const opt=pickRandom(evt.options);
+pending.event={icon:opt.icon,label:evt.prompt,choiceLabel:opt.label,perfDelta:careerRoll(opt.perfDelta[0],opt.perfDelta[1]),extraInjury:(opt.injuryRisk&&Math.random()<opt.injuryRisk)?Math.round(careerRoll(6,16)):0};
+}else{
+pending.event={icon:evt.icon,label:evt.label,perfDelta:careerRoll(evt.mod[0],evt.mod[1])};
+}
+if(curTrueRating>=83&&Math.random()<0.45){
+pending.nationalTeam=true;
+pending.nationalFatigue=Math.random()<0.2;
+}
+return pending;
 }
 function careerVerdict(score){
-if(score>=420)return{tier:"🐐 All-Time Great",color:"#f5a524"};
-if(score>=260)return{tier:"🏆 Hall of Famer",color:"#f5a524"};
-if(score>=150)return{tier:"⭐ Perennial All-Star",color:"#E8312A"};
+if(score>=520)return{tier:"🐐 Icoon",color:"#f5a524"};
+if(score>=400)return{tier:"👑 Legende",color:"#f5a524"};
+if(score>=300)return{tier:"🌟 Superster",color:"#f5a524"};
+if(score>=210)return{tier:"🥇 All-NBA Ster",color:"#E8312A"};
+if(score>=140)return{tier:"⭐ All-Star niveau",color:"#E8312A"};
 if(score>=80)return{tier:"💪 Solide starter",color:"#3498DB"};
 if(score>=35)return{tier:"🔄 Rotatiespeler",color:"#8E8E93"};
 return{tier:"📋 Journeyman",color:"#8E8E93"};
 }
-function computeCareerScore(seasons){
-let pts=0,reb=0,ast=0,gp=0,allStars=0,allNba=0,mvps=0,dpoys=0,champs=0,peak=0,playoffApps=0,finalsApps=0;
-seasons.forEach(s=>{
+// ── Folds the whole season log into one legacy score — including loyalty (longest single-team streak),
+// national caps, and a "ring chaser" bonus for a discount-contract signing that actually paid off.
+function computeCareerScore(seasons,voluntaryRetire){
+let pts=0,reb=0,ast=0,gp=0,allStars=0,allNba=0,mvps=0,dpoys=0,champs=0,peak=0,playoffApps=0,finalsApps=0,caps=0,earnings=0;
+let curStreak=0,maxStreak=0,lastTeam=null,ringChaseBonus=0;
+seasons.forEach((s,i)=>{
 pts+=s.pts*s.gp;reb+=s.reb*s.gp;ast+=s.ast*s.gp;gp+=s.gp;
+earnings+=s.salary||0;
 if(s.rating>peak)peak=s.rating;
 if(s.awards.includes("all-star"))allStars++;
 if(s.awards.includes("all-nba"))allNba++;
 if(s.awards.includes("mvp"))mvps++;
 if(s.awards.includes("dpoy"))dpoys++;
 if(s.awards.includes("championship"))champs++;
+if(s.nationalTeam)caps++;
 if(s.playoffs&&s.playoffs.made){playoffApps++;if(s.playoffs.rounds.some(r=>r.round==="NBA Finals"))finalsApps++;}
+if(lastTeam&&s.team.name===lastTeam)curStreak++;else curStreak=1;
+maxStreak=Math.max(maxStreak,curStreak);
+lastTeam=s.team.name;
+if(s.contract&&s.contract.id==="discount"&&seasons.slice(i,i+2).some(x=>x.awards.includes("championship")))ringChaseBonus+=25;
 });
-const score=Math.round(pts*0.015+reb*0.02+ast*0.03+allStars*15+allNba*20+mvps*60+dpoys*30+champs*35+peak*1.5+gp*0.04+playoffApps*5+finalsApps*10);
-return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast),gp,allStars,allNba,mvps,dpoys,champs,peak,playoffApps}};
+const loyaltyBonus=maxStreak*3;
+const voluntaryBonus=voluntaryRetire?12:0;
+const score=Math.round(pts*0.015+reb*0.02+ast*0.03+allStars*15+allNba*20+mvps*60+dpoys*30+champs*35+peak*1.5+gp*0.04+playoffApps*5+finalsApps*10+caps*4+loyaltyBonus+ringChaseBonus+voluntaryBonus);
+return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast),gp,allStars,allNba,mvps,dpoys,champs,peak,playoffApps,caps,maxStreak,earnings:Math.round(earnings*10)/10}};
 }
 
 // ── One season card (used in the live sim recap, retirement card and saved-career detail view) — full stat line + playoff bracket
@@ -8518,7 +8652,7 @@ return(
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
 <div>
 <div style={{color:WHITE,fontWeight:700,fontSize:13}}>{season.age}j · {season.team.name}</div>
-<div style={{color:GREY,fontSize:11}}>{season.team.conf} · {season.wins}-{season.losses}{season.seed&&season.seed<=8?` · seed #${season.seed}`:""} · {season.role}</div>
+<div style={{color:GREY,fontSize:11}}>{season.teamTier||season.team.conf} · {season.wins}-{season.losses}{season.seed&&season.seed<=8?` · seed #${season.seed}`:""} · {season.role}{season.salary?` · ${formatMoney(season.salary)}`:""}</div>
 </div>
 <div style={{textAlign:"right"}}>
 <div style={{color:RED,fontWeight:800,fontSize:16}}>{season.rating}</div>
@@ -8533,7 +8667,10 @@ return(
 </div>
 ))}
 </div>
-{season.event&&<div style={{color:"#f5a524",fontSize:11,marginBottom:6}}>{season.event.icon} {season.event.label}</div>}
+{season.contract&&<div style={{color:"#3498DB",fontSize:11,marginBottom:4}}>{season.contract.icon} {season.contract.label} · {season.contract.years}j · {formatMoney(season.contract.salaryPerYear)}/jr</div>}
+{season.training&&<div style={{color:GREY,fontSize:11,marginBottom:4}}>{season.training.icon} Trainingsfocus: {season.training.label}</div>}
+{season.event&&<div style={{color:"#f5a524",fontSize:11,marginBottom:4}}>{season.event.icon} {season.event.choiceLabel?`${season.event.choiceLabel} — ${season.event.label}`:season.event.label}</div>}
+{season.nationalTeam&&<div style={{color:"#27AE60",fontSize:11,marginBottom:6}}>🇺🇸 Nationaal team deze zomer</div>}
 {season.awards.filter(a=>a!=="championship").length>0&&(
 <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
 {season.awards.filter(a=>a!=="championship").map(a=>(<span key={a} style={{background:"#2C2C2E",color:WHITE,fontSize:10,fontWeight:700,borderRadius:8,padding:"3px 8px"}}>{awardLabels[a]}</span>))}
@@ -8557,17 +8694,18 @@ return(
 }
 
 // ── Retirement / share card
-function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,onDone}){
+function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,onDone}){
 return(
 <div style={{textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
 <div style={{fontSize:44,marginBottom:6}}>{(verdict.tier.split(" ")[0])}</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:20,marginBottom:2}}>{player.name}</div>
-<div style={{color:GREY,fontSize:13,marginBottom:10}}>{player.pos} · Gestopt op {retiredAge}</div>
-<div style={{color:verdict.color,fontWeight:800,fontSize:16,marginBottom:18}}>{verdict.tier}</div>
+<div style={{color:GREY,fontSize:13,marginBottom:10}}>{player.pos} · {voluntaryRetire?`Stopte zelf op ${retiredAge}, op eigen voorwaarden`:`Gestopt op ${retiredAge}`}</div>
+<div style={{color:verdict.color,fontWeight:800,fontSize:16,marginBottom:6}}>{verdict.tier}</div>
+{totals&&<div style={{color:"#27AE60",fontWeight:800,fontSize:20,marginBottom:18}}>💰 {formatMoney(totals.earnings)} verdiend</div>}
 {totals&&(
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
-{[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Play-offs",totals.playoffApps]].map(([lbl,val])=>(
+{[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Caps",totals.caps],["Play-offs",totals.playoffApps],["Langste tijd bij 1 team",totals.maxStreak+"j"]].map(([lbl,val])=>(
 <div key={lbl} style={{background:INPUTBG,borderRadius:10,padding:"10px 4px"}}>
 <div style={{color:WHITE,fontWeight:800,fontSize:16}}>{val}</div>
 <div style={{color:GREY,fontSize:9}}>{lbl}</div>
@@ -8590,7 +8728,7 @@ return(
 <div style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:12,padding:"10px 14px",marginBottom:8}}>
 <div onClick={onView} style={{flex:1,minWidth:0,cursor:"pointer"}}>
 <div style={{color:WHITE,fontWeight:700,fontSize:13}}>{career.playerName} <span style={{color:GREY,fontWeight:400}}>· {career.pos}</span></div>
-<div style={{color:GREY,fontSize:11}}>{career.verdict} · {(career.seasons||[]).length} seizoenen</div>
+<div style={{color:GREY,fontSize:11}}>{career.verdict} · {(career.seasons||[]).length} seizoenen{career.totalEarnings?` · ${formatMoney(career.totalEarnings)}`:""}</div>
 </div>
 <div style={{color:RED,fontWeight:800,fontSize:14}}>{career.careerScore}</div>
 {mine&&<button onClick={onDelete} style={{background:"transparent",border:"none",color:GREY,fontSize:15,cursor:"pointer",padding:"0 2px"}}>✕</button>}
@@ -8609,6 +8747,7 @@ return(
 <div style={{color:WHITE,fontWeight:800,fontSize:18}}>{career.playerName}</div>
 <div style={{color:GREY,fontSize:12}}>{career.pos} · {career.overall} OVR · {career.username}</div>
 <div style={{color:verdict.color,fontWeight:800,fontSize:15,marginTop:6}}>{career.verdict}</div>
+{career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:13,marginTop:4}}>💰 {formatMoney(career.totalEarnings)} verdiend</div>}
 </div>
 {(career.seasons||[]).map((s,i)=>(<CareerSeasonCard key={i} season={s}/>))}
 <button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:14}}>Sluiten</button>
@@ -8633,7 +8772,16 @@ const [player,setPlayer]=useState(null);
 const [seasons,setSeasons]=useState([]);
 const [simAge,setSimAge]=useState(19);
 const [teamState,setTeamState]=useState(null);
-const [decisionPending,setDecisionPending]=useState(false);
+const [trueRating,setTrueRating]=useState(0);
+const [peakRating,setPeakRating]=useState(0);
+const [voluntaryRetire,setVoluntaryRetire]=useState(false);
+const [contractYearsLeft,setContractYearsLeft]=useState(4);
+const [activeSalary,setActiveSalary]=useState(null);
+const [pendingContractBase,setPendingContractBase]=useState(null);
+const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|retireChoice|recap
+const [pendingSeason,setPendingSeason]=useState(null);
+const [trainingOptions,setTrainingOptions]=useState(null);
+const [currentEvent,setCurrentEvent]=useState(null);
 const [retired,setRetired]=useState(false);
 const [saved,setSaved]=useState(false);
 
@@ -8665,66 +8813,137 @@ setPlayer({name:draftName.trim()||"Naamloos Talent",pos:draftPos,attrs:newAttrs,
 setStage("modepick");
 }
 }
-function freshTeamState(excludeName){
-const pool=excludeName?NBA_TEAMS_STATIC.filter(t=>t.name!==excludeName):NBA_TEAMS_STATIC;
-return{team:pickRandom(pool),strength:careerRoll(40,80)};
-}
-function runQuickToEnd(startPlayer,initTs){
-let age=19,list=[],ts=initTs;
+
+// ── Quick mode: resolve every season (with auto-picked choices) straight through to retirement.
+function runQuickToEnd(startPlayer,initTs,startTrue){
+let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null;
 for(let i=0;i<20;i++){
-const{season,teamState:nextTs}=simulateCareerSeason(startPlayer,age,ts);
-ts=nextTs;
+const pending=autoPendingChoices(cyl,ts,trueR);
+if(pending.contract){salary=pending.contract.salaryPerYear;cyl=pending.contract.years;}
+const seasonSalary=salary!=null?salary:rookieScaleSalary(startPlayer.overall,Math.min(i,3));
+const{season,newTrueRating,newTeamState}=buildSeason(startPlayer,age,trueR,ts,pending,seasonSalary);
 list.push(season);
-if(shouldRetireCareer(age,season.rating))break;
+trueR=newTrueRating;peak=Math.max(peak,trueR);ts=newTeamState;
+cyl-=1;
+const hardForced=(age+1)>=39||((age+1)>=34&&trueR<50);
+const randForced=!hardForced&&(age+1)>=36&&Math.random()<0.4;
 age++;
+if(hardForced||randForced)break;
 }
-setSeasons(list);setSimAge(age);setTeamState(ts);setRetired(true);
+setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setRetired(true);
 }
 function beginSim(chosenMode){
 const initTs=freshTeamState(null);
-setTeamState(initTs);
-setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);
+const startTrue=Math.max(35,player.overall-Math.round(careerRoll(15,22)));
+setTeamState(initTs);setTrueRating(startTrue);setPeakRating(startTrue);
+setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);setVoluntaryRetire(false);
+setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);
+setPendingSeason(null);setSeasonStage(null);
 setStage("sim");
-if(chosenMode==="quick")runQuickToEnd(player,initTs);
+if(chosenMode==="quick")runQuickToEnd(player,initTs,startTrue);
 }
-function simulateChunk(curAge,curSeasons,curTeamState){
-let age=curAge,list=curSeasons.slice(),stop=false,ts=curTeamState;
-for(let i=0;i<2;i++){
-const{season,teamState:nextTs}=simulateCareerSeason(player,age,ts);
-ts=nextTs;
-list.push(season);
-age++;
-if(shouldRetireCareer(age,season.rating)){stop=true;break;}
+
+// ── Standard mode: interactive per-season flow — contract (when years run out) → length/salary → training focus → season event → national team → resolve.
+function startSeasonFlow(){
+setPendingSeason({});
+if(contractYearsLeft<=0&&teamState){setSeasonStage("contract");}
+else{beginTrainingStage();}
 }
-setSeasons(list);setSimAge(age);setTeamState(ts);
-if(stop)setRetired(true);else setDecisionPending(true);
+function beginTrainingStage(){setTrainingOptions(getTrainingOptions());setSeasonStage("training");}
+function chooseContractOption(optId){
+const base=makeContractOutcome(optId,teamState);
+setPendingContractBase(base);
+setSeasonStage("contractLength");
 }
-function resolveDecision(choice){
-setDecisionPending(false);
-let ts=teamState;
-if(choice==="move"){
-ts=freshTeamState(teamState.team.name);
-setTeamState(ts);
+function chooseContractLength(lenOpt){
+const base=pendingContractBase;
+const salaryPerYear=negotiateSalary(trueRating,base.id,lenOpt.salaryMult);
+const contract={...base,years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
+setPendingSeason(p=>({...(p||{}),contract}));
+setActiveSalary(salaryPerYear);
+setContractYearsLeft(lenOpt.years);
+setPendingContractBase(null);
+beginTrainingStage();
 }
-simulateChunk(simAge,seasons,ts);
+function chooseTraining(attrDef){
+const training={key:attrDef.key,label:attrDef.label,icon:attrDef.icon};
+const evt=rollSeasonEvent();
+if(evt.kind==="choice"){
+setPendingSeason(p=>({...(p||{}),training}));
+setCurrentEvent(evt);
+setSeasonStage("event");
+return;
 }
+const eventObj={icon:evt.icon,label:evt.label,perfDelta:careerRoll(evt.mod[0],evt.mod[1])};
+setPendingSeason(p=>({...(p||{}),training,event:eventObj}));
+afterEventStage({training,event:eventObj});
+}
+function chooseEventOption(opt){
+const perfDelta=careerRoll(opt.perfDelta[0],opt.perfDelta[1]);
+const extraInjury=(opt.injuryRisk&&Math.random()<opt.injuryRisk)?Math.round(careerRoll(6,16)):0;
+const eventObj={icon:opt.icon,label:currentEvent.prompt,choiceLabel:opt.label,perfDelta,extraInjury};
+setPendingSeason(p=>({...(p||{}),event:eventObj}));
+setCurrentEvent(null);
+afterEventStage({event:eventObj});
+}
+function afterEventStage(partial){
+partial=partial||{};
+if(trueRating>=83&&Math.random()<0.45){
+setPendingSeason(p=>({...(p||{}),...partial}));
+setSeasonStage("national");
+}else{
+doResolveSeasonWith({...(pendingSeason||{}),...partial});
+}
+}
+function chooseNational(accept){
+if(accept){
+const fatigue=Math.random()<0.2;
+const partial={nationalTeam:true,nationalFatigue:fatigue};
+setPendingSeason(p=>({...(p||{}),...partial}));
+doResolveSeasonWith({...(pendingSeason||{}),...partial});
+}else{
+doResolveSeason();
+}
+}
+function doResolveSeason(){doResolveSeasonWith(pendingSeason||{});}
+function doResolveSeasonWith(pending){
+const age=simAge;
+const seasonSalary=activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3));
+const{season,newTrueRating,newTeamState}=buildSeason(player,age,trueRating,teamState,pending,seasonSalary);
+const newSeasons=[...seasons,season];
+const newPeak=Math.max(peakRating,newTrueRating);
+setSeasons(newSeasons);setTrueRating(newTrueRating);setPeakRating(newPeak);setTeamState(newTeamState);setSimAge(age+1);setPendingSeason(null);
+setContractYearsLeft(y=>y-1);
+const hardForced=(age+1)>=39||((age+1)>=34&&newTrueRating<50);
+let offerChoice=false,forced=hardForced;
+if(!hardForced){
+if((age+1)>=34&&newTrueRating<newPeak-10)offerChoice=true;
+else if((age+1)>=36)offerChoice=true;
+}
+if(forced){setRetired(true);setSeasonStage("recap");}
+else if(offerChoice){setSeasonStage("retireChoice");}
+else{setSeasonStage("recap");}
+}
+function continueCareer(){setSeasonStage(null);startSeasonFlow();}
+function retireNow(){setVoluntaryRetire(true);setRetired(true);setSeasonStage("recap");}
+
 useEffect(()=>{
-if(stage==="sim"&&mode==="standard"&&seasons.length===0&&!decisionPending&&!retired&&player&&teamState){
-simulateChunk(19,[],teamState);
+if(stage==="sim"&&mode==="standard"&&seasons.length===0&&!seasonStage&&!retired&&player&&teamState){
+startSeasonFlow();
 }
 // eslint-disable-next-line
 },[stage,mode]);
 useEffect(()=>{
 if(retired&&!saved&&player&&seasons.length){
-const{score,totals}=computeCareerScore(seasons);
+const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
 const verdict=careerVerdict(score);
-onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge});
+onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge,voluntaryRetire,totalEarnings:totals.earnings});
 setSaved(true);
 }
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setDecisionPending(false);setRetired(false);setTeamState(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);}
 
 if(stage==="hub"){
 return(
@@ -8795,7 +9014,8 @@ return(
 <div style={{textAlign:"center"}}>
 <div style={{fontSize:44,marginBottom:10}}>🏀</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:19,marginBottom:4}}>{player.name}</div>
-<div style={{color:GREY,fontSize:13,marginBottom:16}}>{player.pos} · {player.overall} OVR</div>
+<div style={{color:GREY,fontSize:13,marginBottom:4}}>{player.pos} · {player.overall} OVR plafond</div>
+<div style={{color:GREY,fontSize:11,marginBottom:16}}>Je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:24}}>
 {CAREER_ATTRS.map(a=>(
 <div key={a.key} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px"}}>
@@ -8806,27 +9026,19 @@ return(
 ))}
 </div>
 <button onClick={()=>beginSim("quick")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
-<button onClick={()=>beginSim("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (keuzes elke 2 seizoenen)</button>
+<button onClick={()=>beginSim("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
 <button onClick={backToHub} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer"}}>Annuleren</button>
 </div>
 );
 }
 
 if(stage==="sim"){
-if(!retired){
-if(mode==="standard"&&decisionPending){
-const last2=seasons.slice(-2);
-const curTeamName=teamState?.team?.name||last2[last2.length-1]?.team?.name;
-return(
-<div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN {simAge-2}–{simAge-1} · LEEFTIJD {simAge}</div>
-{last2.map((s,i)=>(<CareerSeasonCard key={i} season={s}/>))}
-<div style={{color:WHITE,fontSize:13,fontWeight:600,margin:"18px 0 10px",textAlign:"center"}}>Wat nu?</div>
-<button onClick={()=>resolveDecision("stay")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>🤝 Bijtekenen bij {curTeamName}</button>
-<button onClick={()=>resolveDecision("move")} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>✈️ Naar een nieuwe club</button>
-</div>
-);
+if(retired){
+const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
+const verdict=careerVerdict(score);
+return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} onDone={backToHub}/>);
 }
+if(mode==="quick"){
 return(
 <div style={{textAlign:"center",padding:"60px 0"}}>
 <div style={{fontSize:36,marginBottom:10}}>🏀</div>
@@ -8834,9 +9046,107 @@ return(
 </div>
 );
 }
-const{score,totals}=computeCareerScore(seasons);
-const verdict=careerVerdict(score);
-return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} onDone={backToHub}/>);
+if(!seasonStage&&seasons.length===0){
+return(
+<div style={{textAlign:"center",padding:"60px 0"}}>
+<div style={{fontSize:36,marginBottom:10}}>🏀</div>
+<div style={{color:GREY,fontSize:13}}>Carrière wordt gesimuleerd...</div>
+</div>
+);
+}
+if(seasonStage==="contract"){
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTONDERHANDELING · LEEFTIJD {simAge}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je contract bij {teamState.team.name} loopt af. Wat nu?</div>
+{CONTRACT_OPTIONS.map(o=>(
+<div key={o.id} onClick={()=>chooseContractOption(o.id)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{fontSize:20}}>{o.icon}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{o.label}</div>
+</div>
+))}
+</div>
+);
+}
+if(seasonStage==="contractLength"&&pendingContractBase){
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTDUUR & SALARIS · LEEFTIJD {simAge}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>{pendingContractBase.icon} {pendingContractBase.label} — voor hoelang?</div>
+{CONTRACT_LENGTHS.map(lo=>{
+const preview=negotiateSalary(trueRating,pendingContractBase.id,lo.salaryMult);
+return(
+<div key={lo.years} onClick={()=>chooseContractLength(lo)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{lo.label}</div>
+<div style={{color:GREY,fontSize:11}}>Totaal {formatMoney(preview*lo.years)} over {lo.years} jaar</div>
+</div>
+<div style={{color:"#27AE60",fontWeight:800,fontSize:15,whiteSpace:"nowrap"}}>{formatMoney(preview)}/jr</div>
+</div>
+);
+})}
+</div>
+);
+}
+if(seasonStage==="training"){
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PRESEASON · LEEFTIJD {simAge}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Waar focus je je training op dit seizoen?</div>
+{(trainingOptions||[]).map(a=>(
+<div key={a.key} onClick={()=>chooseTraining(a)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{fontSize:20}}>{a.icon}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{a.label}</div>
+</div>
+))}
+</div>
+);
+}
+if(seasonStage==="event"&&currentEvent){
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>SEIZOENSMOMENT · LEEFTIJD {simAge}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{currentEvent.prompt}</div>
+{currentEvent.options.map((o,i)=>(
+<div key={i} onClick={()=>chooseEventOption(o)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{fontSize:20}}>{o.icon}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{o.label}</div>
+</div>
+))}
+</div>
+);
+}
+if(seasonStage==="national"){
+return(
+<div style={{textAlign:"center"}}>
+<div style={{fontSize:36,marginBottom:10}}>🇺🇸</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>NATIONAAL TEAM · LEEFTIJD {simAge}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>Je bent opgeroepen voor het nationale team deze zomer. Doe je mee?</div>
+<button onClick={()=>chooseNational(true)} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>🔥 Speel mee</button>
+<button onClick={()=>chooseNational(false)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>😌 Rust uit deze zomer</button>
+</div>
+);
+}
+if(seasonStage==="retireChoice"){
+const last=seasons[seasons.length-1];
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>EINDE CARRIÈRE IN ZICHT · LEEFTIJD {simAge}</div>
+{last&&<CareerSeasonCard season={last}/>}
+<div style={{color:WHITE,fontSize:13,fontWeight:600,margin:"18px 0 10px",textAlign:"center"}}>Ga je door, of stop je nu?</div>
+<button onClick={continueCareer} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>💪 Nog een seizoen proberen</button>
+<button onClick={retireNow} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>🏁 Stop nu, op eigen voorwaarden</button>
+</div>
+);
+}
+const last=seasons[seasons.length-1];
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN AFGEROND · LEEFTIJD {simAge-1}</div>
+{last&&<CareerSeasonCard season={last}/>}
+<button onClick={continueCareer} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Volgende seizoen ▸</button>
+</div>
+);
 }
 
 return null;

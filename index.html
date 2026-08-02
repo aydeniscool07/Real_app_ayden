@@ -8500,43 +8500,79 @@ if(age>=36)return Math.random()<0.4;
 return false;
 }
 // ── Simulate the other ~14 teams in a conference so we can rank & seed the player's team.
-function simulateConferenceStandings(conf,myTeamName,myWins){
-const others=NBA_TEAMS_STATIC.filter(t=>t.conf===conf&&t.name!==myTeamName).map(t=>({name:t.name,wins:Math.round(careerRoll(24,58))}));
-return[{name:myTeamName,wins:myWins},...others].sort((a,b)=>b.wins-a.wins);
-}
-function simulateSeriesResult(edge,teamStrength,rating){
-const winProb=Math.max(0.12,Math.min(0.88,0.5+edge+((teamStrength-50)/280)+((rating-80)/220)));
+// Standard 8-team bracket reseeding order: adjacent pairs here are round-1 matchups (1v8, 4v5, 2v7, 3v6);
+// adjacent WINNERS meet next round, giving the familiar top-half/bottom-half bracket shape.
+const BRACKET_ORDER=[1,8,4,5,2,7,3,6];
+function seriesWinProb(edge){return Math.max(0.1,Math.min(0.9,0.5+edge));}
+function resolveSeries(winProb){
 const win=Math.random()<winProb;
 const closeness=Math.max(0,1-Math.abs(winProb-0.5)*1.6);
 const loserGames=Math.max(0,Math.min(3,Math.round(careerRoll(1,4)*closeness)));
 return{win,gamesFor:win?4:loserGames,gamesAgainst:win?loserGames:4};
 }
-// ── Full round-by-round playoff bracket for the player's team this season.
-function simulatePlayoffs(team,teamStrength,rating,wins){
-const standings=simulateConferenceStandings(team.conf,team.name,wins);
-const mySeedIdx=standings.findIndex(t=>t.name===team.name);
-const mySeed=mySeedIdx+1;
-if(mySeed>8)return{made:false,rounds:[],champion:false,seed:mySeed};
-let remainingOpponents=standings.slice(0,8).filter((_,i)=>i!==mySeedIdx).map(t=>t.name);
+// ── Build an 8-seed playoff field for a conference. Pass myTeamName/myWins/myStrength to include the player's team; omit for a fully neutral (other-conference) field.
+function buildConferenceField(conf,myTeamName,myWins,myStrength){
+const others=NBA_TEAMS_STATIC.filter(t=>t.conf===conf&&t.name!==myTeamName).map(t=>({name:t.name,wins:Math.round(careerRoll(24,58)),strength:careerRoll(30,90)}));
+const all=myTeamName?[{name:myTeamName,wins:myWins,strength:myStrength,isMine:true},...others]:others;
+all.sort((a,b)=>b.wins-a.wins);
+return all.slice(0,8).map((t,i)=>({...t,seed:i+1}));
+}
+// ── Simulate a full 8-team single-elimination conference bracket (3 rounds) using fixed bracket-order reseeding.
+function simulateConferenceBracket(field,myRating){
+const bySeed={};field.forEach(t=>{bySeed[t.seed]=t;});
+let positions=BRACKET_ORDER.map(s=>bySeed[s]).filter(Boolean);
 const roundNames=["Eerste ronde","Halve finale conf.","Conferencefinale"];
 const rounds=[];
-for(let i=0;i<3;i++){
-if(!remainingOpponents.length)break;
-const oppIdx=Math.floor(Math.random()*remainingOpponents.length);
-const opponent=remainingOpponents[oppIdx];
-remainingOpponents=remainingOpponents.filter((_,idx)=>idx!==oppIdx);
-const edge=(9-mySeed)*0.055-i*0.045;
-const res=simulateSeriesResult(edge,teamStrength,rating);
-rounds.push({round:roundNames[i],opponent,result:res.win?"win":"loss",gamesFor:res.gamesFor,gamesAgainst:res.gamesAgainst});
-if(!res.win)return{made:true,rounds,champion:false,seed:mySeed};
+for(let r=0;r<3;r++){
+const matchups=[];
+const winners=[];
+for(let i=0;i<positions.length;i+=2){
+const a=positions[i],b=positions[i+1];
+if(!a||!b)continue;
+const seedDiff=b.seed-a.seed;
+const strengthDiff=a.strength-b.strength;
+let edge=seedDiff*0.045+strengthDiff/300+careerRoll(-0.03,0.03);
+if(a.isMine)edge+=(myRating-75)/220;
+if(b.isMine)edge-=(myRating-75)/220;
+const res=resolveSeries(seriesWinProb(edge));
+const winner=res.win?a:b;
+matchups.push({round:roundNames[r],aSeed:a.seed,aName:a.name,bSeed:b.seed,bName:b.name,winnerSeed:winner.seed,winnerName:winner.name,gamesFor:res.win?res.gamesFor:res.gamesAgainst,gamesAgainst:res.win?res.gamesAgainst:res.gamesFor,mineInvolved:!!(a.isMine||b.isMine),mineWon:a.isMine?res.win:(b.isMine?!res.win:null)});
+winners.push(winner);
 }
-const otherConf=team.conf==="East"?"West":"East";
-const otherStrength=careerRoll(35,90);
-const finalsEdge=(otherStrength-teamStrength)/-150;
-const finalsRes=simulateSeriesResult(finalsEdge,teamStrength,rating);
-const otherChampName=pickRandom(NBA_TEAMS_STATIC.filter(t=>t.conf===otherConf)).name;
-rounds.push({round:"NBA Finals",opponent:otherChampName,result:finalsRes.win?"win":"loss",gamesFor:finalsRes.gamesFor,gamesAgainst:finalsRes.gamesAgainst});
-return{made:true,rounds,champion:finalsRes.win,seed:mySeed};
+rounds.push({name:roundNames[r],matchups});
+positions=winners;
+}
+return{rounds,champion:positions[0]};
+}
+function simulateFinals(westChamp,eastChamp,myRating){
+const strengthDiff=westChamp.strength-eastChamp.strength;
+let edge=strengthDiff/300+careerRoll(-0.03,0.03);
+if(westChamp.isMine)edge+=(myRating-75)/220;
+if(eastChamp.isMine)edge-=(myRating-75)/220;
+const res=resolveSeries(seriesWinProb(edge));
+const winner=res.win?westChamp:eastChamp;
+return{aName:westChamp.name,bName:eastChamp.name,winnerName:winner.name,gamesFor:res.win?res.gamesFor:res.gamesAgainst,gamesAgainst:res.win?res.gamesAgainst:res.gamesFor,mineInvolved:!!(westChamp.isMine||eastChamp.isMine),mineWon:westChamp.isMine?res.win:(eastChamp.isMine?!res.win:null)};
+}
+// ── Full-season playoff picture: both conference brackets (proper seeding) plus the Finals, from the player's perspective.
+function simulateSeasonPlayoffs(myTeam,myStrength,myRating,myWins){
+const myField=buildConferenceField(myTeam.conf,myTeam.name,myWins,myStrength);
+const myEntry=myField.find(t=>t.isMine);
+if(!myEntry)return{made:false,seed:null};
+const myBracket=simulateConferenceBracket(myField,myRating);
+const otherConf=myTeam.conf==="East"?"West":"East";
+const otherField=buildConferenceField(otherConf,null,0,0);
+const otherBracket=simulateConferenceBracket(otherField,0);
+const finals=myTeam.conf==="West"
+?simulateFinals(myBracket.champion,otherBracket.champion,myRating)
+:simulateFinals(otherBracket.champion,myBracket.champion,myRating);
+let eliminatedRoundIndex=null;
+for(let i=0;i<3;i++){
+const m=myBracket.rounds[i].matchups.find(x=>x.mineInvolved);
+if(m&&!m.mineWon){eliminatedRoundIndex=i;break;}
+}
+if(eliminatedRoundIndex===null&&!finals.mineInvolved)eliminatedRoundIndex=2; // safety net, shouldn't normally trigger
+if(eliminatedRoundIndex===null&&!finals.mineWon)eliminatedRoundIndex=3;
+return{made:true,seed:myEntry.seed,myConf:myTeam.conf,otherConf,myBracket,otherBracket,finals,champion:!!finals.mineWon,eliminatedRoundIndex};
 }
 // ── Core season builder — shared by both the interactive (Standard) and auto-resolved (Quick) paths.
 // `pending` bundles whatever choices were made this season: {training,event,contract,nationalTeam,nationalFatigue}.
@@ -8569,7 +8605,15 @@ const strength=ts.strength;
 const winsBase=41+((strength-55)/55)*30+((seasonRating-75)/75)*12;
 const wins=Math.max(9,Math.min(73,Math.round(winsBase+careerRoll(-4,4))));
 const losses=82-wins;
-const playoffs=simulatePlayoffs(ts.team,strength,seasonRating,wins);
+const playoffs=simulateSeasonPlayoffs(ts.team,strength,seasonRating,wins);
+if(playoffs.made){
+const attachStats=m=>{
+if(!m.mineInvolved)return m;
+return{...m,ppg:Math.round(pts*careerRoll(0.88,1.28)*10)/10,rpg:Math.round(reb*careerRoll(0.85,1.25)*10)/10,apg:Math.round(ast*careerRoll(0.85,1.25)*10)/10};
+};
+playoffs.myBracket={...playoffs.myBracket,rounds:playoffs.myBracket.rounds.map(r=>({...r,matchups:r.matchups.map(attachStats)}))};
+playoffs.finals=attachStats(playoffs.finals);
+}
 const awards=[];
 if(seasonRating>=83&&Math.random()<0.55)awards.push("all-star");
 if(seasonRating>=88&&Math.random()<0.35)awards.push("all-nba");
@@ -8631,7 +8675,7 @@ if(s.awards.includes("mvp"))mvps++;
 if(s.awards.includes("dpoy"))dpoys++;
 if(s.awards.includes("championship"))champs++;
 if(s.nationalTeam)caps++;
-if(s.playoffs&&s.playoffs.made){playoffApps++;if(s.playoffs.rounds.some(r=>r.round==="NBA Finals"))finalsApps++;}
+if(s.playoffs&&s.playoffs.made){playoffApps++;if(s.playoffs.finals&&s.playoffs.finals.mineInvolved)finalsApps++;}
 if(lastTeam&&s.team.name===lastTeam)curStreak++;else curStreak=1;
 maxStreak=Math.max(maxStreak,curStreak);
 lastTeam=s.team.name;
@@ -8647,6 +8691,8 @@ return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast)
 function CareerSeasonCard({season}){
 const awardLabels={"all-star":"⭐ All-Star","all-nba":"🥇 All-NBA","mvp":"👑 MVP","dpoy":"🛡️ DPOY"};
 const po=season.playoffs;
+const [showBracket,setShowBracket]=useState(false);
+const myPath=po&&po.made?[...po.myBracket.rounds.map(r=>r.matchups.find(m=>m.mineInvolved)).filter(Boolean),...(po.finals&&po.finals.mineInvolved?[{...po.finals,round:"NBA Finals"}]:[])]:[];
 return(
 <div style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:10}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
@@ -8678,20 +8724,105 @@ return(
 )}
 {po&&(
 <div style={{borderTop:`1px solid ${DIVIDER}`,paddingTop:8,marginTop:2}}>
-<div style={{color:GREY,fontSize:9,fontWeight:700,letterSpacing:1,marginBottom:4}}>PLAY-OFFS</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+<div style={{color:GREY,fontSize:9,fontWeight:700,letterSpacing:1}}>PLAY-OFFS{po.made&&po.seed?` · SEED #${po.seed}`:""}</div>
+{po.made&&<button onClick={()=>setShowBracket(true)} style={{background:"transparent",border:`1px solid ${DIVIDER}`,color:GREY,fontSize:9,fontWeight:700,borderRadius:6,padding:"2px 8px",cursor:"pointer"}}>BRACKET</button>}
+</div>
 {!po.made&&<div style={{color:GREY,fontSize:11}}>Net niet gehaald</div>}
-{po.made&&po.rounds.map((r,i)=>(
+{po.made&&myPath.map((r,i)=>(
 <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:2}}>
-<span style={{color:GREY}}>{r.round} vs {r.opponent}</span>
-<span style={{color:r.result==="win"?"#27AE60":RED,fontWeight:700}}>{r.result==="win"?"W":"L"} {r.gamesFor}-{r.gamesAgainst}</span>
+<span style={{color:GREY}}>{r.round} vs {r.aName===season.team.name?r.bName:r.aName}</span>
+<span style={{color:r.mineWon?"#27AE60":RED,fontWeight:700}}>{r.mineWon?"W":"L"} {r.gamesFor}-{r.gamesAgainst}</span>
 </div>
 ))}
 {po.made&&po.champion&&<div style={{color:"#f5a524",fontWeight:800,fontSize:12,marginTop:4}}>🏆 NBA KAMPIOEN</div>}
 </div>
 )}
+{showBracket&&<PlayoffBracketModal season={season} onClose={()=>setShowBracket(false)}/>}
 </div>
 );
 }
+
+// ── Retirement / share card
+// ── Visual playoff bracket — mirrors the classic two-conference layout, but stacked vertically for mobile.
+// My conference's matchups render as full boxes (highlighted where I'm involved, with my PPG/RPG/APG for that round);
+// the other conference renders condensed underneath for context. revealedRounds gates how much is shown (for the live round-by-round reveal).
+function PlayoffBracketView({playoffs,revealedRounds=4}){
+if(!playoffs||!playoffs.made){
+return<div style={{textAlign:"center",padding:"20px 0",color:GREY,fontSize:13}}>Net niet gehaald dit seizoen.</div>;
+}
+const roundLabels=["Eerste ronde","Halve finale conf.","Conferencefinale"];
+return(
+<div>
+{[0,1,2].map(i=>{
+if(i>=revealedRounds)return null;
+const myR=playoffs.myBracket.rounds[i];
+const otherR=playoffs.otherBracket.rounds[i];
+const myMatch=myR.matchups.find(m=>m.mineInvolved);
+return(
+<div key={i} style={{marginBottom:16}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>{roundLabels[i].toUpperCase()} · {playoffs.myConf.toUpperCase()}</div>
+{myR.matchups.map((m,mi)=>(
+<div key={mi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:m.mineInvolved?"#241010":"#141414",border:m.mineInvolved?`1px solid ${RED}55`:"1px solid transparent",borderRadius:8,padding:"7px 10px",marginBottom:4}}>
+<span style={{color:m.winnerSeed===m.aSeed?WHITE:GREY,fontSize:11,fontWeight:m.winnerSeed===m.aSeed?700:400,flex:1}}>#{m.aSeed} {m.aName}</span>
+<span style={{color:GREY,fontSize:10,padding:"0 8px"}}>{m.gamesFor}-{m.gamesAgainst}</span>
+<span style={{color:m.winnerSeed===m.bSeed?WHITE:GREY,fontSize:11,fontWeight:m.winnerSeed===m.bSeed?700:400,flex:1,textAlign:"right"}}>{m.bName} #{m.bSeed}</span>
+</div>
+))}
+{myMatch&&(
+<div style={{display:"flex",justifyContent:"space-around",background:INPUTBG,borderRadius:8,padding:"8px",marginTop:4,marginBottom:6}}>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.ppg}</div><div style={{color:GREY,fontSize:8}}>PPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.rpg}</div><div style={{color:GREY,fontSize:8}}>RPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.apg}</div><div style={{color:GREY,fontSize:8}}>APG</div></div>
+</div>
+)}
+<div style={{color:"#666",fontSize:9,fontWeight:700,letterSpacing:1,margin:"8px 0 4px"}}>{roundLabels[i].toUpperCase()} · {playoffs.otherConf.toUpperCase()}</div>
+{otherR.matchups.map((m,mi)=>(
+<div key={mi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 10px",marginBottom:2}}>
+<span style={{color:m.winnerSeed===m.aSeed?"#999":"#555",fontSize:10,flex:1}}>#{m.aSeed} {m.aName}</span>
+<span style={{color:"#555",fontSize:9,padding:"0 8px"}}>{m.gamesFor}-{m.gamesAgainst}</span>
+<span style={{color:m.winnerSeed===m.bSeed?"#999":"#555",fontSize:10,flex:1,textAlign:"right"}}>{m.bName} #{m.bSeed}</span>
+</div>
+))}
+</div>
+);
+})}
+{revealedRounds>=4&&playoffs.finals&&(
+<div>
+<div style={{color:"#f5a524",fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:6,textAlign:"center"}}>🏆 NBA FINALS</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:playoffs.finals.mineInvolved?"#2a1a08":"#141414",border:"1px solid #f5a52455",borderRadius:10,padding:"12px 14px",marginBottom:6}}>
+<span style={{color:playoffs.finals.winnerName===playoffs.finals.aName?WHITE:GREY,fontWeight:700,fontSize:13,flex:1}}>{playoffs.finals.aName}</span>
+<span style={{color:GREY,fontSize:11,padding:"0 8px"}}>{playoffs.finals.gamesFor}-{playoffs.finals.gamesAgainst}</span>
+<span style={{color:playoffs.finals.winnerName===playoffs.finals.bName?WHITE:GREY,fontWeight:700,fontSize:13,flex:1,textAlign:"right"}}>{playoffs.finals.bName}</span>
+</div>
+{playoffs.finals.mineInvolved&&(
+<div style={{display:"flex",justifyContent:"space-around",background:INPUTBG,borderRadius:8,padding:"8px",marginBottom:8}}>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.ppg}</div><div style={{color:GREY,fontSize:8}}>PPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.rpg}</div><div style={{color:GREY,fontSize:8}}>RPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.apg}</div><div style={{color:GREY,fontSize:8}}>APG</div></div>
+</div>
+)}
+{playoffs.champion&&<div style={{textAlign:"center",color:"#f5a524",fontWeight:800,fontSize:15}}>🏆 NBA KAMPIOEN!</div>}
+</div>
+)}
+</div>
+);
+}
+// ── Full bracket in a bottom-sheet modal (used from any saved/completed season card).
+function PlayoffBracketModal({season,onClose}){
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:410}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:2,textAlign:"center"}}>{season.team.name} · {season.age}j</div>
+<div style={{color:GREY,fontSize:11,marginBottom:16,textAlign:"center"}}>Play-off bracket</div>
+<PlayoffBracketView playoffs={season.playoffs} revealedRounds={4}/>
+<button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:8}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
 
 // ── Retirement / share card
 function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,onDone}){
@@ -8778,7 +8909,9 @@ const [voluntaryRetire,setVoluntaryRetire]=useState(false);
 const [contractYearsLeft,setContractYearsLeft]=useState(4);
 const [activeSalary,setActiveSalary]=useState(null);
 const [pendingContractBase,setPendingContractBase]=useState(null);
-const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|retireChoice|recap
+const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|playoffs|retireChoice|recap
+const [revealedRounds,setRevealedRounds]=useState(0);
+const [pendingSeasonEnd,setPendingSeasonEnd]=useState(null);
 const [pendingSeason,setPendingSeason]=useState(null);
 const [trainingOptions,setTrainingOptions]=useState(null);
 const [currentEvent,setCurrentEvent]=useState(null);
@@ -8920,8 +9053,20 @@ if(!hardForced){
 if((age+1)>=34&&newTrueRating<newPeak-10)offerChoice=true;
 else if((age+1)>=36)offerChoice=true;
 }
-if(forced){setRetired(true);setSeasonStage("recap");}
+if(season.playoffs&&season.playoffs.made){
+setRevealedRounds(0);
+setPendingSeasonEnd({forced,offerChoice});
+setSeasonStage("playoffs");
+}else if(forced){setRetired(true);setSeasonStage("recap");}
 else if(offerChoice){setSeasonStage("retireChoice");}
+else{setSeasonStage("recap");}
+}
+function revealNextRound(){setRevealedRounds(r=>r+1);}
+function finishBracketViewing(){
+const info=pendingSeasonEnd||{};
+setPendingSeasonEnd(null);
+if(info.forced){setRetired(true);setSeasonStage("recap");}
+else if(info.offerChoice){setSeasonStage("retireChoice");}
 else{setSeasonStage("recap");}
 }
 function continueCareer(){setSeasonStage(null);startSeasonFlow();}
@@ -8943,7 +9088,7 @@ setSaved(true);
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9124,6 +9269,22 @@ return(
 <div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>Je bent opgeroepen voor het nationale team deze zomer. Doe je mee?</div>
 <button onClick={()=>chooseNational(true)} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>🔥 Speel mee</button>
 <button onClick={()=>chooseNational(false)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>😌 Rust uit deze zomer</button>
+</div>
+);
+}
+if(seasonStage==="playoffs"){
+const last=seasons[seasons.length-1];
+const po=last.playoffs;
+const maxRounds=po.eliminatedRoundIndex!=null?po.eliminatedRoundIndex+1:4;
+const roundBtnLabel=["Simuleer Eerste Ronde ▸","Simuleer Halve Finale ▸","Simuleer Conferencefinale ▸","Simuleer NBA Finals ▸"][revealedRounds];
+const done=revealedRounds>=maxRounds;
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PLAY-OFFS · {last.team.name} · SEED #{po.seed}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je hebt de play-offs gehaald! 🏀</div>
+<PlayoffBracketView playoffs={po} revealedRounds={revealedRounds}/>
+{!done&&<button onClick={revealNextRound} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>{roundBtnLabel}</button>}
+{done&&<button onClick={finishBracketViewing} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Ga verder met carrière ▸</button>}
 </div>
 );
 }

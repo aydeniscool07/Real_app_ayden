@@ -8747,64 +8747,109 @@ return(
 // ── Visual playoff bracket — mirrors the classic two-conference layout, but stacked vertically for mobile.
 // My conference's matchups render as full boxes (highlighted where I'm involved, with my PPG/RPG/APG for that round);
 // the other conference renders condensed underneath for context. revealedRounds gates how much is shown (for the live round-by-round reveal).
+// ── Bracket geometry constants (all boxes/lines positioned by computed coordinates, not CSS flex guessing)
+const BR_BOX_W=112,BR_BOX_H=44,BR_GAP=24,BR_UNIT=BR_BOX_W+BR_GAP;
+const BR_Y1=[44,98,152,206]; // round-1 (8 seeds → 4 matchups) y-centers
+const BR_Y2=[(BR_Y1[0]+BR_Y1[1])/2,(BR_Y1[2]+BR_Y1[3])/2]; // semis
+const BR_Y3=[(BR_Y2[0]+BR_Y2[1])/2]; // conf finals (= finals y-center too, by symmetry)
+const BR_HEIGHT=250;
+const BR_COLS={ // left edge x for each column, in left→right screen order
+myR1:0,myR2:BR_UNIT,myR3:BR_UNIT*2,finals:BR_UNIT*3,otherR3:BR_UNIT*4,otherR2:BR_UNIT*5,otherR1:BR_UNIT*6,
+};
+const BR_WIDTH=BR_COLS.otherR1+BR_BOX_W;
+
+function BracketMatchBox({x,y,match,decided,label}){
+if(!match)return null;
+const winner=match.winnerName;
+const loser=winner===match.aName?match.bName:match.aName;
+const boxStyle={position:"absolute",left:x,top:y-BR_BOX_H/2,width:BR_BOX_W,height:BR_BOX_H,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"2px 6px",boxSizing:"border-box",overflow:"hidden"};
+if(!decided){
+return(
+<div style={{...boxStyle,background:"#141414",border:"1px dashed #333"}}>
+<div style={{color:"#888",fontSize:9,fontWeight:600,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{match.aSeed?`#${match.aSeed} `:""}{match.aName}</div>
+<div style={{color:"#555",fontSize:8}}>vs</div>
+<div style={{color:"#888",fontSize:9,fontWeight:600,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{match.bSeed?`#${match.bSeed} `:""}{match.bName}</div>
+</div>
+);
+}
+return(
+<div style={{...boxStyle,background:match.mineInvolved?"#241010":"#161616",border:match.mineInvolved?`1px solid ${RED}88`:"1px solid #262626"}}>
+<div style={{color:WHITE,fontSize:10,fontWeight:800,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{winner}</div>
+<div style={{color:GREY,fontSize:8,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{match.gamesFor}-{match.gamesAgainst} vs {loser}</div>
+</div>
+);
+}
+// Draws the elbow connector merging two y-positions at xA into one at xB (works regardless of whether xA<xB or xA>xB).
+function BracketConnectorPair({xA,xB,yTop,yBottom,color}){
+const xMid=(xA+xB)/2,yMerge=(yTop+yBottom)/2;
+return(
+<g stroke={color} strokeWidth="1.5" fill="none">
+<line x1={xA} y1={yTop} x2={xMid} y2={yTop}/>
+<line x1={xA} y1={yBottom} x2={xMid} y2={yBottom}/>
+<line x1={xMid} y1={yTop} x2={xMid} y2={yBottom}/>
+<line x1={xMid} y1={yMerge} x2={xB} y2={yMerge}/>
+</g>
+);
+}
+function BracketConnectorSingle({x1,y1,x2,y2,color}){
+return<line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.5"/>;
+}
+// ── Real bracket tree: both conferences mirrored around a center Finals column, connected with elbow lines.
+// revealedRounds gates which stages show as "decided" (winner+score) vs "pending" (matchup known, outcome hidden) — the whole tree is always visible.
 function PlayoffBracketView({playoffs,revealedRounds=4}){
 if(!playoffs||!playoffs.made){
 return<div style={{textAlign:"center",padding:"20px 0",color:GREY,fontSize:13}}>Net niet gehaald dit seizoen.</div>;
 }
-const roundLabels=["Eerste ronde","Halve finale conf.","Conferencefinale"];
+const LINE="#333";
+const myR=playoffs.myBracket.rounds,otherR=playoffs.otherBracket.rounds;
+const dec=[revealedRounds>0,revealedRounds>1,revealedRounds>2,revealedRounds>3];
 return(
 <div>
-{[0,1,2].map(i=>{
-if(i>=revealedRounds)return null;
-const myR=playoffs.myBracket.rounds[i];
-const otherR=playoffs.otherBracket.rounds[i];
-const myMatch=myR.matchups.find(m=>m.mineInvolved);
-return(
-<div key={i} style={{marginBottom:16}}>
-<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>{roundLabels[i].toUpperCase()} · {playoffs.myConf.toUpperCase()}</div>
-{myR.matchups.map((m,mi)=>(
-<div key={mi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:m.mineInvolved?"#241010":"#141414",border:m.mineInvolved?`1px solid ${RED}55`:"1px solid transparent",borderRadius:8,padding:"7px 10px",marginBottom:4}}>
-<span style={{color:m.winnerSeed===m.aSeed?WHITE:GREY,fontSize:11,fontWeight:m.winnerSeed===m.aSeed?700:400,flex:1}}>#{m.aSeed} {m.aName}</span>
-<span style={{color:GREY,fontSize:10,padding:"0 8px"}}>{m.gamesFor}-{m.gamesAgainst}</span>
-<span style={{color:m.winnerSeed===m.bSeed?WHITE:GREY,fontSize:11,fontWeight:m.winnerSeed===m.bSeed?700:400,flex:1,textAlign:"right"}}>{m.bName} #{m.bSeed}</span>
+<div style={{color:GREY,fontSize:10,marginBottom:6,textAlign:"center"}}>👉 Swipe om de volledige bracket te zien</div>
+<div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+<div style={{position:"relative",width:BR_WIDTH,height:BR_HEIGHT}}>
+<svg width={BR_WIDTH} height={BR_HEIGHT} style={{position:"absolute",left:0,top:0}}>
+<BracketConnectorPair xA={BR_COLS.myR1+BR_BOX_W} xB={BR_COLS.myR2} yTop={BR_Y1[0]} yBottom={BR_Y1[1]} color={LINE}/>
+<BracketConnectorPair xA={BR_COLS.myR1+BR_BOX_W} xB={BR_COLS.myR2} yTop={BR_Y1[2]} yBottom={BR_Y1[3]} color={LINE}/>
+<BracketConnectorPair xA={BR_COLS.myR2+BR_BOX_W} xB={BR_COLS.myR3} yTop={BR_Y2[0]} yBottom={BR_Y2[1]} color={LINE}/>
+<BracketConnectorSingle x1={BR_COLS.myR3+BR_BOX_W} y1={BR_Y3[0]} x2={BR_COLS.finals} y2={BR_Y3[0]} color={LINE}/>
+<BracketConnectorSingle x1={BR_COLS.finals+BR_BOX_W} y1={BR_Y3[0]} x2={BR_COLS.otherR3} y2={BR_Y3[0]} color={LINE}/>
+<BracketConnectorPair xA={BR_COLS.otherR2} xB={BR_COLS.otherR3+BR_BOX_W} yTop={BR_Y2[0]} yBottom={BR_Y2[1]} color={LINE}/>
+<BracketConnectorPair xA={BR_COLS.otherR1} xB={BR_COLS.otherR2+BR_BOX_W} yTop={BR_Y1[0]} yBottom={BR_Y1[1]} color={LINE}/>
+<BracketConnectorPair xA={BR_COLS.otherR1} xB={BR_COLS.otherR2+BR_BOX_W} yTop={BR_Y1[2]} yBottom={BR_Y1[3]} color={LINE}/>
+</svg>
+<div style={{position:"absolute",left:BR_COLS.myR1,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:GREY,fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.myConf?.toUpperCase()}</div>
+<div style={{position:"absolute",left:BR_COLS.finals,top:8,width:BR_BOX_W,textAlign:"center",color:"#f5a524",fontSize:9,fontWeight:700,letterSpacing:1}}>FINALS</div>
+<div style={{position:"absolute",left:BR_COLS.otherR2,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:GREY,fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.otherConf?.toUpperCase()}</div>
+{myR[0].matchups.map((m,i)=>(<BracketMatchBox key={"m0"+i} x={BR_COLS.myR1} y={BR_Y1[i]} match={m} decided={dec[0]}/>))}
+{myR[1].matchups.map((m,i)=>(<BracketMatchBox key={"m1"+i} x={BR_COLS.myR2} y={BR_Y2[i]} match={m} decided={dec[1]}/>))}
+{myR[2].matchups.map((m,i)=>(<BracketMatchBox key={"m2"+i} x={BR_COLS.myR3} y={BR_Y3[i]} match={m} decided={dec[2]}/>))}
+<BracketMatchBox x={BR_COLS.finals} y={BR_Y3[0]} match={playoffs.finals} decided={dec[3]}/>
+{otherR[2].matchups.map((m,i)=>(<BracketMatchBox key={"o2"+i} x={BR_COLS.otherR3} y={BR_Y3[i]} match={m} decided/>))}
+{otherR[1].matchups.map((m,i)=>(<BracketMatchBox key={"o1"+i} x={BR_COLS.otherR2} y={BR_Y2[i]} match={m} decided/>))}
+{otherR[0].matchups.map((m,i)=>(<BracketMatchBox key={"o0"+i} x={BR_COLS.otherR1} y={BR_Y1[i]} match={m} decided/>))}
 </div>
-))}
-{myMatch&&(
-<div style={{display:"flex",justifyContent:"space-around",background:INPUTBG,borderRadius:8,padding:"8px",marginTop:4,marginBottom:6}}>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.ppg}</div><div style={{color:GREY,fontSize:8}}>PPG</div></div>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.rpg}</div><div style={{color:GREY,fontSize:8}}>RPG</div></div>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{myMatch.apg}</div><div style={{color:GREY,fontSize:8}}>APG</div></div>
 </div>
-)}
-<div style={{color:"#666",fontSize:9,fontWeight:700,letterSpacing:1,margin:"8px 0 4px"}}>{roundLabels[i].toUpperCase()} · {playoffs.otherConf.toUpperCase()}</div>
-{otherR.matchups.map((m,mi)=>(
-<div key={mi} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 10px",marginBottom:2}}>
-<span style={{color:m.winnerSeed===m.aSeed?"#999":"#555",fontSize:10,flex:1}}>#{m.aSeed} {m.aName}</span>
-<span style={{color:"#555",fontSize:9,padding:"0 8px"}}>{m.gamesFor}-{m.gamesAgainst}</span>
-<span style={{color:m.winnerSeed===m.bSeed?"#999":"#555",fontSize:10,flex:1,textAlign:"right"}}>{m.bName} #{m.bSeed}</span>
-</div>
-))}
+{dec[3]&&playoffs.champion&&<div style={{textAlign:"center",color:"#f5a524",fontWeight:800,fontSize:15,marginTop:10}}>🏆 NBA KAMPIOEN!</div>}
 </div>
 );
-})}
-{revealedRounds>=4&&playoffs.finals&&(
-<div>
-<div style={{color:"#f5a524",fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:6,textAlign:"center"}}>🏆 NBA FINALS</div>
-<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:playoffs.finals.mineInvolved?"#2a1a08":"#141414",border:"1px solid #f5a52455",borderRadius:10,padding:"12px 14px",marginBottom:6}}>
-<span style={{color:playoffs.finals.winnerName===playoffs.finals.aName?WHITE:GREY,fontWeight:700,fontSize:13,flex:1}}>{playoffs.finals.aName}</span>
-<span style={{color:GREY,fontSize:11,padding:"0 8px"}}>{playoffs.finals.gamesFor}-{playoffs.finals.gamesAgainst}</span>
-<span style={{color:playoffs.finals.winnerName===playoffs.finals.bName?WHITE:GREY,fontWeight:700,fontSize:13,flex:1,textAlign:"right"}}>{playoffs.finals.bName}</span>
+}
+// ── PPG/RPG/APG callout for whichever round was just revealed — shown alongside the bracket during the live Standard-mode reveal.
+function BracketRoundStats({playoffs,revealedRounds}){
+if(!playoffs||!playoffs.made||revealedRounds<=0)return null;
+const roundNames=["Eerste Ronde","Halve Finale","Conferencefinale","NBA Finals"];
+const idx=revealedRounds-1;
+const match=idx<3?playoffs.myBracket.rounds[idx].matchups.find(m=>m.mineInvolved):playoffs.finals;
+if(!match||!match.mineInvolved)return null;
+return(
+<div style={{background:INPUTBG,borderRadius:10,padding:"10px 14px",marginTop:10}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6,textAlign:"center"}}>JOUW CIJFERS · {roundNames[idx].toUpperCase()}</div>
+<div style={{display:"flex",justifyContent:"space-around"}}>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:15}}>{match.ppg}</div><div style={{color:GREY,fontSize:9}}>PPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:15}}>{match.rpg}</div><div style={{color:GREY,fontSize:9}}>RPG</div></div>
+<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:15}}>{match.apg}</div><div style={{color:GREY,fontSize:9}}>APG</div></div>
 </div>
-{playoffs.finals.mineInvolved&&(
-<div style={{display:"flex",justifyContent:"space-around",background:INPUTBG,borderRadius:8,padding:"8px",marginBottom:8}}>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.ppg}</div><div style={{color:GREY,fontSize:8}}>PPG</div></div>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.rpg}</div><div style={{color:GREY,fontSize:8}}>RPG</div></div>
-<div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:13}}>{playoffs.finals.apg}</div><div style={{color:GREY,fontSize:8}}>APG</div></div>
-</div>
-)}
-{playoffs.champion&&<div style={{textAlign:"center",color:"#f5a524",fontWeight:800,fontSize:15}}>🏆 NBA KAMPIOEN!</div>}
-</div>
-)}
+<div style={{textAlign:"center",marginTop:6,color:match.mineWon?"#27AE60":RED,fontWeight:700,fontSize:12}}>{match.mineWon?"Gewonnen":"Verloren"} {match.gamesFor}-{match.gamesAgainst}</div>
 </div>
 );
 }
@@ -9283,6 +9328,7 @@ return(
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PLAY-OFFS · {last.team.name} · SEED #{po.seed}</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je hebt de play-offs gehaald! 🏀</div>
 <PlayoffBracketView playoffs={po} revealedRounds={revealedRounds}/>
+<BracketRoundStats playoffs={po} revealedRounds={revealedRounds}/>
 {!done&&<button onClick={revealNextRound} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>{roundBtnLabel}</button>}
 {done&&<button onClick={finishBracketViewing} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Ga verder met carrière ▸</button>}
 </div>

@@ -8464,6 +8464,25 @@ if(strength>=48)return"Middenmoter";
 if(strength>=32)return"Rebuilding project";
 return"Tanking team";
 }
+// ── Draft night lottery: better prospects skew toward low pick numbers, but it's still a weighted random roll — upsets happen.
+function rollDraftPick(ceiling){
+const idealPick=Math.max(1,Math.min(30,Math.round(30-((ceiling-50)/45)*29)));
+const weights=[];
+for(let pick=1;pick<=30;pick++){
+weights.push(Math.max(0.5,20-Math.abs(pick-idealPick)));
+}
+const total=weights.reduce((a,b)=>a+b,0);
+let r=Math.random()*total;
+for(let pick=1;pick<=30;pick++){
+r-=weights[pick-1];
+if(r<=0)return pick;
+}
+return 30;
+}
+// Early picks land on bad/rebuilding teams (real lottery logic), late picks land on good/contending teams.
+function draftPickTeamStrength(pick){
+return Math.max(20,Math.min(92,Math.round(20+pick*2.4+careerRoll(-6,6))));
+}
 function getTrainingOptions(){return CAREER_ATTRS.slice().sort(()=>Math.random()-0.5).slice(0,3);}
 function rollSeasonEvent(){
 if(Math.random()<0.55)return{kind:"choice",...pickRandom(CHOICE_EVENTS)};
@@ -8790,11 +8809,19 @@ myR1:0,myR2:BR_UNIT,myR3:BR_UNIT*2,finals:BR_UNIT*3,otherR3:BR_UNIT*4,otherR2:BR
 };
 const BR_WIDTH=BR_COLS.otherR1+BR_BOX_W;
 
-function BracketMatchBox({x,y,match,decided,label}){
+function BracketMatchBox({x,y,match,decided,known=true}){
 if(!match)return null;
+const boxStyle={position:"absolute",left:x,top:y-BR_BOX_H/2,width:BR_BOX_W,height:BR_BOX_H,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"2px 6px",boxSizing:"border-box",overflow:"hidden"};
+if(!known){
+// Participants aren't determined yet from the viewer's perspective (their round hasn't been revealed) — no names shown, nothing to spoil.
+return(
+<div style={{...boxStyle,background:"#111",border:"1px dashed #2a2a2a"}}>
+<div style={{color:"#555",fontSize:9,fontWeight:700,letterSpacing:1}}>TBD</div>
+</div>
+);
+}
 const winner=match.winnerName;
 const loser=winner===match.aName?match.bName:match.aName;
-const boxStyle={position:"absolute",left:x,top:y-BR_BOX_H/2,width:BR_BOX_W,height:BR_BOX_H,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"2px 6px",boxSizing:"border-box",overflow:"hidden"};
 if(!decided){
 return(
 <div style={{...boxStyle,background:"#141414",border:"1px dashed #333"}}>
@@ -8827,7 +8854,7 @@ function BracketConnectorSingle({x1,y1,x2,y2,color}){
 return<line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth="1.5"/>;
 }
 // ── Real bracket tree: both conferences mirrored around a center Finals column, connected with elbow lines.
-// revealedRounds gates which stages show as "decided" (winner+score) vs "pending" (matchup known, outcome hidden) — the whole tree is always visible.
+// revealedRounds gates which stages show as "decided" (winner+score), "pending" (matchup known, outcome hidden), or fully "TBD" (participants not yet determined) — nothing ahead of the reveal point leaks a result.
 function PlayoffBracketView({playoffs,revealedRounds=4}){
 if(!playoffs||!playoffs.made){
 return<div style={{textAlign:"center",padding:"20px 0",color:GREY,fontSize:13}}>Net niet gehaald dit seizoen.</div>;
@@ -8835,6 +8862,7 @@ return<div style={{textAlign:"center",padding:"20px 0",color:GREY,fontSize:13}}>
 const LINE="#333";
 const myR=playoffs.myBracket.rounds,otherR=playoffs.otherBracket.rounds;
 const dec=[revealedRounds>0,revealedRounds>1,revealedRounds>2,revealedRounds>3];
+const known=[true,dec[0],dec[1],dec[2]]; // round0 seeding is always known; each later round's participants are only known once the round before it is decided
 return(
 <div>
 <div style={{color:GREY,fontSize:10,marginBottom:6,textAlign:"center"}}>👉 Swipe om de volledige bracket te zien</div>
@@ -8853,13 +8881,13 @@ return(
 <div style={{position:"absolute",left:BR_COLS.myR1,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:GREY,fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.myConf?.toUpperCase()}</div>
 <div style={{position:"absolute",left:BR_COLS.finals,top:8,width:BR_BOX_W,textAlign:"center",color:"#f5a524",fontSize:9,fontWeight:700,letterSpacing:1}}>FINALS</div>
 <div style={{position:"absolute",left:BR_COLS.otherR2,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:GREY,fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.otherConf?.toUpperCase()}</div>
-{myR[0].matchups.map((m,i)=>(<BracketMatchBox key={"m0"+i} x={BR_COLS.myR1} y={BR_Y1[i]} match={m} decided={dec[0]}/>))}
-{myR[1].matchups.map((m,i)=>(<BracketMatchBox key={"m1"+i} x={BR_COLS.myR2} y={BR_Y2[i]} match={m} decided={dec[1]}/>))}
-{myR[2].matchups.map((m,i)=>(<BracketMatchBox key={"m2"+i} x={BR_COLS.myR3} y={BR_Y3[i]} match={m} decided={dec[2]}/>))}
-<BracketMatchBox x={BR_COLS.finals} y={BR_Y3[0]} match={playoffs.finals} decided={dec[3]}/>
-{otherR[2].matchups.map((m,i)=>(<BracketMatchBox key={"o2"+i} x={BR_COLS.otherR3} y={BR_Y3[i]} match={m} decided/>))}
-{otherR[1].matchups.map((m,i)=>(<BracketMatchBox key={"o1"+i} x={BR_COLS.otherR2} y={BR_Y2[i]} match={m} decided/>))}
-{otherR[0].matchups.map((m,i)=>(<BracketMatchBox key={"o0"+i} x={BR_COLS.otherR1} y={BR_Y1[i]} match={m} decided/>))}
+{myR[0].matchups.map((m,i)=>(<BracketMatchBox key={"m0"+i} x={BR_COLS.myR1} y={BR_Y1[i]} match={m} decided={dec[0]} known={known[0]}/>))}
+{myR[1].matchups.map((m,i)=>(<BracketMatchBox key={"m1"+i} x={BR_COLS.myR2} y={BR_Y2[i]} match={m} decided={dec[1]} known={known[1]}/>))}
+{myR[2].matchups.map((m,i)=>(<BracketMatchBox key={"m2"+i} x={BR_COLS.myR3} y={BR_Y3[i]} match={m} decided={dec[2]} known={known[2]}/>))}
+<BracketMatchBox x={BR_COLS.finals} y={BR_Y3[0]} match={playoffs.finals} decided={dec[3]} known={known[3]}/>
+{otherR[2].matchups.map((m,i)=>(<BracketMatchBox key={"o2"+i} x={BR_COLS.otherR3} y={BR_Y3[i]} match={m} decided={dec[2]} known={known[2]}/>))}
+{otherR[1].matchups.map((m,i)=>(<BracketMatchBox key={"o1"+i} x={BR_COLS.otherR2} y={BR_Y2[i]} match={m} decided={dec[1]} known={known[1]}/>))}
+{otherR[0].matchups.map((m,i)=>(<BracketMatchBox key={"o0"+i} x={BR_COLS.otherR1} y={BR_Y1[i]} match={m} decided={dec[0]} known={known[0]}/>))}
 </div>
 </div>
 {dec[3]&&playoffs.champion&&<div style={{textAlign:"center",color:"#f5a524",fontWeight:800,fontSize:15,marginTop:10}}>🏆 NBA KAMPIOEN!</div>}
@@ -9117,6 +9145,10 @@ const [draftAttrs,setDraftAttrs]=useState({});
 const [draftTrio,setDraftTrio]=useState(null);
 const [draftLegendNames,setDraftLegendNames]=useState([]);
 const [mode,setMode]=useState(null);
+const [pendingMode,setPendingMode]=useState(null);
+const [draftSpinning,setDraftSpinning]=useState(false);
+const [draftDisplay,setDraftDisplay]=useState(null);
+const [draftResult,setDraftResult]=useState(null);
 const [player,setPlayer]=useState(null);
 const [seasons,setSeasons]=useState([]);
 const [simAge,setSimAge]=useState(19);
@@ -9187,8 +9219,15 @@ if(hardForced||randForced)break;
 }
 setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setRetired(true);
 }
-function beginSim(chosenMode){
-const initTs=freshTeamState(null);
+function startDraftNight(chosenMode){
+setPendingMode(chosenMode);
+setDraftResult(null);
+setDraftDisplay(null);
+setDraftSpinning(true);
+setStage("draftNight");
+}
+function beginSim(chosenMode,draftedTeam){
+const initTs=draftedTeam?{team:draftedTeam.team,strength:draftedTeam.strength}:freshTeamState(null);
 const startTrue=Math.max(35,player.overall-Math.round(careerRoll(15,22)));
 setTeamState(initTs);setTrueRating(startTrue);setPeakRating(startTrue);
 setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);setVoluntaryRetire(false);
@@ -9197,6 +9236,27 @@ setPendingSeason(null);setSeasonStage(null);
 setStage("sim");
 if(chosenMode==="quick")runQuickToEnd(player,initTs,startTrue);
 }
+
+useEffect(()=>{
+if(stage!=="draftNight"||!draftSpinning||!player)return;
+let ticks=0;
+const maxTicks=18;
+const interval=setInterval(()=>{
+ticks++;
+setDraftDisplay({pick:Math.floor(Math.random()*30)+1,team:pickRandom(NBA_TEAMS_STATIC)});
+if(ticks>=maxTicks){
+clearInterval(interval);
+const pick=rollDraftPick(player.overall);
+const strength=draftPickTeamStrength(pick);
+const team=pickRandom(NBA_TEAMS_STATIC);
+setDraftDisplay({pick,team});
+setDraftResult({pick,team,strength});
+setDraftSpinning(false);
+}
+},110);
+return()=>clearInterval(interval);
+// eslint-disable-next-line
+},[stage,draftSpinning]);
 
 // ── Standard mode: interactive per-season flow — contract (when years run out) → length/salary → training focus → season event → national team → resolve.
 function startSeasonFlow(){
@@ -9324,7 +9384,7 @@ setSaved(true);
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9427,9 +9487,36 @@ return(
 </div>
 ))}
 </div>
-<button onClick={()=>beginSim("quick")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
-<button onClick={()=>beginSim("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
+<button onClick={()=>startDraftNight("quick")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
+<button onClick={()=>startDraftNight("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
 <button onClick={backToHub} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>Annuleren</button>
+</div>
+);
+}
+
+if(stage==="draftNight"){
+return(
+<div style={{textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>DRAFT NIGHT</div>
+<div style={{fontSize:38,marginBottom:14}}>🎡</div>
+<div style={{background:INPUTBG,borderRadius:16,padding:"26px 16px",marginBottom:20,border:draftSpinning?"1px solid #333":`1px solid ${RED}55`}}>
+{draftDisplay?(
+<>
+<div style={{color:draftSpinning?GREY:"#f5a524",fontWeight:900,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{draftDisplay.pick}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:16}}>{draftDisplay.team.name}</div>
+</>
+):(
+<div style={{color:GREY,fontSize:14}}>Het wiel begint te draaien...</div>
+)}
+</div>
+{draftSpinning&&<div style={{color:GREY,fontSize:13}}>🎡 Het wiel draait...</div>}
+{!draftSpinning&&draftResult&&(
+<>
+<div style={{color:WHITE,fontSize:14,marginBottom:6}}>Je bent gedraft als <b>pick #{draftResult.pick}</b> door de</div>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:18,marginBottom:18}}>{draftResult.team.name}</div>
+<button onClick={()=>beginSim(pendingMode,draftResult)} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Start je carrière ▸</button>
+</>
+)}
 </div>
 );
 }

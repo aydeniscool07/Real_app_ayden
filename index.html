@@ -8446,6 +8446,24 @@ const w=CAREER_POS_WEIGHTS[pos]||CAREER_POS_WEIGHTS.SF;
 const raw=CAREER_ATTRS.reduce((s,a)=>s+attrs[a.key]*w[a.key],0);
 return Math.round(raw);
 }
+// ── 2K-style archetype tradeoff: heavy offense drags defense down (and vice versa) — unless you roll a rare two-way freak.
+function applyArchetypeTradeoff(attrs){
+const offense=(attrs.sco+attrs.plm)/2;
+const defense=(attrs.def+attrs.reb)/2;
+const gap=offense-defense;
+const isGoatBuild=Math.random()<0.05;
+if(isGoatBuild||Math.abs(gap)<8)return{attrs,isGoatBuild};
+const pull=Math.min(10,Math.round(Math.abs(gap)*0.35));
+const newAttrs={...attrs};
+if(gap>0){
+newAttrs.def=Math.max(25,attrs.def-pull);
+newAttrs.reb=Math.max(25,attrs.reb-Math.round(pull*0.6));
+}else{
+newAttrs.sco=Math.max(25,attrs.sco-pull);
+newAttrs.plm=Math.max(25,attrs.plm-Math.round(pull*0.6));
+}
+return{attrs:newAttrs,isGoatBuild:false};
+}
 function careerRoll(min,max){return min+Math.random()*(max-min);}
 function pickRandom(arr){return arr[Math.floor(Math.random()*arr.length)];}
 function draftLegendTrio(pool,excludeNames){
@@ -8624,6 +8642,36 @@ if(m&&!m.mineWon){eliminatedRoundIndex=i;break;}
 if(eliminatedRoundIndex===null&&!finals.mineInvolved)eliminatedRoundIndex=2; // safety net, shouldn't normally trigger
 if(eliminatedRoundIndex===null&&!finals.mineWon)eliminatedRoundIndex=3;
 return{made:true,seed:myEntry.seed,myConf:myTeam.conf,otherConf,myBracket,otherBracket,finals,champion:!!finals.mineWon,eliminatedRoundIndex};
+}
+// ── "What if" engine: fast-forwards a few hypothetical seasons at an alternate team from a real decision point, to see if a title would have followed.
+function simulateAltFuture(ceiling,startTrueRating,startAge,altTeam,startStrength,seasonsToSim){
+let trueR=startTrueRating,strength=startStrength;
+for(let i=0;i<seasonsToSim;i++){
+const age=startAge+i;
+trueR=growTrueRating(trueR,ceiling,age,careerRoll(-3,5));
+const seasonRating=Math.max(30,Math.min(99,Math.round(trueR+careerRoll(-3,3))));
+strength=Math.max(25,Math.min(95,strength+careerRoll(-6,6)));
+const wins=Math.max(9,Math.min(73,Math.round(41+((strength-55)/55)*30+((seasonRating-75)/75)*12+careerRoll(-4,4))));
+const po=simulateSeasonPlayoffs(altTeam,strength,seasonRating,wins);
+if(po.made&&po.champion)return true;
+}
+return false;
+}
+// ── Scans every team-change decision made during the career; if a road not taken would (probably) have won a title in the following seasons
+// while the real path didn't, that's the story worth telling in the retirement summary.
+function computeBestRegret(forkPoints,seasons){
+for(const fp of forkPoints){
+const actualWon=seasons.some(s=>s.age>=fp.age&&s.age<fp.age+3&&s.awards.includes("championship"));
+if(actualWon)continue;
+for(const alt of fp.alternatives){
+let winCount=0;
+for(let trial=0;trial<3;trial++){
+if(simulateAltFuture(fp.ceiling,fp.trueRatingAtDecision,fp.age,alt.team,alt.strength,3))winCount++;
+}
+if(winCount>=2)return{age:fp.age,actualTeam:fp.chosenTeamName,altTeam:alt.team.name};
+}
+}
+return null;
 }
 // ── Core season builder — shared by both the interactive (Standard) and auto-resolved (Quick) paths.
 // `pending` bundles whatever choices were made this season: {training,event,contract,nationalTeam,nationalFatigue}.
@@ -8994,7 +9042,17 @@ return(
 }
 
 // ── Retirement / share card
-function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,onDone,onPlayAgain}){
+// ── "Wat als..." callout — a real simulated counterfactual from a team decision made mid-career
+function CareerRegretCallout({regret}){
+if(!regret)return null;
+return(
+<div style={{background:"#1a1410",border:"1px solid #f5a52455",borderRadius:12,padding:"14px",marginBottom:16,textAlign:"left"}}>
+<div style={{color:"#f5a524",fontWeight:700,fontSize:11,letterSpacing:1,marginBottom:4}}>🔮 WAT ALS...</div>
+<div style={{color:WHITE,fontSize:13,lineHeight:1.4}}>Op je {regret.age}e koos je voor de <b>{regret.actualTeam}</b>. Was je bij de <b>{regret.altTeam}</b> gebleven, dan had je waarschijnlijk een NBA-titel gewonnen.</div>
+</div>
+);
+}
+function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,regret,onDone,onPlayAgain}){
 return(
 <div style={{textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
@@ -9014,7 +9072,8 @@ return(
 ))}
 </div>
 )}
-<div style={{color:RED,fontWeight:800,fontSize:22,marginBottom:20}}>{score} carrièrepunten</div>
+<div style={{color:RED,fontWeight:800,fontSize:22,marginBottom:14}}>{score} carrièrepunten</div>
+<CareerRegretCallout regret={regret}/>
 <div style={{marginBottom:18,textAlign:"left"}}>
 <CareerLadderList seasons={seasons}/>
 </div>
@@ -9058,6 +9117,7 @@ return(
 {career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:12,textAlign:"right"}}>💰 {formatMoney(career.totalEarnings)}</div>}
 </div>
 <CareerTrophyRow totals={totals}/>
+<CareerRegretCallout regret={career.regret}/>
 <CareerLadderList seasons={career.seasons||[]}/>
 <button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:14}}>Sluiten</button>
 </div>
@@ -9160,6 +9220,9 @@ const [contractYearsLeft,setContractYearsLeft]=useState(4);
 const [activeSalary,setActiveSalary]=useState(null);
 const [pendingContractBase,setPendingContractBase]=useState(null);
 const [teamOffers,setTeamOffers]=useState(null);
+const [pendingStayOption,setPendingStayOption]=useState(null);
+const [forkPoints,setForkPoints]=useState([]);
+const [regret,setRegret]=useState(null);
 const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|playoffs|retireChoice|recap
 const [revealedRounds,setRevealedRounds]=useState(0);
 const [pendingSeasonEnd,setPendingSeasonEnd]=useState(null);
@@ -9195,8 +9258,9 @@ if(draftStep<5){
 setDraftStep(draftStep+1);
 setDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
 }else{
-const overall=careerOverall(newAttrs,draftPos);
-setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:newAttrs,overall,legends:newNames});
+const{attrs:balancedAttrs,isGoatBuild}=applyArchetypeTradeoff(newAttrs);
+const overall=careerOverall(balancedAttrs,draftPos);
+setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:balancedAttrs,isGoatBuild,overall,legends:newNames});
 setStage("modepick");
 }
 }
@@ -9271,6 +9335,7 @@ const base=makeContractOutcome(optId,teamState);
 setPendingContractBase(base);
 setSeasonStage("contractLength");
 }else{
+setPendingStayOption({team:teamState.team,strength:teamState.strength});
 setTeamOffers(generateTeamOffers(optId,teamState.team.name,trueRating));
 setSeasonStage("teamOffer");
 }
@@ -9291,11 +9356,21 @@ const contract={id:offer.id,icon:opt.icon,label:`${opt.label} — ${offer.team.n
 setPendingSeason(p=>({...(p||{}),contract}));
 setActiveSalary(offer.salaryPerYear);
 setContractYearsLeft(offer.years);
+if(pendingStayOption&&teamOffers){
+const alternatives=[pendingStayOption,...teamOffers.filter(o=>o!==offer).map(o=>({team:o.team,strength:o.teamState.strength}))];
+setForkPoints(fp=>[...fp,{age:simAge,trueRatingAtDecision:trueRating,ceiling:player.overall,chosenTeamName:offer.team.name,alternatives}]);
+}
 setTeamOffers(null);
+setPendingStayOption(null);
 beginTrainingStage();
 }
 function chooseTraining(attrDef){
 const training={key:attrDef.key,label:attrDef.label,icon:attrDef.icon};
+setPlayer(p=>{
+const bump=Math.round(careerRoll(1,3));
+const newAttrs={...p.attrs,[attrDef.key]:Math.min(99,p.attrs[attrDef.key]+bump)};
+return{...p,attrs:newAttrs,overall:careerOverall(newAttrs,p.pos)};
+});
 const evt=rollSeasonEvent();
 if(evt.kind==="choice"){
 setPendingSeason(p=>({...(p||{}),training}));
@@ -9378,13 +9453,15 @@ useEffect(()=>{
 if(retired&&!saved&&player&&seasons.length){
 const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
 const verdict=careerVerdict(score);
-onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge,voluntaryRetire,totalEarnings:totals.earnings});
+const computedRegret=computeBestRegret(forkPoints,seasons);
+setRegret(computedRegret);
+onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge,voluntaryRetire,totalEarnings:totals.earnings,regret:computedRegret});
 setSaved(true);
 }
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setPendingStayOption(null);setForkPoints([]);setRegret(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9477,7 +9554,12 @@ if(stage==="modepick"){
 return(
 <div>
 <CareerPlayerHeader player={player} rating={player.overall} age={19} team={null} salary={null}/>
-<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:16}}>{player.overall} OVR is je plafond — je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:4}}>{player.overall} OVR is je plafond — je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
+{player.isGoatBuild?(
+<div style={{color:"#f5a524",fontSize:12,fontWeight:700,textAlign:"center",marginBottom:16}}>🐐 Genetic freak — je ontsnapt aan de gebruikelijke aanval/verdediging trade-off!</div>
+):(
+<div style={{color:GREY,fontSize:10,textAlign:"center",marginBottom:16}}>Zoals in 2K: extreem sterk in aanval kost je meestal wat verdediging, en omgekeerd.</div>
+)}
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:24}}>
 {CAREER_ATTRS.map(a=>(
 <div key={a.key} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px",textAlign:"center"}}>
@@ -9525,7 +9607,7 @@ if(stage==="sim"){
 if(retired){
 const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
 const verdict=careerVerdict(score);
-return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
+return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} regret={regret} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
 }
 if(mode==="quick"){
 return(

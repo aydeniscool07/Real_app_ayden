@@ -8307,6 +8307,22 @@ const CAREER_ATTRS=[
 {key:"iq",label:"Basketbal IQ",icon:"🧠"},
 ];
 const CAREER_POSITIONS=["PG","SG","SF","PF","C"];
+// Nationalities you can pick for your player — ties into the national team callup mechanic during a career.
+const CAREER_NATIONS=[
+{code:"USA",name:"Verenigde Staten",flag:"🇺🇸"},{code:"CAN",name:"Canada",flag:"🇨🇦"},{code:"NED",name:"Nederland",flag:"🇳🇱"},{code:"FRA",name:"Frankrijk",flag:"🇫🇷"},
+{code:"ESP",name:"Spanje",flag:"🇪🇸"},{code:"GER",name:"Duitsland",flag:"🇩🇪"},{code:"SRB",name:"Servië",flag:"🇷🇸"},{code:"GRE",name:"Griekenland",flag:"🇬🇷"},
+{code:"SLO",name:"Slovenië",flag:"🇸🇮"},{code:"LTU",name:"Litouwen",flag:"🇱🇹"},{code:"AUS",name:"Australië",flag:"🇦🇺"},{code:"NGA",name:"Nigeria",flag:"🇳🇬"},
+{code:"CMR",name:"Kameroen",flag:"🇨🇲"},{code:"SEN",name:"Senegal",flag:"🇸🇳"},{code:"CIV",name:"Ivoorkust",flag:"🇨🇮"},{code:"BRA",name:"Brazilië",flag:"🇧🇷"},
+{code:"ARG",name:"Argentinië",flag:"🇦🇷"},{code:"DOM",name:"Dominicaanse Republiek",flag:"🇩🇴"},{code:"PUR",name:"Puerto Rico",flag:"🇵🇷"},{code:"TUR",name:"Turkije",flag:"🇹🇷"},
+{code:"ITA",name:"Italië",flag:"🇮🇹"},{code:"CRO",name:"Kroatië",flag:"🇭🇷"},{code:"LAT",name:"Letland",flag:"🇱🇻"},{code:"MNE",name:"Montenegro",flag:"🇲🇪"},
+{code:"BIH",name:"Bosnië en Herzegovina",flag:"🇧🇦"},{code:"POL",name:"Polen",flag:"🇵🇱"},{code:"CZE",name:"Tsjechië",flag:"🇨🇿"},{code:"UKR",name:"Oekraïne",flag:"🇺🇦"},
+{code:"RUS",name:"Rusland",flag:"🇷🇺"},{code:"CHN",name:"China",flag:"🇨🇳"},{code:"JPN",name:"Japan",flag:"🇯🇵"},{code:"PHI",name:"Filipijnen",flag:"🇵🇭"},
+{code:"NZL",name:"Nieuw-Zeeland",flag:"🇳🇿"},{code:"MEX",name:"Mexico",flag:"🇲🇽"},{code:"VEN",name:"Venezuela",flag:"🇻🇪"},{code:"GBR",name:"Verenigd Koninkrijk",flag:"🇬🇧"},
+{code:"IRL",name:"Ierland",flag:"🇮🇪"},{code:"SUI",name:"Zwitserland",flag:"🇨🇭"},{code:"AUT",name:"Oostenrijk",flag:"🇦🇹"},{code:"BEL",name:"België",flag:"🇧🇪"},
+{code:"SWE",name:"Zweden",flag:"🇸🇪"},{code:"FIN",name:"Finland",flag:"🇫🇮"},{code:"ISR",name:"Israël",flag:"🇮🇱"},{code:"EGY",name:"Egypte",flag:"🇪🇬"},
+{code:"RSA",name:"Zuid-Afrika",flag:"🇿🇦"},{code:"KOR",name:"Zuid-Korea",flag:"🇰🇷"},{code:"IND",name:"India",flag:"🇮🇳"},{code:"GHA",name:"Ghana",flag:"🇬🇭"},
+{code:"MLI",name:"Mali",flag:"🇲🇱"},{code:"COD",name:"Congo-Kinshasa",flag:"🇨🇩"},{code:"BAH",name:"Bahama's",flag:"🇧🇸"},{code:"JAM",name:"Jamaica",flag:"🇯🇲"},
+];
 const CAREER_POS_WEIGHTS={
 PG:{sco:0.20,plm:0.30,reb:0.05,def:0.15,ath:0.15,iq:0.15},
 SG:{sco:0.30,plm:0.15,reb:0.05,def:0.15,ath:0.20,iq:0.15},
@@ -8477,6 +8493,22 @@ else if(typeId==="demand")mult=1.05;
 else if(typeId==="testFA")mult=1.08;
 else if(typeId==="resign")mult=0.97+careerRoll(0,0.1);
 return Math.max(1.5,Math.round(marketValue*mult*lengthMult*10)/10);
+}
+// ── Three concrete team+contract offers to choose between (team, length and salary bundled into one pick) — for deals that change team (testFA/discount/demand).
+function generateTeamOffers(typeId,excludeName,trueRating){
+let pool=NBA_TEAMS_STATIC.filter(t=>t.name!==excludeName);
+const teams=[];
+while(teams.length<3&&pool.length){
+const idx=Math.floor(Math.random()*pool.length);
+teams.push(pool[idx]);
+pool=pool.filter((_,i)=>i!==idx);
+}
+return teams.map(team=>{
+const strength=typeId==="discount"?careerRoll(75,95):careerRoll(30,90);
+const lenOpt=pickRandom(CONTRACT_LENGTHS);
+const salaryPerYear=negotiateSalary(trueRating,typeId,lenOpt.salaryMult);
+return{id:typeId,team,teamState:{team,strength},years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
+});
 }
 function formatMoney(m){return"$"+m.toFixed(1)+"M";}
 // ── Growth model: true rating climbs toward the draft ceiling (fast early, flat mid-career, decline after 32), nudged each season.
@@ -8716,7 +8748,7 @@ return(
 {season.contract&&<div style={{color:"#3498DB",fontSize:11,marginBottom:4}}>{season.contract.icon} {season.contract.label} · {season.contract.years}j · {formatMoney(season.contract.salaryPerYear)}/jr</div>}
 {season.training&&<div style={{color:GREY,fontSize:11,marginBottom:4}}>{season.training.icon} Trainingsfocus: {season.training.label}</div>}
 {season.event&&<div style={{color:"#f5a524",fontSize:11,marginBottom:4}}>{season.event.icon} {season.event.choiceLabel?`${season.event.choiceLabel} — ${season.event.label}`:season.event.label}</div>}
-{season.nationalTeam&&<div style={{color:"#27AE60",fontSize:11,marginBottom:6}}>🇺🇸 Nationaal team deze zomer</div>}
+{season.nationalTeam&&<div style={{color:"#27AE60",fontSize:11,marginBottom:6}}>🌍 Nationaal team deze zomer</div>}
 {season.awards.filter(a=>a!=="championship").length>0&&(
 <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
 {season.awards.filter(a=>a!=="championship").map(a=>(<span key={a} style={{background:"#2C2C2E",color:WHITE,fontSize:10,fontWeight:700,borderRadius:8,padding:"3px 8px"}}>{awardLabels[a]}</span>))}
@@ -8870,15 +8902,80 @@ return(
 
 
 // ── Retirement / share card
-function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,onDone}){
+// ── Trophy icon row — one icon per honor, like Copero's end-of-career trophy case
+function CareerTrophyRow({totals}){
+if(!totals)return null;
+const items=[];
+for(let i=0;i<totals.champs;i++)items.push("🏆");
+for(let i=0;i<totals.mvps;i++)items.push("👑");
+for(let i=0;i<totals.allNba;i++)items.push("🥇");
+for(let i=0;i<totals.dpoys;i++)items.push("🛡️");
+for(let i=0;i<totals.allStars;i++)items.push("⭐");
+if(!items.length)return null;
+return(
+<div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",marginBottom:18}}>
+{items.slice(0,24).map((ic,i)=>(<div key={i} style={{fontSize:22}}>{ic}</div>))}
+{items.length>24&&<div style={{color:GREY,fontSize:13,alignSelf:"center"}}>+{items.length-24}</div>}
+</div>
+);
+}
+// ── Compact age/club/OVR/GP/PTS/AST ladder row — one line per season, tap to expand full detail
+function CareerLadderRow({season,onClick}){
+const tierColor=season.rating>=90?"#f5a524":season.rating>=80?"#e0862a":season.rating>=70?RED:season.rating>=60?"#8E8E93":"#4a4a4a";
+return(
+<div onClick={onClick} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 2px",borderBottom:`1px solid ${DIVIDER}`,cursor:"pointer"}}>
+<div style={{width:24,textAlign:"center",background:"#2C2C2E",borderRadius:6,color:WHITE,fontSize:10,fontWeight:700,padding:"2px 0",flexShrink:0}}>{season.age}</div>
+<div style={{flex:1,minWidth:0,color:WHITE,fontSize:11,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{season.team.name}</div>
+<div style={{width:26,textAlign:"center",background:tierColor,borderRadius:6,color:"#000",fontSize:10,fontWeight:800,padding:"2px 0",flexShrink:0}}>{season.rating}</div>
+<div style={{width:22,textAlign:"center",color:GREY,fontSize:9,flexShrink:0}}>{season.gp}</div>
+<div style={{width:28,textAlign:"center",color:GREY,fontSize:9,flexShrink:0}}>{season.pts}</div>
+<div style={{width:22,textAlign:"center",color:GREY,fontSize:9,flexShrink:0}}>{season.ast}</div>
+</div>
+);
+}
+function CareerLadderHeader(){
+return(
+<div style={{display:"flex",alignItems:"center",gap:6,padding:"2px 2px",marginBottom:2}}>
+<div style={{width:24,textAlign:"center",color:GREY,fontSize:8,fontWeight:700,flexShrink:0}}>LFT</div>
+<div style={{flex:1,color:GREY,fontSize:8,fontWeight:700}}>TEAM</div>
+<div style={{width:26,textAlign:"center",color:GREY,fontSize:8,fontWeight:700,flexShrink:0}}>OVR</div>
+<div style={{width:22,textAlign:"center",color:GREY,fontSize:8,fontWeight:700,flexShrink:0}}>GP</div>
+<div style={{width:28,textAlign:"center",color:GREY,fontSize:8,fontWeight:700,flexShrink:0}}>PTS</div>
+<div style={{width:22,textAlign:"center",color:GREY,fontSize:8,fontWeight:700,flexShrink:0}}>AST</div>
+</div>
+);
+}
+// ── Full season ladder — tap any row to pop open its full detail (stats, playoffs bracket button, awards)
+function CareerLadderList({seasons}){
+const[expanded,setExpanded]=useState(null);
+return(
+<div>
+<CareerLadderHeader/>
+{seasons.map((s,i)=>(<CareerLadderRow key={i} season={s} onClick={()=>setExpanded(s)}/>))}
+{expanded&&(
+<div onClick={()=>setExpanded(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:420}}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
+<CareerSeasonCard season={expanded}/>
+<button onClick={()=>setExpanded(null)} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:8}}>Sluiten</button>
+</div>
+</div>
+)}
+</div>
+);
+}
+
+// ── Retirement / share card
+function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,onDone,onPlayAgain}){
 return(
 <div style={{textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
-<div style={{fontSize:44,marginBottom:6}}>{(verdict.tier.split(" ")[0])}</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:20,marginBottom:2}}>{player.name}</div>
+<CareerOvrBadge ovr={player.overall} size={56}/>
+<div style={{color:WHITE,fontWeight:800,fontSize:20,margin:"10px 0 2px"}}>{player.name}</div>
 <div style={{color:GREY,fontSize:13,marginBottom:10}}>{player.pos} · {voluntaryRetire?`Stopte zelf op ${retiredAge}, op eigen voorwaarden`:`Gestopt op ${retiredAge}`}</div>
 <div style={{color:verdict.color,fontWeight:800,fontSize:16,marginBottom:6}}>{verdict.tier}</div>
-{totals&&<div style={{color:"#27AE60",fontWeight:800,fontSize:20,marginBottom:18}}>💰 {formatMoney(totals.earnings)} verdiend</div>}
+{totals&&<div style={{color:"#27AE60",fontWeight:800,fontSize:20,marginBottom:14}}>💰 {formatMoney(totals.earnings)} verdiend</div>}
+<CareerTrophyRow totals={totals}/>
 {totals&&(
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
 {[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Caps",totals.caps],["Play-offs",totals.playoffApps],["Langste tijd bij 1 team",totals.maxStreak+"j"]].map(([lbl,val])=>(
@@ -8890,10 +8987,13 @@ return(
 </div>
 )}
 <div style={{color:RED,fontWeight:800,fontSize:22,marginBottom:20}}>{score} carrièrepunten</div>
-<div style={{maxHeight:280,overflowY:"auto",marginBottom:18,textAlign:"left"}}>
-{seasons.map((s,i)=>(<CareerSeasonCard key={i} season={s}/>))}
+<div style={{marginBottom:18,textAlign:"left"}}>
+<CareerLadderList seasons={seasons}/>
 </div>
-<button onClick={onDone} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Terug naar overzicht</button>
+<div style={{display:"flex",gap:8}}>
+<button onClick={onDone} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",flex:1}}>Bekijk overzicht</button>
+{onPlayAgain&&<button onClick={onPlayAgain} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",flex:1}}>Speel opnieuw</button>}
+</div>
 </div>
 );
 }
@@ -8915,17 +9015,22 @@ return(
 // ── Full season-by-season view of any saved career
 function CareerDetailModal({career,onClose}){
 const verdict=careerVerdict(career.careerScore||0);
+const{totals}=computeCareerScore(career.seasons||[],career.voluntaryRetire);
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
-<div style={{textAlign:"center",marginBottom:14}}>
-<div style={{color:WHITE,fontWeight:800,fontSize:18}}>{career.playerName}</div>
-<div style={{color:GREY,fontSize:12}}>{career.pos} · {career.overall} OVR · {career.username}</div>
-<div style={{color:verdict.color,fontWeight:800,fontSize:15,marginTop:6}}>{career.verdict}</div>
-{career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:13,marginTop:4}}>💰 {formatMoney(career.totalEarnings)} verdiend</div>}
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+<CareerOvrBadge ovr={career.overall} size={50}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{career.playerName}</div>
+<div style={{color:GREY,fontSize:11}}>{career.pos} · {career.username}</div>
+<div style={{color:verdict.color,fontWeight:700,fontSize:12,marginTop:2}}>{career.verdict}</div>
 </div>
-{(career.seasons||[]).map((s,i)=>(<CareerSeasonCard key={i} season={s}/>))}
+{career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:12,textAlign:"right"}}>💰 {formatMoney(career.totalEarnings)}</div>}
+</div>
+<CareerTrophyRow totals={totals}/>
+<CareerLadderList seasons={career.seasons||[]}/>
 <button onClick={onClose} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:14}}>Sluiten</button>
 </div>
 </div>
@@ -8933,12 +9038,80 @@ return(
 }
 
 // ── Main Career Sim orchestrator: hub (past careers + leaderboard) → create (name/pos/draft) → mode pick → live sim → result
+// ── OVR badge — colored tier square, like Copero's rating chip
+function CareerOvrBadge({ovr,size=62}){
+const tier=ovr>=90?"#f5a524":ovr>=80?"#e0862a":ovr>=70?RED:ovr>=60?"#8E8E93":"#4a4a4a";
+return(
+<div style={{background:tier,borderRadius:14,width:size,height:size,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+<div style={{color:"rgba(0,0,0,0.5)",fontSize:9,fontWeight:800,letterSpacing:1}}>OVR</div>
+<div style={{color:"#000",fontSize:Math.round(size*0.36),fontWeight:900,lineHeight:1}}>{ovr}</div>
+</div>
+);
+}
+// ── Persistent player header — OVR badge + #number/position pills + club/age/salary, shown across the live career flow
+function CareerPlayerHeader({player,rating,age,team,salary}){
+return(
+<div style={{display:"flex",gap:10,marginBottom:16}}>
+<CareerOvrBadge ovr={rating}/>
+<div style={{flex:1,background:INPUTBG,borderRadius:14,padding:"10px 14px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+{player.nationality&&<span style={{background:"#2C2C2E",color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>{player.nationality.flag} {player.nationality.code}</span>}
+<span style={{background:"#2C2C2E",color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>#{player.number||19}</span>
+<span style={{background:RED,color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>{player.pos}</span>
+{age!=null&&<span style={{color:GREY,fontSize:11,marginLeft:"auto"}}>{age}j</span>}
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{player.name}</div>
+<div style={{color:GREY,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{team?team.name:"Free agent"}{salary?` · ${formatMoney(salary)}/jr`:""}</div>
+</div>
+</div>
+);
+}
+// ── One choice, rendered as a card (icon + label + optional sub-line + colored effect tag) — used for every in-season decision
+function DecisionCard({icon,label,sub,tag,tagColor,onClick}){
+return(
+<div onClick={onClick} style={{background:INPUTBG,borderRadius:14,padding:"16px 10px",textAlign:"center",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",minHeight:112}}>
+<div style={{fontSize:26,marginBottom:8}}>{icon}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:12.5,marginBottom:sub?2:0}}>{label}</div>
+{sub&&<div style={{color:GREY,fontSize:10,marginBottom:8}}>{sub}</div>}
+{tag&&<div style={{marginTop:"auto",background:tagColor||"#2C2C2E",color:WHITE,fontSize:9,fontWeight:700,borderRadius:8,padding:"3px 8px"}}>{tag}</div>}
+</div>
+);
+}
+// ── A concrete team offer — team + tier + contract length combined with the salary being offered, like Copero's academy-offer cards
+function TeamOfferCard({offer,onClick}){
+return(
+<div onClick={onClick} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:14,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div style={{fontSize:24,flexShrink:0}}>🏀</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{offer.team.name}</div>
+<div style={{color:GREY,fontSize:11}}>{teamTierLabel(offer.teamState.strength)} · {offer.years} jaar</div>
+</div>
+<div style={{color:"#27AE60",fontWeight:800,fontSize:15,whiteSpace:"nowrap",flexShrink:0}}>{formatMoney(offer.salaryPerYear)}/jr</div>
+</div>
+);
+}
+// ── Jersey mockup with live name/number preview, used during player creation
+function CareerJerseyPreview({name,number}){
+return(
+<div style={{display:"flex",justifyContent:"center",marginBottom:18}}>
+<svg width="150" height="150" viewBox="0 0 150 150">
+<path d="M45 20 L60 12 Q75 22 90 12 L105 20 L118 42 L104 52 L104 130 Q75 136 46 130 L46 52 L32 42 Z" fill={RED} stroke="#000" strokeWidth="2"/>
+<text x="75" y="70" textAnchor="middle" fill={WHITE} fontSize="12" fontWeight="800" fontFamily="inherit">{(name||"SPELER").toUpperCase()}</text>
+<text x="75" y="108" textAnchor="middle" fill={WHITE} fontSize="34" fontWeight="900" fontFamily="inherit">{number||"19"}</text>
+</svg>
+</div>
+);
+}
+
 function CareerSimSection({careerSims,authUserId,myUsername,onSaveCareerSim,onDeleteCareerSim}){
 const {IS}=styles();
 const [stage,setStage]=useState("hub"); // hub | create | modepick | sim
 const [viewingSim,setViewingSim]=useState(null);
 const [draftName,setDraftName]=useState("");
+const [draftNumber,setDraftNumber]=useState("");
 const [draftPos,setDraftPos]=useState(null);
+const [draftNationality,setDraftNationality]=useState(null);
+const [nationalitySearch,setNationalitySearch]=useState("");
 const [draftStep,setDraftStep]=useState(0);
 const [draftAttrs,setDraftAttrs]=useState({});
 const [draftTrio,setDraftTrio]=useState(null);
@@ -8954,6 +9127,7 @@ const [voluntaryRetire,setVoluntaryRetire]=useState(false);
 const [contractYearsLeft,setContractYearsLeft]=useState(4);
 const [activeSalary,setActiveSalary]=useState(null);
 const [pendingContractBase,setPendingContractBase]=useState(null);
+const [teamOffers,setTeamOffers]=useState(null);
 const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|playoffs|retireChoice|recap
 const [revealedRounds,setRevealedRounds]=useState(0);
 const [pendingSeasonEnd,setPendingSeasonEnd]=useState(null);
@@ -8967,11 +9141,14 @@ const myCareers=careerSims.filter(c=>c.userId===authUserId).sort((a,b)=>new Date
 const topCareers=careerSims.slice().sort((a,b)=>(b.careerScore||0)-(a.careerScore||0)).slice(0,15);
 
 function startCreate(){
-setDraftName("");setDraftPos(null);setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);
+setDraftName("");setDraftNumber("");setDraftPos(null);setDraftNationality(null);setNationalitySearch("");setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);
 setStage("create");
 }
 function choosePos(p){
 setDraftPos(p);
+}
+function chooseNationality(nat){
+setDraftNationality(nat);
 setDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));
 }
 function pickLegendForAttr(legend){
@@ -8987,7 +9164,7 @@ setDraftStep(draftStep+1);
 setDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
 }else{
 const overall=careerOverall(newAttrs,draftPos);
-setPlayer({name:draftName.trim()||"Naamloos Talent",pos:draftPos,attrs:newAttrs,overall,legends:newNames});
+setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:newAttrs,overall,legends:newNames});
 setStage("modepick");
 }
 }
@@ -9015,7 +9192,7 @@ const initTs=freshTeamState(null);
 const startTrue=Math.max(35,player.overall-Math.round(careerRoll(15,22)));
 setTeamState(initTs);setTrueRating(startTrue);setPeakRating(startTrue);
 setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);setVoluntaryRetire(false);
-setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);
+setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);
 setPendingSeason(null);setSeasonStage(null);
 setStage("sim");
 if(chosenMode==="quick")runQuickToEnd(player,initTs,startTrue);
@@ -9029,9 +9206,14 @@ else{beginTrainingStage();}
 }
 function beginTrainingStage(){setTrainingOptions(getTrainingOptions());setSeasonStage("training");}
 function chooseContractOption(optId){
+if(optId==="resign"){
 const base=makeContractOutcome(optId,teamState);
 setPendingContractBase(base);
 setSeasonStage("contractLength");
+}else{
+setTeamOffers(generateTeamOffers(optId,teamState.team.name,trueRating));
+setSeasonStage("teamOffer");
+}
 }
 function chooseContractLength(lenOpt){
 const base=pendingContractBase;
@@ -9041,6 +9223,15 @@ setPendingSeason(p=>({...(p||{}),contract}));
 setActiveSalary(salaryPerYear);
 setContractYearsLeft(lenOpt.years);
 setPendingContractBase(null);
+beginTrainingStage();
+}
+function chooseTeamOffer(offer){
+const opt=CONTRACT_OPTIONS.find(o=>o.id===offer.id);
+const contract={id:offer.id,icon:opt.icon,label:`${opt.label} — ${offer.team.name}`,newTeamState:offer.teamState,years:offer.years,lengthLabel:offer.lengthLabel,salaryPerYear:offer.salaryPerYear,perfBonus:offer.perfBonus};
+setPendingSeason(p=>({...(p||{}),contract}));
+setActiveSalary(offer.salaryPerYear);
+setContractYearsLeft(offer.years);
+setTeamOffers(null);
 beginTrainingStage();
 }
 function chooseTraining(attrDef){
@@ -9133,7 +9324,7 @@ setSaved(true);
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9168,12 +9359,35 @@ if(!draftPos){
 return(
 <div>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>NIEUWE CARRIÈRE</div>
-<input value={draftName} onChange={e=>setDraftName(e.target.value)} placeholder="Naam van je speler" style={{...IS,marginBottom:14}}/>
+<CareerJerseyPreview name={draftName} number={draftNumber}/>
+<div style={{display:"flex",gap:10,marginBottom:14}}>
+<input value={draftName} onChange={e=>setDraftName(e.target.value)} placeholder="Naam van je speler" style={{...IS,flex:1}}/>
+<input value={draftNumber} onChange={e=>setDraftNumber(e.target.value.replace(/\D/g,"").slice(0,2))} placeholder="19" style={{...IS,width:60,textAlign:"center"}}/>
+</div>
 <div style={{color:GREY,fontSize:12,marginBottom:8}}>Kies een positie:</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,marginBottom:20}}>
 {CAREER_POSITIONS.map(p=>(<button key={p} onClick={()=>choosePos(p)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:800,fontSize:14,cursor:"pointer"}}>{p}</button>))}
 </div>
 <button onClick={()=>setStage("hub")} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Terug</button>
+</div>
+);
+}
+if(!draftNationality){
+const filtered=CAREER_NATIONS.filter(n=>n.name.toLowerCase().includes(nationalitySearch.toLowerCase()));
+return(
+<div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>NATIONALITEIT</div>
+<input value={nationalitySearch} onChange={e=>setNationalitySearch(e.target.value)} placeholder="Zoek land..." style={{...IS,marginBottom:14}}/>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,maxHeight:420,overflowY:"auto",marginBottom:16}}>
+{filtered.map(n=>(
+<div key={n.code} onClick={()=>chooseNationality(n)} style={{display:"flex",alignItems:"center",gap:8,background:INPUTBG,borderRadius:10,padding:"10px 12px",cursor:"pointer"}}>
+<span style={{fontSize:20,flexShrink:0}}>{n.flag}</span>
+<span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.name}</span>
+</div>
+))}
+{filtered.length===0&&<div style={{color:GREY,fontSize:13,gridColumn:"1/3",textAlign:"center",padding:16}}>Geen landen gevonden</div>}
+</div>
+<button onClick={()=>setDraftPos(null)} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Terug</button>
 </div>
 );
 }
@@ -9201,14 +9415,12 @@ return(
 
 if(stage==="modepick"){
 return(
-<div style={{textAlign:"center"}}>
-<div style={{fontSize:44,marginBottom:10}}>🏀</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:19,marginBottom:4}}>{player.name}</div>
-<div style={{color:GREY,fontSize:13,marginBottom:4}}>{player.pos} · {player.overall} OVR plafond</div>
-<div style={{color:GREY,fontSize:11,marginBottom:16}}>Je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
+<div>
+<CareerPlayerHeader player={player} rating={player.overall} age={19} team={null} salary={null}/>
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:16}}>{player.overall} OVR is je plafond — je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:24}}>
 {CAREER_ATTRS.map(a=>(
-<div key={a.key} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px"}}>
+<div key={a.key} style={{background:INPUTBG,borderRadius:10,padding:"8px 4px",textAlign:"center"}}>
 <div style={{fontSize:16}}>{a.icon}</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:15}}>{player.attrs[a.key]}</div>
 <div style={{color:GREY,fontSize:9}}>{a.label}</div>
@@ -9217,7 +9429,7 @@ return(
 </div>
 <button onClick={()=>beginSim("quick")} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
 <button onClick={()=>beginSim("standard")} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
-<button onClick={backToHub} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer"}}>Annuleren</button>
+<button onClick={backToHub} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>Annuleren</button>
 </div>
 );
 }
@@ -9226,7 +9438,7 @@ if(stage==="sim"){
 if(retired){
 const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
 const verdict=careerVerdict(score);
-return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} onDone={backToHub}/>);
+return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
 }
 if(mode==="quick"){
 return(
@@ -9244,76 +9456,81 @@ return(
 </div>
 );
 }
+const headerEl=<CareerPlayerHeader player={player} rating={trueRating} age={simAge} team={teamState?.team} salary={activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3))}/>;
 if(seasonStage==="contract"){
+const tags={resign:{tag:"Loyaliteit ↑",color:"#27AE60"},testFA:{tag:"Open markt",color:"#3498DB"},discount:{tag:"Ring chase 💍",color:"#f5a524"},demand:{tag:"Onrustig",color:RED}};
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTONDERHANDELING · LEEFTIJD {simAge}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTONDERHANDELING</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je contract bij {teamState.team.name} loopt af. Wat nu?</div>
-{CONTRACT_OPTIONS.map(o=>(
-<div key={o.id} onClick={()=>chooseContractOption(o.id)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
-<div style={{fontSize:20}}>{o.icon}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{o.label}</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+{CONTRACT_OPTIONS.map(o=>(<DecisionCard key={o.id} icon={o.icon} label={o.label} tag={tags[o.id]?.tag} tagColor={tags[o.id]?.color} onClick={()=>chooseContractOption(o.id)}/>))}
 </div>
-))}
+</div>
+);
+}
+if(seasonStage==="teamOffer"&&teamOffers){
+return(
+<div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTAANBIEDINGEN</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Drie teams willen je. Kies je nieuwe club:</div>
+{teamOffers.map((o,i)=>(<TeamOfferCard key={i} offer={o} onClick={()=>chooseTeamOffer(o)}/>))}
 </div>
 );
 }
 if(seasonStage==="contractLength"&&pendingContractBase){
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTDUUR & SALARIS · LEEFTIJD {simAge}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTDUUR & SALARIS</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>{pendingContractBase.icon} {pendingContractBase.label} — voor hoelang?</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
 {CONTRACT_LENGTHS.map(lo=>{
 const preview=negotiateSalary(trueRating,pendingContractBase.id,lo.salaryMult);
-return(
-<div key={lo.years} onClick={()=>chooseContractLength(lo)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
-<div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{lo.label}</div>
-<div style={{color:GREY,fontSize:11}}>Totaal {formatMoney(preview*lo.years)} over {lo.years} jaar</div>
-</div>
-<div style={{color:"#27AE60",fontWeight:800,fontSize:15,whiteSpace:"nowrap"}}>{formatMoney(preview)}/jr</div>
-</div>
-);
+return(<DecisionCard key={lo.years} icon="📅" label={`${lo.years} jaar`} sub={lo.label.split("—")[1]?.trim()} tag={`${formatMoney(preview)}/jr`} tagColor="#27AE60" onClick={()=>chooseContractLength(lo)}/>);
 })}
+</div>
 </div>
 );
 }
 if(seasonStage==="training"){
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PRESEASON · LEEFTIJD {simAge}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PRESEASON</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Waar focus je je training op dit seizoen?</div>
-{(trainingOptions||[]).map(a=>(
-<div key={a.key} onClick={()=>chooseTraining(a)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
-<div style={{fontSize:20}}>{a.icon}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{a.label}</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+{(trainingOptions||[]).map(a=>(<DecisionCard key={a.key} icon={a.icon} label={a.label} tag="Groei-boost" tagColor="#27AE60" onClick={()=>chooseTraining(a)}/>))}
 </div>
-))}
 </div>
 );
 }
 if(seasonStage==="event"&&currentEvent){
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>SEIZOENSMOMENT · LEEFTIJD {simAge}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>SEIZOENSMOMENT</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{currentEvent.prompt}</div>
-{currentEvent.options.map((o,i)=>(
-<div key={i} onClick={()=>chooseEventOption(o)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
-<div style={{fontSize:20}}>{o.icon}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{o.label}</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+{currentEvent.options.map((o,i)=>(<DecisionCard key={i} icon={o.icon} label={o.label} tag={o.injuryRisk?"⚠️ Risico":"Veilig"} tagColor={o.injuryRisk?"#f5a524":"#27AE60"} onClick={()=>chooseEventOption(o)}/>))}
 </div>
-))}
 </div>
 );
 }
 if(seasonStage==="national"){
+const natName=player.nationality?.name||"je land";
+const natFlag=player.nationality?.flag||"🌍";
 return(
-<div style={{textAlign:"center"}}>
-<div style={{fontSize:36,marginBottom:10}}>🇺🇸</div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>NATIONAAL TEAM · LEEFTIJD {simAge}</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>Je bent opgeroepen voor het nationale team deze zomer. Doe je mee?</div>
-<button onClick={()=>chooseNational(true)} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>🔥 Speel mee</button>
-<button onClick={()=>chooseNational(false)} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>😌 Rust uit deze zomer</button>
+<div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>NATIONAAL TEAM</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{natFlag} Je bent opgeroepen voor {natName} deze zomer. Doe je mee?</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
+<DecisionCard icon="🔥" label="Speel mee" tag="Extra caps" tagColor="#27AE60" onClick={()=>chooseNational(true)}/>
+<DecisionCard icon="😌" label="Rust uit" tag="Geen risico" tagColor="#3498DB" onClick={()=>chooseNational(false)}/>
+</div>
 </div>
 );
 }
@@ -9325,7 +9542,8 @@ const roundBtnLabel=["Simuleer Eerste Ronde ▸","Simuleer Halve Finale ▸","Si
 const done=revealedRounds>=maxRounds;
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PLAY-OFFS · {last.team.name} · SEED #{po.seed}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PLAY-OFFS · SEED #{po.seed}</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je hebt de play-offs gehaald! 🏀</div>
 <PlayoffBracketView playoffs={po} revealedRounds={revealedRounds}/>
 <BracketRoundStats playoffs={po} revealedRounds={revealedRounds}/>
@@ -9338,7 +9556,8 @@ if(seasonStage==="retireChoice"){
 const last=seasons[seasons.length-1];
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>EINDE CARRIÈRE IN ZICHT · LEEFTIJD {simAge}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>EINDE CARRIÈRE IN ZICHT</div>
 {last&&<CareerSeasonCard season={last}/>}
 <div style={{color:WHITE,fontSize:13,fontWeight:600,margin:"18px 0 10px",textAlign:"center"}}>Ga je door, of stop je nu?</div>
 <button onClick={continueCareer} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>💪 Nog een seizoen proberen</button>
@@ -9349,7 +9568,8 @@ return(
 const last=seasons[seasons.length-1];
 return(
 <div>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN AFGEROND · LEEFTIJD {simAge-1}</div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN AFGEROND</div>
 {last&&<CareerSeasonCard season={last}/>}
 <button onClick={continueCareer} style={{background:RED,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Volgende seizoen ▸</button>
 </div>

@@ -8407,24 +8407,24 @@ const CAREER_EVENTS=[
 // Choice events — each presents two options with different growth/risk trade-offs, mid-season narrative moments.
 const CHOICE_EVENTS=[
 {id:"coach_trust",prompt:"De coach biedt je een grotere rol aan met meer minuten — meer druk, meer kans op blessures.",options:[
-{label:"Pak de kans",icon:"🔥",perfDelta:[4,9],injuryRisk:0.18},
-{label:"Blijf voorzichtig",icon:"🛡️",perfDelta:[-1,2],injuryRisk:0.05},
+{label:"Pak de kans",icon:"🔥",perfDelta:[4,9],injuryRisk:0.18,repDelta:1,leader:true},
+{label:"Blijf voorzichtig",icon:"🛡️",perfDelta:[-1,2],injuryRisk:0.05,repDelta:0},
 ]},
 {id:"minor_injury",prompt:"Je voelt lichte pijn opkomen tijdens het seizoen.",options:[
-{label:"Speel door de pijn",icon:"😬",perfDelta:[1,4],injuryRisk:0.3},
-{label:"Neem rust om te herstellen",icon:"🩹",perfDelta:[-4,-1],injuryRisk:0.02},
+{label:"Speel door de pijn",icon:"😬",perfDelta:[1,4],injuryRisk:0.3,repDelta:1},
+{label:"Neem rust om te herstellen",icon:"🩹",perfDelta:[-4,-1],injuryRisk:0.02,repDelta:0},
 ]},
 {id:"trade_rumor",prompt:"Er gaan geruchten over een trade rond jouw naam.",options:[
-{label:"Vraag duidelijkheid van het management",icon:"🗣️",perfDelta:[-2,3]},
-{label:"Negeer het en focus op je spel",icon:"🎯",perfDelta:[1,5]},
+{label:"Vraag duidelijkheid van het management",icon:"🗣️",perfDelta:[-2,3],repDelta:0},
+{label:"Negeer het en focus op je spel",icon:"🎯",perfDelta:[1,5],repDelta:0},
 ]},
 {id:"leadership",prompt:"Jongere teamgenoten kijken naar jou op als leider.",options:[
-{label:"Neem de leidersrol op je",icon:"🧠",perfDelta:[2,6]},
-{label:"Focus liever op je eigen spel",icon:"🎯",perfDelta:[0,3]},
+{label:"Neem de leidersrol op je",icon:"🧠",perfDelta:[2,6],repDelta:2,leader:true},
+{label:"Focus liever op je eigen spel",icon:"🎯",perfDelta:[0,3],repDelta:-1},
 ]},
 {id:"rivalry",prompt:"Een rivaliteit met een sterspeler van een ander team laait op.",options:[
-{label:"Ga de confrontatie aan",icon:"😤",perfDelta:[2,7]},
-{label:"Blijf professioneel en negeer het",icon:"😌",perfDelta:[0,2]},
+{label:"Ga de confrontatie aan",icon:"😤",perfDelta:[2,7],repDelta:1},
+{label:"Blijf professioneel en negeer het",icon:"😌",perfDelta:[0,2],repDelta:0},
 ]},
 ];
 const CONTRACT_OPTIONS=[
@@ -8522,17 +8522,20 @@ const mult=[1,1.08,1.17,1.3][yearIndex]||1.3;
 return Math.max(1,Math.round(base*mult*10)/10);
 }
 // ── Negotiated salary (millions/yr) for any post-rookie contract — driven by current true rating, deal type and chosen length.
-function negotiateSalary(trueRatingAtSigning,typeId,lengthMult){
+function negotiateSalary(trueRatingAtSigning,typeId,lengthMult,reputation){
+reputation=reputation||0;
 const marketValue=Math.pow(trueRatingAtSigning/99,2.2)*46;
 let mult=1;
 if(typeId==="discount")mult=0.62;
 else if(typeId==="demand")mult=1.05;
 else if(typeId==="testFA")mult=1.08;
-else if(typeId==="resign")mult=0.97+careerRoll(0,0.1);
+else if(typeId==="resign")mult=0.97+careerRoll(0,0.1)+Math.min(0.08,Math.max(-0.05,reputation*0.005));
 return Math.max(1.5,Math.round(marketValue*mult*lengthMult*10)/10);
 }
 // ── Three concrete team+contract offers to choose between (team, length and salary bundled into one pick) — for deals that change team (testFA/discount/demand).
-function generateTeamOffers(typeId,excludeName,trueRating){
+// A mercenary reputation makes contenders warier about the "discount" path; a beloved leader gets better contender interest.
+function generateTeamOffers(typeId,excludeName,trueRating,reputation){
+reputation=reputation||0;
 let pool=NBA_TEAMS_STATIC.filter(t=>t.name!==excludeName);
 const teams=[];
 while(teams.length<3&&pool.length){
@@ -8541,11 +8544,27 @@ teams.push(pool[idx]);
 pool=pool.filter((_,i)=>i!==idx);
 }
 return teams.map(team=>{
-const strength=typeId==="discount"?careerRoll(75,95):careerRoll(30,90);
+let strength;
+if(typeId==="discount"){
+if(reputation<=-8)strength=careerRoll(55,75);
+else if(reputation>=10)strength=careerRoll(82,97);
+else strength=careerRoll(75,95);
+}else{
+strength=careerRoll(30,90);
+}
 const lenOpt=pickRandom(CONTRACT_LENGTHS);
-const salaryPerYear=negotiateSalary(trueRating,typeId,lenOpt.salaryMult);
+const salaryPerYear=negotiateSalary(trueRating,typeId,lenOpt.salaryMult,reputation);
 return{id:typeId,team,teamState:{team,strength},years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
 });
+}
+// ── Reputation tier — built from loyalty, leadership, and grit choices made through the career; shown in the header and shapes contract leverage.
+function reputationLabel(rep){
+if(rep>=15)return{label:"🏆 Franchise legend",color:"#f5a524"};
+if(rep>=8)return{label:"🤝 Fanfavoriet",color:"#27AE60"};
+if(rep>=3)return{label:"😊 Gerespecteerd",color:"#3498DB"};
+if(rep>-3)return{label:"😐 Neutraal",color:GREY};
+if(rep>-8)return{label:"😒 Wisselvallig imago",color:"#f5a524"};
+return{label:"😈 Huurling-reputatie",color:RED};
 }
 function formatMoney(m){return"$"+m.toFixed(1)+"M";}
 // ── Growth model: true rating climbs toward the draft ceiling (fast early, flat mid-career, decline after 32), nudged each season.
@@ -8690,6 +8709,8 @@ else if(seasonRating>=65){role="Rotatie";minutesFactor=0.6;}
 let injuryGames=Math.random()<0.12?Math.round(careerRoll(8,28)):Math.round(careerRoll(0,6));
 if(pending.event?.extraInjury)injuryGames+=pending.event.extraInjury;
 if(pending.nationalTeam&&pending.nationalFatigue)injuryGames+=Math.round(careerRoll(5,12));
+const majorInjury=injuryGames>=30;
+const ceilingHit=majorInjury?Math.round(careerRoll(1,3)):0;
 const gp=Math.max(8,82-injuryGames);
 const pts=Math.round((player.attrs.sco/99)*minutesFactor*30*careerRoll(0.85,1.15)*10)/10;
 const reb=Math.round((player.attrs.reb/99)*minutesFactor*13*careerRoll(0.85,1.15)*10)/10;
@@ -8720,7 +8741,7 @@ if(seasonRating>=95&&Math.random()<0.18)awards.push("mvp");
 if(player.attrs.def>=90&&seasonRating>=85&&Math.random()<0.15)awards.push("dpoy");
 if(playoffs.champion)awards.push("championship");
 const teamTier=teamTierLabel(strength);
-const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,nationalTeam:!!pending.nationalTeam,awards,playoffs};
+const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,ceilingHit,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,nationalTeam:!!pending.nationalTeam,awards,playoffs};
 return{season,newTrueRating:newTrue,newTeamState:ts};
 }
 // ── Auto-pick every choice for a season (used by Quick mode — no UI, just resolves). contractYearsLeft<=0 triggers a fresh negotiation.
@@ -8816,6 +8837,7 @@ return(
 {season.training&&<div style={{color:GREY,fontSize:11,marginBottom:4}}>{season.training.icon} Trainingsfocus: {season.training.label}</div>}
 {season.event&&<div style={{color:"#f5a524",fontSize:11,marginBottom:4}}>{season.event.icon} {season.event.choiceLabel?`${season.event.choiceLabel} — ${season.event.label}`:season.event.label}</div>}
 {season.nationalTeam&&<div style={{color:"#27AE60",fontSize:11,marginBottom:6}}>🌍 Nationaal team deze zomer</div>}
+{season.majorInjury&&<div style={{color:RED,fontSize:11,marginBottom:6}}>🚑 Serieuze blessure — verloor {season.ceilingHit} punten van zijn plafond, blijvend</div>}
 {season.awards.filter(a=>a!=="championship").length>0&&(
 <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
 {season.awards.filter(a=>a!=="championship").map(a=>(<span key={a} style={{background:"#2C2C2E",color:WHITE,fontSize:10,fontWeight:700,borderRadius:8,padding:"3px 8px"}}>{awardLabels[a]}</span>))}
@@ -9052,13 +9074,14 @@ return(
 </div>
 );
 }
-function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,regret,onDone,onPlayAgain}){
+function CareerResultCard({player,seasons,score,totals,verdict,retiredAge,voluntaryRetire,regret,isCaptain,onDone,onPlayAgain}){
 return(
 <div style={{textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
 <CareerOvrBadge ovr={player.overall} size={56}/>
 <div style={{color:WHITE,fontWeight:800,fontSize:20,margin:"10px 0 2px"}}>{player.name}</div>
 <div style={{color:GREY,fontSize:13,marginBottom:10}}>{player.pos} · {voluntaryRetire?`Stopte zelf op ${retiredAge}, op eigen voorwaarden`:`Gestopt op ${retiredAge}`}</div>
+{isCaptain&&<div style={{color:"#f5a524",fontWeight:700,fontSize:12,marginBottom:4}}>⭐ Captain Legacy — een geboren leider</div>}
 <div style={{color:verdict.color,fontWeight:800,fontSize:16,marginBottom:6}}>{verdict.tier}</div>
 {totals&&<div style={{color:"#27AE60",fontWeight:800,fontSize:20,marginBottom:14}}>💰 {formatMoney(totals.earnings)} verdiend</div>}
 <CareerTrophyRow totals={totals}/>
@@ -9113,6 +9136,7 @@ return(
 <div style={{color:WHITE,fontWeight:800,fontSize:16}}>{career.playerName}</div>
 <div style={{color:GREY,fontSize:11}}>{career.pos} · {career.username}</div>
 <div style={{color:verdict.color,fontWeight:700,fontSize:12,marginTop:2}}>{career.verdict}</div>
+{career.isCaptain&&<div style={{color:"#f5a524",fontWeight:700,fontSize:11,marginTop:2}}>⭐ Captain Legacy</div>}
 </div>
 {career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:12,textAlign:"right"}}>💰 {formatMoney(career.totalEarnings)}</div>}
 </div>
@@ -9137,7 +9161,8 @@ return(
 );
 }
 // ── Persistent player header — OVR badge + #number/position pills + club/age/salary, shown across the live career flow
-function CareerPlayerHeader({player,rating,age,team,salary}){
+function CareerPlayerHeader({player,rating,age,team,salary,reputation}){
+const rep=reputation!=null?reputationLabel(reputation):null;
 return(
 <div style={{display:"flex",gap:10,marginBottom:16}}>
 <CareerOvrBadge ovr={rating}/>
@@ -9150,6 +9175,7 @@ return(
 </div>
 <div style={{color:WHITE,fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{player.name}</div>
 <div style={{color:GREY,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{team?team.name:"Free agent"}{salary?` · ${formatMoney(salary)}/jr`:""}</div>
+{rep&&<div style={{color:rep.color,fontSize:10,fontWeight:700,marginTop:2}}>{rep.label}</div>}
 </div>
 </div>
 );
@@ -9223,6 +9249,8 @@ const [teamOffers,setTeamOffers]=useState(null);
 const [pendingStayOption,setPendingStayOption]=useState(null);
 const [forkPoints,setForkPoints]=useState([]);
 const [regret,setRegret]=useState(null);
+const [reputation,setReputation]=useState(0);
+const [leadershipCount,setLeadershipCount]=useState(0);
 const [seasonStage,setSeasonStage]=useState(null); // null|contract|contractLength|training|event|national|playoffs|retireChoice|recap
 const [revealedRounds,setRevealedRounds]=useState(0);
 const [pendingSeasonEnd,setPendingSeasonEnd]=useState(null);
@@ -9267,12 +9295,13 @@ setStage("modepick");
 
 // ── Quick mode: resolve every season (with auto-picked choices) straight through to retirement.
 function runQuickToEnd(startPlayer,initTs,startTrue){
-let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null;
+let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null,ceiling=startPlayer.overall;
 for(let i=0;i<20;i++){
 const pending=autoPendingChoices(cyl,ts,trueR);
 if(pending.contract){salary=pending.contract.salaryPerYear;cyl=pending.contract.years;}
-const seasonSalary=salary!=null?salary:rookieScaleSalary(startPlayer.overall,Math.min(i,3));
-const{season,newTrueRating,newTeamState}=buildSeason(startPlayer,age,trueR,ts,pending,seasonSalary);
+const seasonSalary=salary!=null?salary:rookieScaleSalary(ceiling,Math.min(i,3));
+const{season,newTrueRating,newTeamState}=buildSeason({...startPlayer,overall:ceiling},age,trueR,ts,pending,seasonSalary);
+if(season.majorInjury&&season.ceilingHit)ceiling=Math.max(40,ceiling-season.ceilingHit);
 list.push(season);
 trueR=newTrueRating;peak=Math.max(peak,trueR);ts=newTeamState;
 cyl-=1;
@@ -9281,7 +9310,7 @@ const randForced=!hardForced&&(age+1)>=36&&Math.random()<0.4;
 age++;
 if(hardForced||randForced)break;
 }
-setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setRetired(true);
+setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setPlayer(p=>({...p,overall:ceiling}));setRetired(true);
 }
 function startDraftNight(chosenMode){
 setPendingMode(chosenMode);
@@ -9295,7 +9324,7 @@ const initTs=draftedTeam?{team:draftedTeam.team,strength:draftedTeam.strength}:f
 const startTrue=Math.max(35,player.overall-Math.round(careerRoll(15,22)));
 setTeamState(initTs);setTrueRating(startTrue);setPeakRating(startTrue);
 setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);setVoluntaryRetire(false);
-setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);
+setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setReputation(0);setLeadershipCount(0);setForkPoints([]);setRegret(null);
 setPendingSeason(null);setSeasonStage(null);
 setStage("sim");
 if(chosenMode==="quick")runQuickToEnd(player,initTs,startTrue);
@@ -9331,18 +9360,19 @@ else{beginTrainingStage();}
 function beginTrainingStage(){setTrainingOptions(getTrainingOptions());setSeasonStage("training");}
 function chooseContractOption(optId){
 if(optId==="resign"){
+setReputation(r=>r+3);
 const base=makeContractOutcome(optId,teamState);
 setPendingContractBase(base);
 setSeasonStage("contractLength");
 }else{
 setPendingStayOption({team:teamState.team,strength:teamState.strength});
-setTeamOffers(generateTeamOffers(optId,teamState.team.name,trueRating));
+setTeamOffers(generateTeamOffers(optId,teamState.team.name,trueRating,reputation));
 setSeasonStage("teamOffer");
 }
 }
 function chooseContractLength(lenOpt){
 const base=pendingContractBase;
-const salaryPerYear=negotiateSalary(trueRating,base.id,lenOpt.salaryMult);
+const salaryPerYear=negotiateSalary(trueRating,base.id,lenOpt.salaryMult,reputation);
 const contract={...base,years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
 setPendingSeason(p=>({...(p||{}),contract}));
 setActiveSalary(salaryPerYear);
@@ -9351,6 +9381,7 @@ setPendingContractBase(null);
 beginTrainingStage();
 }
 function chooseTeamOffer(offer){
+setReputation(r=>r+(offer.id==="discount"?1:-2));
 const opt=CONTRACT_OPTIONS.find(o=>o.id===offer.id);
 const contract={id:offer.id,icon:opt.icon,label:`${opt.label} — ${offer.team.name}`,newTeamState:offer.teamState,years:offer.years,lengthLabel:offer.lengthLabel,salaryPerYear:offer.salaryPerYear,perfBonus:offer.perfBonus};
 setPendingSeason(p=>({...(p||{}),contract}));
@@ -9386,6 +9417,8 @@ function chooseEventOption(opt){
 const perfDelta=careerRoll(opt.perfDelta[0],opt.perfDelta[1]);
 const extraInjury=(opt.injuryRisk&&Math.random()<opt.injuryRisk)?Math.round(careerRoll(6,16)):0;
 const eventObj={icon:opt.icon,label:currentEvent.prompt,choiceLabel:opt.label,perfDelta,extraInjury};
+if(opt.repDelta)setReputation(r=>r+opt.repDelta);
+if(opt.leader)setLeadershipCount(c=>c+1);
 setPendingSeason(p=>({...(p||{}),event:eventObj}));
 setCurrentEvent(null);
 afterEventStage({event:eventObj});
@@ -9401,6 +9434,8 @@ doResolveSeasonWith({...(pendingSeason||{}),...partial});
 }
 function chooseNational(accept){
 if(accept){
+setReputation(r=>r+2);
+setLeadershipCount(c=>c+1);
 const fatigue=Math.random()<0.2;
 const partial={nationalTeam:true,nationalFatigue:fatigue};
 setPendingSeason(p=>({...(p||{}),...partial}));
@@ -9414,6 +9449,9 @@ function doResolveSeasonWith(pending){
 const age=simAge;
 const seasonSalary=activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3));
 const{season,newTrueRating,newTeamState}=buildSeason(player,age,trueRating,teamState,pending,seasonSalary);
+if(season.majorInjury&&season.ceilingHit){
+setPlayer(p=>({...p,overall:Math.max(40,p.overall-season.ceilingHit)}));
+}
 const newSeasons=[...seasons,season];
 const newPeak=Math.max(peakRating,newTrueRating);
 setSeasons(newSeasons);setTrueRating(newTrueRating);setPeakRating(newPeak);setTeamState(newTeamState);setSimAge(age+1);setPendingSeason(null);
@@ -9452,16 +9490,18 @@ startSeasonFlow();
 useEffect(()=>{
 if(retired&&!saved&&player&&seasons.length){
 const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
-const verdict=careerVerdict(score);
+const isCaptain=leadershipCount>=4;
+const finalScore=score+(isCaptain?15:0);
+const verdict=careerVerdict(finalScore);
 const computedRegret=computeBestRegret(forkPoints,seasons);
 setRegret(computedRegret);
-onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:score,verdict:verdict.tier,retiredAge:simAge,voluntaryRetire,totalEarnings:totals.earnings,regret:computedRegret});
+onSaveCareerSim({playerName:player.name,pos:player.pos,attrs:player.attrs,overall:player.overall,legends:player.legends,mode,seasons,careerScore:finalScore,verdict:verdict.tier,retiredAge:simAge,voluntaryRetire,totalEarnings:totals.earnings,regret:computedRegret,isCaptain});
 setSaved(true);
 }
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setPendingStayOption(null);setForkPoints([]);setRegret(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setPendingStayOption(null);setForkPoints([]);setRegret(null);setReputation(0);setLeadershipCount(0);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9553,7 +9593,7 @@ return(
 if(stage==="modepick"){
 return(
 <div>
-<CareerPlayerHeader player={player} rating={player.overall} age={19} team={null} salary={null}/>
+<CareerPlayerHeader player={player} rating={player.overall} age={19} team={null} salary={null} reputation={0}/>
 <div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:4}}>{player.overall} OVR is je plafond — je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
 {player.isGoatBuild?(
 <div style={{color:"#f5a524",fontSize:12,fontWeight:700,textAlign:"center",marginBottom:16}}>🐐 Genetic freak — je ontsnapt aan de gebruikelijke aanval/verdediging trade-off!</div>
@@ -9606,8 +9646,10 @@ return(
 if(stage==="sim"){
 if(retired){
 const{score,totals}=computeCareerScore(seasons,voluntaryRetire);
-const verdict=careerVerdict(score);
-return(<CareerResultCard player={player} seasons={seasons} score={score} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} regret={regret} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
+const isCaptain=leadershipCount>=4;
+const finalScore=score+(isCaptain?15:0);
+const verdict=careerVerdict(finalScore);
+return(<CareerResultCard player={player} seasons={seasons} score={finalScore} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} regret={regret} isCaptain={isCaptain} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
 }
 if(mode==="quick"){
 return(
@@ -9625,7 +9667,7 @@ return(
 </div>
 );
 }
-const headerEl=<CareerPlayerHeader player={player} rating={trueRating} age={simAge} team={teamState?.team} salary={activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3))}/>;
+const headerEl=<CareerPlayerHeader player={player} rating={trueRating} age={simAge} team={teamState?.team} salary={activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3))} reputation={reputation}/>;
 if(seasonStage==="contract"){
 const tags={resign:{tag:"Loyaliteit ↑",color:"#27AE60"},testFA:{tag:"Open markt",color:"#3498DB"},discount:{tag:"Ring chase 💍",color:"#f5a524"},demand:{tag:"Onrustig",color:RED}};
 return(

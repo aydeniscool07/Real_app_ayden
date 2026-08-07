@@ -8435,6 +8435,21 @@ return{id:"revenge_game",prompt:`Vanavond speel je tegen je rivaal ${rivalName} 
 {label:"Speel het slim, laat het team schitteren",icon:"🧠",perfDelta:[1,4],repDelta:2,leader:true},
 ]};
 }
+// ── One-game box score for the marquee rival matchup — how you actually played that night, plus the final score.
+function simulateRivalGameBox(player,trueRating,perfDelta){
+const boost=Math.max(0,perfDelta)/10;
+const pts=Math.max(2,Math.round((player.attrs.sco/99)*24*(0.9+boost)+careerRoll(-3,5)));
+const reb=Math.max(0,Math.round((player.attrs.reb/99)*10*(0.9+boost*0.5)+careerRoll(-2,3)));
+const ast=Math.max(0,Math.round((player.attrs.plm/99)*8*(0.9+boost*0.5)+careerRoll(-2,3)));
+const stl=Math.max(0,Math.round((player.attrs.def/99)*3+careerRoll(-1,1)));
+const blk=Math.max(0,Math.round(((player.attrs.def+player.attrs.ath)/198)*2.5+careerRoll(-1,1)));
+const winProb=Math.max(0.25,Math.min(0.85,0.5+(trueRating-75)/150+boost*0.15));
+const win=Math.random()<winProb;
+const myScore=Math.round(careerRoll(96,122));
+const diff=Math.round(careerRoll(2,14));
+const oppScore=Math.max(70,win?myScore-diff:myScore+diff);
+return{pts,reb,ast,stl,blk,myScore,oppScore,win};
+}
 function rollSeasonEvent(rival){
 if(rival&&rival.intensity>=2&&Math.random()<0.3){
 return{kind:"choice",...buildRevengeGameEvent(rival.name)};
@@ -8447,6 +8462,7 @@ const CONTRACT_OPTIONS=[
 {id:"testFA",icon:"🧳",label:"Test de vrije agent-markt"},
 {id:"discount",icon:"💍",label:"Neem korting bij een titelkandidaat"},
 {id:"demand",icon:"📣",label:"Eis een trade"},
+{id:"forceTrade",icon:"🎯",label:"Eis een trade naar een specifiek team"},
 ];
 // Contract length choices — shorter = more pressure/upside for growth this signing, longer = security but smaller bump, and a lower per-year rate.
 const CONTRACT_LENGTHS=[
@@ -8517,13 +8533,23 @@ function draftPickTeamStrength(pick){
 return Math.max(20,Math.min(92,Math.round(20+pick*2.4+careerRoll(-6,6))));
 }
 function getTrainingOptions(){return CAREER_ATTRS.slice().sort(()=>Math.random()-0.5).slice(0,3);}
+// ── Olympics — only fires roughly every 4 seasons (each career gets a fixed phase), medal chance driven by your rating plus a random national-team-quality roll.
+function simulateOlympics(trueRating){
+const teamQuality=careerRoll(50,95);
+const strength=trueRating*0.4+teamQuality*0.6;
+const roll=strength+careerRoll(-20,20);
+if(roll>=88)return"gold";
+if(roll>=75)return"silver";
+if(roll>=62)return"bronze";
+return null;
+}
 function makeContractOutcome(optId,curTeamState){
 const opt=CONTRACT_OPTIONS.find(o=>o.id===optId);
 let newTeamState=curTeamState;
 if(optId==="resign")newTeamState={...curTeamState,strength:Math.min(95,curTeamState.strength+careerRoll(2,7))};
 else if(optId==="testFA")newTeamState=freshTeamState(curTeamState.team.name);
 else if(optId==="discount")newTeamState={team:pickRandom(NBA_TEAMS_STATIC),strength:careerRoll(75,95)};
-else if(optId==="demand")newTeamState=freshTeamState(curTeamState.team.name);
+else if(optId==="demand"||optId==="forceTrade")newTeamState=freshTeamState(curTeamState.team.name);
 return{id:optId,icon:opt.icon,label:opt.label,newTeamState};
 }
 // ── Rookie-scale salary (millions/yr) for the first 4 seasons, before any negotiation — scales with draft ceiling, rises each year.
@@ -8539,6 +8565,7 @@ const marketValue=Math.pow(trueRatingAtSigning/99,2.2)*46;
 let mult=1;
 if(typeId==="discount")mult=0.62;
 else if(typeId==="demand")mult=1.05;
+else if(typeId==="forceTrade")mult=1.03;
 else if(typeId==="testFA")mult=1.08;
 else if(typeId==="resign")mult=0.97+careerRoll(0,0.1)+Math.min(0.08,Math.max(-0.05,reputation*0.005));
 return Math.max(1.5,Math.round(marketValue*mult*lengthMult*10)/10);
@@ -8566,6 +8593,25 @@ strength=careerRoll(30,90);
 const lenOpt=pickRandom(CONTRACT_LENGTHS);
 const salaryPerYear=negotiateSalary(trueRating,typeId,lenOpt.salaryMult,reputation);
 return{id:typeId,team,teamState:{team,strength},years:lenOpt.years,lengthLabel:lenOpt.label,salaryPerYear,perfBonus:lenOpt.perfBonus};
+});
+}
+// ── Whether a specific team wants you — used for the "force a trade anywhere" browser. Bad reputation or being not-good-enough can get you rejected;
+// your original team always welcomes you back.
+function computeTeamInterest(team,trueRating,reputation,isOriginal){
+const strength=careerRoll(30,90);
+if(isOriginal)return{interested:true,reason:"Verwelkomt je terug met open armen",strength};
+let interested=true,reason=null;
+if(trueRating<45){interested=false;reason="Je bent nog niet goed genoeg";}
+else if(strength>=75&&trueRating<65){interested=false;reason="Titelkandidaten willen een bewezen niveau";}
+else if(reputation<=-8&&Math.random()<0.6){interested=false;reason="Twijfelt door je reputatie";}
+else if(strength>=85&&reputation<=-4){interested=false;reason="Wil geen onrust in de kleedkamer";}
+return{interested,reason,strength};
+}
+function buildTeamBrowserList(excludeName,trueRating,reputation,originalTeamName){
+return NBA_TEAMS_STATIC.filter(t=>t.name!==excludeName).map(team=>{
+const isOriginal=team.name===originalTeamName;
+const interest=computeTeamInterest(team,trueRating,reputation,isOriginal);
+return{team,isOriginal,interested:interest.interested,reason:interest.reason,strength:interest.strength};
 });
 }
 // ── Reputation tier — built from loyalty, leadership, and grit choices made through the career; shown in the header and shapes contract leverage.
@@ -8753,15 +8799,15 @@ if(seasonRating>=95&&Math.random()<0.18)awards.push("mvp");
 if(player.attrs.def>=90&&seasonRating>=85&&Math.random()<0.15)awards.push("dpoy");
 if(playoffs.champion)awards.push("championship");
 const teamTier=teamTierLabel(strength);
-const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,potentialCeilingHit,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,recovery:pending.recovery||null,nationalTeam:!!pending.nationalTeam,awards,playoffs};
+const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,potentialCeilingHit,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,recovery:pending.recovery||null,nationalTeam:!!pending.nationalTeam,olympics:pending.olympics||null,awards,playoffs};
 return{season,newTrueRating:newTrue,newTeamState:ts};
 }
 // ── Auto-pick every choice for a season (used by Quick mode — no UI, just resolves). contractYearsLeft<=0 triggers a fresh negotiation.
-function autoPendingChoices(contractYearsLeft,curTeamState,curTrueRating){
+function autoPendingChoices(contractYearsLeft,curTeamState,curTrueRating,isOlympicYear){
 const pending={};
 if(contractYearsLeft<=0){
 const r=Math.random();
-const optId=r<0.55?"resign":r<0.75?"discount":r<0.9?"testFA":"demand";
+const optId=r<0.55?"resign":r<0.72?"discount":r<0.86?"testFA":r<0.96?"demand":"forceTrade";
 const base=makeContractOutcome(optId,curTeamState);
 const lenOpt=pickRandom(CONTRACT_LENGTHS);
 const salaryPerYear=negotiateSalary(curTrueRating,optId,lenOpt.salaryMult);
@@ -8779,6 +8825,10 @@ pending.event={icon:evt.icon,label:evt.label,perfDelta:careerRoll(evt.mod[0],evt
 if(curTrueRating>=83&&Math.random()<0.45){
 pending.nationalTeam=true;
 pending.nationalFatigue=Math.random()<0.2;
+if(isOlympicYear){
+const medal=simulateOlympics(curTrueRating);
+pending.olympics=medal?{medal}:{medal:null};
+}
 }
 return pending;
 }
@@ -8828,7 +8878,7 @@ return{votePct,inducted,blurb};
 // ── Folds the whole season log into one legacy score — including loyalty (longest single-team streak),
 // national caps, and a "ring chaser" bonus for a discount-contract signing that actually paid off.
 function computeCareerScore(seasons,voluntaryRetire){
-let pts=0,reb=0,ast=0,gp=0,allStars=0,allNba=0,mvps=0,dpoys=0,champs=0,peak=0,playoffApps=0,finalsApps=0,caps=0,earnings=0;
+let pts=0,reb=0,ast=0,gp=0,allStars=0,allNba=0,mvps=0,dpoys=0,champs=0,peak=0,playoffApps=0,finalsApps=0,finalsWins=0,finalsLosses=0,playoffSeriesWins=0,playoffSeriesLosses=0,olympicGolds=0,olympicMedals=0,caps=0,earnings=0;
 let curStreak=0,maxStreak=0,lastTeam=null,ringChaseBonus=0;
 seasons.forEach((s,i)=>{
 pts+=s.pts*s.gp;reb+=s.reb*s.gp;ast+=s.ast*s.gp;gp+=s.gp;
@@ -8840,7 +8890,18 @@ if(s.awards.includes("mvp"))mvps++;
 if(s.awards.includes("dpoy"))dpoys++;
 if(s.awards.includes("championship"))champs++;
 if(s.nationalTeam)caps++;
-if(s.playoffs&&s.playoffs.made){playoffApps++;if(s.playoffs.finals&&s.playoffs.finals.mineInvolved)finalsApps++;}
+if(s.olympics?.medal){olympicMedals++;if(s.olympics.medal==="gold")olympicGolds++;}
+if(s.playoffs&&s.playoffs.made){
+playoffApps++;
+[0,1,2].forEach(r=>{
+const m=s.playoffs.myBracket.rounds[r]?.matchups.find(x=>x.mineInvolved);
+if(m){if(m.mineWon)playoffSeriesWins++;else playoffSeriesLosses++;}
+});
+if(s.playoffs.finals&&s.playoffs.finals.mineInvolved){
+finalsApps++;
+if(s.playoffs.finals.mineWon)finalsWins++;else finalsLosses++;
+}
+}
 if(lastTeam&&s.team.name===lastTeam)curStreak++;else curStreak=1;
 maxStreak=Math.max(maxStreak,curStreak);
 lastTeam=s.team.name;
@@ -8848,8 +8909,8 @@ if(s.contract&&s.contract.id==="discount"&&seasons.slice(i,i+2).some(x=>x.awards
 });
 const loyaltyBonus=maxStreak*3;
 const voluntaryBonus=voluntaryRetire?12:0;
-const score=Math.round(pts*0.015+reb*0.02+ast*0.03+allStars*15+allNba*20+mvps*60+dpoys*30+champs*35+peak*1.5+gp*0.04+playoffApps*5+finalsApps*10+caps*4+loyaltyBonus+ringChaseBonus+voluntaryBonus);
-return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast),gp,allStars,allNba,mvps,dpoys,champs,peak,playoffApps,caps,maxStreak,earnings:Math.round(earnings*10)/10}};
+const score=Math.round(pts*0.015+reb*0.02+ast*0.03+allStars*15+allNba*20+mvps*60+dpoys*30+champs*35+peak*1.5+gp*0.04+playoffApps*5+finalsApps*10+caps*4+olympicGolds*20+loyaltyBonus+ringChaseBonus+voluntaryBonus);
+return{score,totals:{pts:Math.round(pts),reb:Math.round(reb),ast:Math.round(ast),gp,allStars,allNba,mvps,dpoys,champs,peak,playoffApps,finalsWins,finalsLosses,playoffSeriesWins,playoffSeriesLosses,olympicGolds,olympicMedals,caps,maxStreak,earnings:Math.round(earnings*10)/10}};
 }
 
 // ── One season card (used in the live sim recap, retirement card and saved-career detail view) — full stat line + playoff bracket
@@ -8858,11 +8919,13 @@ const awardLabels={"all-star":"⭐ All-Star","all-nba":"🥇 All-NBA","mvp":"�
 const po=season.playoffs;
 const [showBracket,setShowBracket]=useState(false);
 const myPath=po&&po.made?[...po.myBracket.rounds.map(r=>r.matchups.find(m=>m.mineInvolved)).filter(Boolean),...(po.finals&&po.finals.mineInvolved?[{...po.finals,round:"NBA Finals"}]:[])]:[];
+const won=season.awards.includes("championship");
+const olympicIcon=season.olympics?.medal==="gold"?"🥇🏳️":season.olympics?.medal==="silver"?"🥈🏳️":season.olympics?.medal==="bronze"?"🥉🏳️":null;
 return(
 <div style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",marginBottom:10}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
 <div>
-<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{season.age}j · {season.team.name}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{season.age}j · {season.team.name}{won?" 💍":""}{olympicIcon?" "+olympicIcon:""}</div>
 <div style={{color:GREY,fontSize:11}}>{season.teamTier||season.team.conf} · {season.wins}-{season.losses}{season.seed&&season.seed<=8?` · seed #${season.seed}`:""} · {season.role}{season.salary?` · ${formatMoney(season.salary)}`:""}</div>
 </div>
 <div style={{textAlign:"right"}}>
@@ -8882,7 +8945,28 @@ return(
 {season.recovery&&<div style={{color:"#f5a524",fontSize:11,marginBottom:4}}>{season.recovery.icon} {season.recovery.label}</div>}
 {season.training&&<div style={{color:GREY,fontSize:11,marginBottom:4}}>{season.training.icon} Trainingsfocus: {season.training.label}</div>}
 {season.event&&<div style={{color:"#f5a524",fontSize:11,marginBottom:4}}>{season.event.icon} {season.event.choiceLabel?`${season.event.choiceLabel} — ${season.event.label}`:season.event.label}</div>}
+{season.event?.rivalBox&&(
+<div style={{background:INPUTBG,borderRadius:10,padding:"10px 12px",marginBottom:8}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+<div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1}}>VS {season.event.rivalName?.toUpperCase()}</div>
+<div style={{color:season.event.rivalBox.win?"#27AE60":RED,fontWeight:800,fontSize:12}}>{season.event.rivalBox.win?"W":"L"} {season.event.rivalBox.myScore}-{season.event.rivalBox.oppScore}</div>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4}}>
+{[["PTS",season.event.rivalBox.pts],["REB",season.event.rivalBox.reb],["AST",season.event.rivalBox.ast],["STL",season.event.rivalBox.stl],["BLK",season.event.rivalBox.blk]].map(([lbl,val])=>(
+<div key={lbl} style={{textAlign:"center"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:12}}>{val}</div>
+<div style={{color:GREY,fontSize:8}}>{lbl}</div>
+</div>
+))}
+</div>
+</div>
+)}
 {season.nationalTeam&&<div style={{color:"#27AE60",fontSize:11,marginBottom:6}}>🌍 Nationaal team deze zomer</div>}
+{season.olympics&&(
+<div style={{color:season.olympics.medal?"#f5a524":GREY,fontSize:11,marginBottom:6,fontWeight:season.olympics.medal?700:400}}>
+{season.olympics.medal==="gold"?"🥇🏳️ Olympisch kampioen!":season.olympics.medal==="silver"?"🥈🏳️ Olympisch zilver":season.olympics.medal==="bronze"?"🥉🏳️ Olympisch brons":"🏳️ Olympische Spelen — geen medaille"}
+</div>
+)}
 {season.majorInjury&&<div style={{color:RED,fontSize:11,marginBottom:6}}>🚑 Serieuze blessure — herstel begint volgend seizoen</div>}
 {season.pressLine&&<div style={{color:"#8ab4f8",fontSize:11,fontStyle:"italic",marginBottom:6}}>{season.pressLine}</div>}
 {season.awards.filter(a=>a!=="championship").length>0&&(
@@ -9067,10 +9151,12 @@ return(
 // ── Compact age/club/OVR/GP/PTS/AST ladder row — one line per season, tap to expand full detail
 function CareerLadderRow({season,onClick}){
 const tierColor=season.rating>=90?"#f5a524":season.rating>=80?"#e0862a":season.rating>=70?RED:season.rating>=60?"#8E8E93":"#4a4a4a";
+const won=season.awards.includes("championship");
+const olympicIcon=season.olympics?.medal==="gold"?"🥇🏳️":season.olympics?.medal==="silver"?"🥈🏳️":season.olympics?.medal==="bronze"?"🥉🏳️":null;
 return(
 <div onClick={onClick} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 2px",borderBottom:`1px solid ${DIVIDER}`,cursor:"pointer"}}>
 <div style={{width:24,textAlign:"center",background:"#2C2C2E",borderRadius:6,color:WHITE,fontSize:10,fontWeight:700,padding:"2px 0",flexShrink:0}}>{season.age}</div>
-<div style={{flex:1,minWidth:0,color:WHITE,fontSize:11,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{season.team.name}</div>
+<div style={{flex:1,minWidth:0,color:WHITE,fontSize:11,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{season.team.name}{won?" 💍":""}{olympicIcon?" "+olympicIcon:""}</div>
 <div style={{width:26,textAlign:"center",background:tierColor,borderRadius:6,color:"#000",fontSize:10,fontWeight:800,padding:"2px 0",flexShrink:0}}>{season.rating}</div>
 <div style={{width:22,textAlign:"center",color:GREY,fontSize:9,flexShrink:0}}>{season.gp}</div>
 <div style={{width:28,textAlign:"center",color:GREY,fontSize:9,flexShrink:0}}>{season.pts}</div>
@@ -9144,7 +9230,7 @@ return(
 <CareerTrophyRow totals={totals}/>
 {totals&&(
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
-{[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Caps",totals.caps],["Play-offs",totals.playoffApps],["Langste tijd bij 1 team",totals.maxStreak+"j"]].map(([lbl,val])=>(
+{[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Caps",totals.caps],["Play-offs",totals.playoffApps],["Play-off record",`${totals.playoffSeriesWins}-${totals.playoffSeriesLosses}`],["Finals record",`${totals.finalsWins}-${totals.finalsLosses}`],["🥇 Olympisch goud",totals.olympicGolds],["Langste tijd bij 1 team",totals.maxStreak+"j"]].map(([lbl,val])=>(
 <div key={lbl} style={{background:INPUTBG,borderRadius:10,padding:"10px 4px"}}>
 <div style={{color:WHITE,fontWeight:800,fontSize:16}}>{val}</div>
 <div style={{color:GREY,fontSize:9}}>{lbl}</div>
@@ -9199,6 +9285,11 @@ return(
 {career.totalEarnings&&<div style={{color:"#27AE60",fontWeight:700,fontSize:12,textAlign:"right"}}>💰 {formatMoney(career.totalEarnings)}</div>}
 </div>
 <CareerTrophyRow totals={totals}/>
+<div style={{display:"flex",gap:14,justifyContent:"center",marginBottom:14,flexWrap:"wrap"}}>
+<div style={{color:GREY,fontSize:11}}>Play-offs: <span style={{color:WHITE,fontWeight:700}}>{totals.playoffSeriesWins}-{totals.playoffSeriesLosses}</span></div>
+<div style={{color:GREY,fontSize:11}}>Finals: <span style={{color:WHITE,fontWeight:700}}>{totals.finalsWins}-{totals.finalsLosses}</span></div>
+{totals.olympicGolds>0&&<div style={{color:GREY,fontSize:11}}>🥇 ×{totals.olympicGolds}</div>}
+</div>
 <CareerHallOfFameCallout hallOfFame={career.hallOfFame}/>
 <CareerRegretCallout regret={career.regret}/>
 <CareerLadderList seasons={career.seasons||[]}/>
@@ -9305,6 +9396,8 @@ const [contractYearsLeft,setContractYearsLeft]=useState(4);
 const [activeSalary,setActiveSalary]=useState(null);
 const [pendingContractBase,setPendingContractBase]=useState(null);
 const [teamOffers,setTeamOffers]=useState(null);
+const [originalTeamName,setOriginalTeamName]=useState(null);
+const [teamBrowserList,setTeamBrowserList]=useState(null);
 const [pendingStayOption,setPendingStayOption]=useState(null);
 const [forkPoints,setForkPoints]=useState([]);
 const [regret,setRegret]=useState(null);
@@ -9349,7 +9442,7 @@ setDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
 }else{
 const{attrs:balancedAttrs,isGoatBuild}=applyArchetypeTradeoff(newAttrs);
 const overall=careerOverall(balancedAttrs,draftPos);
-setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:balancedAttrs,isGoatBuild,overall,legends:newNames});
+setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:balancedAttrs,isGoatBuild,overall,olympicPhase:Math.floor(Math.random()*4),legends:newNames});
 setStage("modepick");
 }
 }
@@ -9357,8 +9450,10 @@ setStage("modepick");
 // ── Quick mode: resolve every season (with auto-picked choices) straight through to retirement.
 function runQuickToEnd(startPlayer,initTs,startTrue){
 let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null,ceiling=startPlayer.overall;
+const olympicPhase=startPlayer.olympicPhase!=null?startPlayer.olympicPhase:0;
 for(let i=0;i<20;i++){
-const pending=autoPendingChoices(cyl,ts,trueR);
+const isOlympicYear=(age%4)===olympicPhase;
+const pending=autoPendingChoices(cyl,ts,trueR,isOlympicYear);
 if(pending.contract){salary=pending.contract.salaryPerYear;cyl=pending.contract.years;}
 const seasonSalary=salary!=null?salary:rookieScaleSalary(ceiling,Math.min(i,3));
 const{season,newTrueRating,newTeamState}=buildSeason({...startPlayer,overall:ceiling},age,trueR,ts,pending,seasonSalary);
@@ -9385,8 +9480,9 @@ function beginSim(chosenMode,draftedTeam){
 const initTs=draftedTeam?{team:draftedTeam.team,strength:draftedTeam.strength}:freshTeamState(null);
 const startTrue=Math.max(35,player.overall-Math.round(careerRoll(15,22)));
 setTeamState(initTs);setTrueRating(startTrue);setPeakRating(startTrue);
+setOriginalTeamName(initTs.team.name);
 setMode(chosenMode);setSeasons([]);setSimAge(19);setRetired(false);setSaved(false);setVoluntaryRetire(false);
-setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setReputation(0);setLeadershipCount(0);setForkPoints([]);setRegret(null);setRival(null);setRecoveryArc(null);
+setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setTeamBrowserList(null);setReputation(0);setLeadershipCount(0);setForkPoints([]);setRegret(null);setRival(null);setRecoveryArc(null);
 setPendingSeason(null);setSeasonStage(null);
 setStage("sim");
 if(chosenMode==="quick")runQuickToEnd(player,initTs,startTrue);
@@ -9452,11 +9548,19 @@ setReputation(r=>r+3);
 const base=makeContractOutcome(optId,teamState);
 setPendingContractBase(base);
 setSeasonStage("contractLength");
+}else if(optId==="forceTrade"){
+setTeamBrowserList(buildTeamBrowserList(teamState.team.name,trueRating,reputation,originalTeamName));
+setSeasonStage("teamBrowser");
 }else{
 setPendingStayOption({team:teamState.team,strength:teamState.strength});
 setTeamOffers(generateTeamOffers(optId,teamState.team.name,trueRating,reputation));
 setSeasonStage("teamOffer");
 }
+}
+function chooseForceTradeTeam(t){
+setPendingContractBase({id:"forceTrade",icon:"🎯",label:`Eis trade naar ${t.team.name}`,newTeamState:{team:t.team,strength:t.strength}});
+setTeamBrowserList(null);
+setSeasonStage("contractLength");
 }
 function chooseContractLength(lenOpt){
 const base=pendingContractBase;
@@ -9511,6 +9615,8 @@ if(opt.startsRival){
 setRival(r=>r?{...r,intensity:r.intensity+1}:{name:pickRandom(RIVAL_NAMES),intensity:1});
 }
 if(currentEvent.id==="revenge_game"){
+eventObj.rivalName=rival?.name;
+eventObj.rivalBox=simulateRivalGameBox(player,trueRating,perfDelta);
 setRival(r=>r?{...r,intensity:Math.max(0,r.intensity-2)}:r);
 }
 setPendingSeason(p=>({...(p||{}),event:eventObj}));
@@ -9531,7 +9637,14 @@ if(accept){
 setReputation(r=>r+2);
 setLeadershipCount(c=>c+1);
 const fatigue=Math.random()<0.2;
-const partial={nationalTeam:true,nationalFatigue:fatigue};
+const isOlympicYr=player.olympicPhase!=null&&(simAge%4)===player.olympicPhase;
+let olympics=null;
+if(isOlympicYr){
+const medal=simulateOlympics(trueRating);
+olympics=medal?{medal}:{medal:null};
+if(medal==="gold")setReputation(r=>r+3);
+}
+const partial={nationalTeam:true,nationalFatigue:fatigue,olympics};
 setPendingSeason(p=>({...(p||{}),...partial}));
 doResolveSeasonWith({...(pendingSeason||{}),...partial});
 }else{
@@ -9597,7 +9710,7 @@ setSaved(true);
 // eslint-disable-next-line
 },[retired]);
 
-function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setPendingStayOption(null);setForkPoints([]);setRegret(null);setReputation(0);setLeadershipCount(0);setRival(null);setRecoveryArc(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
+function backToHub(){setStage("hub");setPlayer(null);setSeasons([]);setMode(null);setPendingMode(null);setDraftSpinning(false);setDraftDisplay(null);setDraftResult(null);setSeasonStage(null);setRetired(false);setTeamState(null);setVoluntaryRetire(false);setContractYearsLeft(4);setActiveSalary(null);setPendingContractBase(null);setTeamOffers(null);setOriginalTeamName(null);setTeamBrowserList(null);setPendingStayOption(null);setForkPoints([]);setRegret(null);setReputation(0);setLeadershipCount(0);setRival(null);setRecoveryArc(null);setRevealedRounds(0);setPendingSeasonEnd(null);}
 
 if(stage==="hub"){
 return(
@@ -9779,7 +9892,7 @@ return(
 );
 }
 if(seasonStage==="contract"){
-const tags={resign:{tag:"Loyaliteit ↑",color:"#27AE60"},testFA:{tag:"Open markt",color:"#3498DB"},discount:{tag:"Ring chase 💍",color:"#f5a524"},demand:{tag:"Onrustig",color:RED}};
+const tags={resign:{tag:"Loyaliteit ↑",color:"#27AE60"},testFA:{tag:"Open markt",color:"#3498DB"},discount:{tag:"Ring chase 💍",color:"#f5a524"},demand:{tag:"Onrustig",color:RED},forceTrade:{tag:"Jouw keuze",color:"#f5a524"}};
 return(
 <div>
 {headerEl}
@@ -9788,6 +9901,26 @@ return(
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
 {CONTRACT_OPTIONS.map(o=>(<DecisionCard key={o.id} icon={o.icon} label={o.label} tag={tags[o.id]?.tag} tagColor={tags[o.id]?.color} onClick={()=>chooseContractOption(o.id)}/>))}
 </div>
+</div>
+);
+}
+if(seasonStage==="teamBrowser"&&teamBrowserList){
+return(
+<div>
+{headerEl}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>TRADE-AANVRAAG</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Kies een team om een trade naartoe te eisen. Niet elk team hapt toe.</div>
+<div style={{maxHeight:440,overflowY:"auto",marginBottom:10}}>
+{teamBrowserList.map((t,i)=>(
+<div key={i} onClick={()=>t.interested&&chooseForceTradeTeam(t)} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"10px 12px",marginBottom:6,opacity:t.interested?1:0.5,cursor:t.interested?"pointer":"default"}}>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{t.team.name}{t.isOriginal?" 🏠":""}</div>
+<div style={{color:t.interested?"#27AE60":RED,fontSize:11}}>{t.interested?(t.isOriginal?t.reason:"Geïnteresseerd"):t.reason}</div>
+</div>
+</div>
+))}
+</div>
+<button onClick={()=>setSeasonStage("contract")} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Terug</button>
 </div>
 );
 }
@@ -9843,13 +9976,14 @@ return(
 if(seasonStage==="national"){
 const natName=player.nationality?.name||"je land";
 const natFlag=player.nationality?.flag||"🌍";
+const isOlympicYr=player.olympicPhase!=null&&(simAge%4)===player.olympicPhase;
 return(
 <div>
 {headerEl}
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>NATIONAAL TEAM</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{natFlag} Je bent opgeroepen voor {natName} deze zomer. Doe je mee?</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>{isOlympicYr?"🥇 OLYMPISCHE SPELEN":"NATIONAAL TEAM"}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{natFlag} {isOlympicYr?`Het is Olympisch jaar — ${natName} rekent op je voor het toernooi. Doe je mee?`:`Je bent opgeroepen voor ${natName} deze zomer. Doe je mee?`}</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-<DecisionCard icon="🔥" label="Speel mee" tag="Extra caps" tagColor="#27AE60" onClick={()=>chooseNational(true)}/>
+<DecisionCard icon="🔥" label="Speel mee" tag={isOlympicYr?"Kans op goud":"Extra caps"} tagColor="#27AE60" onClick={()=>chooseNational(true)}/>
 <DecisionCard icon="😌" label="Rust uit" tag="Geen risico" tagColor="#3498DB" onClick={()=>chooseNational(false)}/>
 </div>
 </div>

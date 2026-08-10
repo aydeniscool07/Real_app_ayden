@@ -8306,6 +8306,12 @@ const CAREER_ATTRS=[
 {key:"ath",label:"Atletisch vermogen",icon:"⚡"},
 {key:"iq",label:"Basketbal IQ",icon:"🧠"},
 ];
+// ── Point-buy build system: legend picks set each attribute's CEILING (potential), not its final value.
+// A tight shared budget across all 6 attributes forces real trade-offs — you cannot max out every skill,
+// so every career starts from a genuinely different, often lopsided, foundation instead of a guaranteed all-around stud.
+const CAREER_ATTR_FLOOR=25;
+const CAREER_POINT_BUDGET=220;
+const CAREER_GOAT_BUDGET_BONUS=45; // rare "genetic freak" roll — extra budget, not a tradeoff-immunity freebie
 const CAREER_POSITIONS=["PG","SG","SF","PF","C"];
 // Nationalities you can pick for your player — ties into the national team callup mechanic during a career.
 const CAREER_NATIONS=[
@@ -9398,9 +9404,12 @@ const [draftPos,setDraftPos]=useState(null);
 const [draftNationality,setDraftNationality]=useState(null);
 const [nationalitySearch,setNationalitySearch]=useState("");
 const [draftStep,setDraftStep]=useState(0);
-const [draftAttrs,setDraftAttrs]=useState({});
+const [draftAttrs,setDraftAttrs]=useState({}); // legend picks — these are CEILINGS, not final values
 const [draftTrio,setDraftTrio]=useState(null);
 const [draftLegendNames,setDraftLegendNames]=useState([]);
+const [allocAttrs,setAllocAttrs]=useState({}); // final invested values, spent against the point budget
+const [allocBudget,setAllocBudget]=useState(CAREER_POINT_BUDGET);
+const [isGoatDraft,setIsGoatDraft]=useState(false);
 const [mode,setMode]=useState(null);
 const [pendingMode,setPendingMode]=useState(null);
 const [draftSpinning,setDraftSpinning]=useState(false);
@@ -9441,6 +9450,7 @@ const topCareers=careerSims.slice().sort((a,b)=>(b.careerScore||0)-(a.careerScor
 
 function startCreate(){
 setDraftName("");setDraftNumber("");setDraftPos(null);setDraftNationality(null);setNationalitySearch("");setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);
+setAllocAttrs({});setAllocBudget(CAREER_POINT_BUDGET);setIsGoatDraft(false);
 setStage("create");
 }
 function choosePos(p){
@@ -9452,21 +9462,61 @@ setDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));
 }
 function pickLegendForAttr(legend){
 const attrKey=CAREER_ATTRS[draftStep].key;
-// jitter the inherited value so identical picks never feel guaranteed-elite
-const val=Math.max(20,Math.min(99,Math.round(legend[attrKey]+careerRoll(-8,8))));
-const newAttrs={...draftAttrs,[attrKey]:val};
+// jitter the inherited value so identical picks never feel guaranteed-elite — this becomes your CEILING for the skill,
+// the actual value gets set during the point-buy allocation step right after.
+const ceiling=Math.max(30,Math.min(99,Math.round(legend[attrKey]+careerRoll(-8,8))));
+const newCeilings={...draftAttrs,[attrKey]:ceiling};
 const newNames=[...draftLegendNames,legend.name];
-setDraftAttrs(newAttrs);
+setDraftAttrs(newCeilings);
 setDraftLegendNames(newNames);
 if(draftStep<5){
 setDraftStep(draftStep+1);
 setDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
 }else{
-const{attrs:balancedAttrs,isGoatBuild}=applyArchetypeTradeoff(newAttrs);
-const overall=careerOverall(balancedAttrs,draftPos);
-setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:balancedAttrs,isGoatBuild,overall,olympicPhase:Math.floor(Math.random()*4),legends:newNames});
-setStage("modepick");
+const goat=Math.random()<0.05;
+const startAttrs={};
+CAREER_ATTRS.forEach(a=>{startAttrs[a.key]=CAREER_ATTR_FLOOR;});
+setAllocAttrs(startAttrs);
+setAllocBudget(CAREER_POINT_BUDGET+(goat?CAREER_GOAT_BUDGET_BONUS:0));
+setIsGoatDraft(goat);
+setStage("allocate");
 }
+}
+// ── Spend/refund a point on one attribute, clamped by its legend-given ceiling and by whatever budget is left
+// across the other five attributes (so raising one always visibly costs you room elsewhere).
+function adjustAttr(key,delta){
+setAllocAttrs(prev=>{
+const cur=prev[key]!=null?prev[key]:CAREER_ATTR_FLOOR;
+const ceiling=draftAttrs[key]||99;
+const spentOthers=CAREER_ATTRS.reduce((s,a)=>a.key===key?s:s+((prev[a.key]!=null?prev[a.key]:CAREER_ATTR_FLOOR)-CAREER_ATTR_FLOOR),0);
+const maxByBudget=CAREER_ATTR_FLOOR+Math.max(0,allocBudget-spentOthers);
+const maxVal=Math.min(ceiling,maxByBudget);
+const newVal=Math.max(CAREER_ATTR_FLOOR,Math.min(maxVal,cur+delta));
+return{...prev,[key]:newVal};
+});
+}
+// ── One-tap balanced fill: spreads the remaining budget round-robin across every attribute up to its ceiling.
+function autoBalanceAttrs(){
+const vals={};
+CAREER_ATTRS.forEach(a=>{vals[a.key]=CAREER_ATTR_FLOOR;});
+let remaining=allocBudget;
+let progressed=true;
+while(remaining>0&&progressed){
+progressed=false;
+for(const a of CAREER_ATTRS){
+if(remaining<=0)break;
+const ceiling=draftAttrs[a.key]||99;
+if(vals[a.key]<ceiling){vals[a.key]++;remaining--;progressed=true;}
+}
+}
+setAllocAttrs(vals);
+}
+function confirmBuild(){
+const finalAttrs={};
+CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=allocAttrs[a.key]!=null?allocAttrs[a.key]:CAREER_ATTR_FLOOR;});
+const overall=careerOverall(finalAttrs,draftPos);
+setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:finalAttrs,isGoatBuild:isGoatDraft,overall,olympicPhase:Math.floor(Math.random()*4),legends:draftLegendNames});
+setStage("modepick");
 }
 
 // ── Quick mode: resolve every season (with auto-picked choices) straight through to retirement.
@@ -9820,7 +9870,7 @@ return(
 <div>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>DRAFT · RONDE {draftStep+1}/6</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:18,marginBottom:4}}>{attrDef.icon} {attrDef.label}</div>
-<div style={{color:GREY,fontSize:12,marginBottom:16}}>Kies een legend — jouw speler neemt hun {attrDef.label.toLowerCase()}-waarde over (met een beetje willekeur).</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16}}>Kies een legend — dit bepaalt het PLAFOND van je {attrDef.label.toLowerCase()} (met een beetje willekeur). Je verdeelt zo dadelijk een beperkt puntenbudget om te bepalen hoe dicht je daar echt bij komt.</div>
 {(draftTrio||[]).map(l=>(
 <div key={l.name} onClick={()=>pickLegendForAttr(l)} style={{display:"flex",alignItems:"center",gap:12,background:INPUTBG,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
 <div style={{flex:1,minWidth:0}}>
@@ -9837,15 +9887,71 @@ return(
 );
 }
 
+if(stage==="allocate"){
+const spent=CAREER_ATTRS.reduce((s,a)=>s+((allocAttrs[a.key]!=null?allocAttrs[a.key]:CAREER_ATTR_FLOOR)-CAREER_ATTR_FLOOR),0);
+const remaining=allocBudget-spent;
+const ATTR_GRAD={
+sco:["#ff5b52","#7a0f0a"],plm:["#4fc3ff","#0d3a63"],reb:["#3ddc84","#0d4225"],
+def:["#b47bff","#3b1a63"],ath:["#ffb545","#7a4d0a"],iq:["#ffe066","#7a5c0a"],
+};
+return(
+<div style={{background:"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 60%,#000 100%)",borderRadius:18,padding:"18px 12px",border:"1px solid #3a1414",boxShadow:"0 0 24px rgba(232,49,42,0.15) inset"}}>
+<div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+<span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>HT: 6'7"</span>
+<span style={{color:"#5a2020"}}>|</span>
+<span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>WT: 217 lbs</span>
+<span style={{color:"#5a2020"}}>|</span>
+<span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>WS: 6'9"</span>
+</div>
+<div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginBottom:14}}>
+<span style={{background:"linear-gradient(180deg,#ffe066,#f5a524)",color:"#3a1a00",fontWeight:900,fontSize:12,padding:"3px 10px",borderRadius:6,letterSpacing:0.5}}>{draftPos||"PG"}</span>
+<span style={{color:"#ffe066",fontWeight:800,fontSize:14,letterSpacing:0.5}}>{draftName?draftName.toUpperCase():"YOUR BUILD"}</span>
+</div>
+{isGoatDraft&&<div style={{color:"#f5a524",fontSize:11,fontWeight:700,textAlign:"center",marginBottom:10}}>🐐 GENETIC FREAK — +{CAREER_GOAT_BUDGET_BONUS} BONUS POINTS</div>}
+<div style={{textAlign:"center",marginBottom:16}}>
+<span style={{color:remaining===0?"#3ddc84":"#ffe066",fontWeight:900,fontSize:28,textShadow:"0 0 10px rgba(255,224,102,0.4)"}}>{remaining}</span>
+<span style={{color:"#c98a8a",fontSize:10,letterSpacing:1,textTransform:"uppercase"}}> {remaining===1?"point left":"points left"}</span>
+</div>
+<div style={{display:"flex",justifyContent:"space-between",gap:4,marginBottom:14,overflowX:"auto",paddingBottom:4}}>
+{CAREER_ATTRS.map(a=>{
+const val=allocAttrs[a.key]!=null?allocAttrs[a.key]:CAREER_ATTR_FLOOR;
+const ceiling=draftAttrs[a.key]||99;
+const atCeiling=val>=ceiling;
+const pct=Math.max(2,Math.min(100,((val-CAREER_ATTR_FLOOR)/(99-CAREER_ATTR_FLOOR))*100));
+const capPct=Math.max(0,Math.min(100,((ceiling-CAREER_ATTR_FLOOR)/(99-CAREER_ATTR_FLOOR))*100));
+const[top,bot]=ATTR_GRAD[a.key]||[RED,"#3a0a08"];
+return(
+<div key={a.key} style={{display:"flex",flexDirection:"column",alignItems:"center",flex:"0 0 auto",width:44}}>
+<div style={{color:atCeiling?"#ffe066":WHITE,fontWeight:900,fontSize:14,marginBottom:4,textShadow:atCeiling?"0 0 8px rgba(255,224,102,0.6)":"none"}}>{val}</div>
+<div style={{position:"relative",width:22,height:130,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:"1px solid #3a1414"}}>
+<div style={{position:"absolute",left:0,right:0,bottom:0,height:`${pct}%`,background:`linear-gradient(180deg,${top},${bot})`,borderRadius:11,transition:"height 0.2s"}}/>
+<div style={{position:"absolute",left:0,right:0,bottom:`${capPct}%`,height:2,background:"#ffe066",boxShadow:"0 0 4px #ffe066"}}/>
+</div>
+<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,marginTop:6}}>
+<button onClick={()=>adjustAttr(a.key,5)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>+</button>
+<button onClick={()=>adjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>−</button>
+</div>
+<div style={{color:"#c98a8a",fontSize:8,fontWeight:700,letterSpacing:0.5,textAlign:"center",marginTop:5,textTransform:"uppercase"}}>{a.icon}<br/>{a.label}</div>
+</div>
+);
+})}
+</div>
+<button onClick={autoBalanceAttrs} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:10}}>⚖️ Auto-balance</button>
+<button onClick={confirmBuild} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10,boxShadow:"0 0 14px rgba(232,49,42,0.5)"}}>CONFIRM BUILD</button>
+<button onClick={()=>{setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);setDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));setStage("create");}} style={{background:"transparent",border:"none",color:"#c98a8a",fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Start over</button>
+</div>
+);
+}
+
 if(stage==="modepick"){
 return(
 <div>
 <CareerPlayerHeader player={player} rating={player.overall} age={19} team={null} salary={null} reputation={0}/>
 <div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:4}}>{player.overall} OVR is je plafond — je begint een stuk lager en groeit hiernaartoe tijdens je carrière.</div>
 {player.isGoatBuild?(
-<div style={{color:"#f5a524",fontSize:12,fontWeight:700,textAlign:"center",marginBottom:16}}>🐐 Genetic freak — je ontsnapt aan de gebruikelijke aanval/verdediging trade-off!</div>
+<div style={{color:"#f5a524",fontSize:12,fontWeight:700,textAlign:"center",marginBottom:16}}>🐐 Genetic freak build — extra budget besteed, dit is een uitzonderlijk talent.</div>
 ):(
-<div style={{color:GREY,fontSize:10,textAlign:"center",marginBottom:16}}>Zoals in 2K: extreem sterk in aanval kost je meestal wat verdediging, en omgekeerd.</div>
+<div style={{color:GREY,fontSize:10,textAlign:"center",marginBottom:16}}>Jouw build heeft duidelijke sterktes én zwaktes — precies zoals je ze hebt verdeeld.</div>
 )}
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:24}}>
 {CAREER_ATTRS.map(a=>(

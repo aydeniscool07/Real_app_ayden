@@ -9161,7 +9161,7 @@ function PlayoffBracketModal({season,onClose}){
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:410}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
-<div style={{width:36,height:4,background:DARK'#c98a8a',borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:2,textAlign:"center"}}>{season.team.name} · {season.age}j</div>
 <div style={{color:'#c98a8a',fontSize:11,marginBottom:16,textAlign:"center"}}>Play-off bracket</div>
 <PlayoffBracketView playoffs={season.playoffs} revealedRounds={4}/>
@@ -9228,7 +9228,7 @@ return(
 {expanded&&(
 <div onClick={()=>setExpanded(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:420}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
-<div style={{width:36,height:4,background:DARK'#c98a8a',borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <CareerSeasonCard season={expanded}/>
 <button onClick={()=>setExpanded(null)} style={{background:'#160a0a',border:'1px solid #3a1414',color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:8}}>Sluiten</button>
 </div>
@@ -9321,7 +9321,7 @@ const{totals}=computeCareerScore(career.seasons||[],career.voluntaryRetire);
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400}}>
 <div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
-<div style={{width:36,height:4,background:DARK'#c98a8a',borderRadius:2,margin:"0 auto 16px"}}/>
+<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
 <CareerOvrBadge ovr={career.overall} size={50}/>
 <div style={{flex:1,minWidth:0}}>

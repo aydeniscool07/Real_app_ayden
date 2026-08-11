@@ -9543,6 +9543,9 @@ const [leagueViewedCount,setLeagueViewedCount]=useState(0);
 const [leagueBuildPos,setLeagueBuildPos]=useState(null);
 const [leagueBuildCeilings,setLeagueBuildCeilings]=useState(null);
 const [leagueBuildAlloc,setLeagueBuildAlloc]=useState({});
+const [leagueDraftStep,setLeagueDraftStep]=useState(0);
+const [leagueDraftTrio,setLeagueDraftTrio]=useState(null);
+const [leagueDraftNames,setLeagueDraftNames]=useState([]);
 const [leagueBuildName,setLeagueBuildName]=useState("");
 const [leagueBusy,setLeagueBusy]=useState(false);
 const [currentEvent,setCurrentEvent]=useState(null);
@@ -9924,15 +9927,25 @@ await fbLeagueMerge(leagueId,{mode:m,status:"building"});
 }
 function startLeagueBuild(pos){
 setLeagueBuildPos(pos);
-const ceilings={};
-const legend=pickRandom(NBA_LEGENDS);
-const legend2=pickRandom(NBA_LEGENDS);
-CAREER_ATTRS.forEach((a,i)=>{
-const src=i%2===0?legend:legend2;
-ceilings[a.key]=rolledCeiling(src[a.key]);
-});
-setLeagueBuildCeilings(ceilings);
+setLeagueBuildCeilings({});
+setLeagueDraftNames([]);
+setLeagueDraftStep(0);
+setLeagueDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));
+}
+function pickLeagueLegend(legend){
+const attrKey=CAREER_ATTRS[leagueDraftStep].key;
+const ceiling=rolledCeiling(legend[attrKey]);
+const newCeilings={...leagueBuildCeilings,[attrKey]:ceiling};
+const newNames=[...leagueDraftNames,legend.name];
+setLeagueBuildCeilings(newCeilings);
+setLeagueDraftNames(newNames);
+if(leagueDraftStep<5){
+setLeagueDraftStep(leagueDraftStep+1);
+setLeagueDraftTrio(draftLegendTrio(NBA_LEGENDS,newNames));
+}else{
+setLeagueDraftStep(6);
 setLeagueBuildAlloc({});
+}
 }
 function leagueAllocSpent(){return CAREER_ATTRS.reduce((s,a)=>s+((leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR)-CAREER_ATTR_FLOOR),0);}
 function leagueAdjustAttr(key,delta){
@@ -9956,6 +9969,21 @@ const leagueOtherId=leagueDoc?(leagueDoc.hostId===authUserId?leagueDoc.guestId:l
 const leagueMe=leagueDoc?.players?.[leagueMyId];
 const leagueOther=leagueOtherId?leagueDoc?.players?.[leagueOtherId]:null;
 const leagueIsHost=leagueDoc&&leagueDoc.hostId===authUserId;
+// Once both players have finished building, the host (only) flips the league from "building" to "active" —
+// without this, both sides sit on the waiting screen forever since nothing ever moved the status forward.
+useEffect(()=>{
+if(!leagueDoc||leagueDoc.status!=="building"||!leagueIsHost)return;
+const p1=leagueDoc.players?.[leagueDoc.hostId];
+const p2=leagueDoc.players?.[leagueDoc.guestId];
+if(!p1||!p2||!p1.built||!p2.built)return;
+(async()=>{
+let extra={};
+if(leagueDoc.mode==="coop"&&p2.team.name!==p1.team.name){
+extra={players:{[leagueDoc.guestId]:{...p2,team:p1.team,teamStrength:p1.teamStrength}}};
+}
+await fbLeagueMerge(leagueId,{...extra,status:"active"});
+})();
+},[leagueDoc,leagueIsHost]);
 async function submitLeagueTraining(attrDef){
 if(!leagueMe)return;
 const updated={...leagueMe,trainingChoice:{key:attrDef.key,label:attrDef.label,icon:attrDef.icon},ready:true};
@@ -10008,7 +10036,7 @@ await fbLeagueMerge(leagueId,{season:age+1,status:bothRetired?"done":"active",pl
 setLeagueBusy(false);
 })();
 },[leagueDoc,leagueIsHost,leagueBusy]);
-function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});}
+function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});setLeagueDraftStep(0);setLeagueDraftTrio(null);setLeagueDraftNames([]);}
 
 
 useEffect(()=>{
@@ -10123,6 +10151,23 @@ return(
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
 {["PG","SG","SF","PF","C"].map(p=>(<button key={p} onClick={()=>startLeagueBuild(p)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:12,padding:"16px 0",fontWeight:800,fontSize:15,cursor:"pointer"}}>{p}</button>))}
 </div>
+</div>
+</div>
+);
+}
+if(leagueDraftStep<6){
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>LEGEND DRAFT — RONDE {leagueDraftStep+1}/6</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:4,textAlign:"center"}}>Kies je voorbeeld voor {CAREER_ATTRS[leagueDraftStep].icon} {CAREER_ATTRS[leagueDraftStep].label}</div>
+<div style={{color:'#c98a8a',fontSize:11,marginBottom:14,textAlign:"center"}}>Dit bepaalt je CEILING voor deze skill — de echte waarde stel je zo dadelijk zelf in.</div>
+{(leagueDraftTrio||[]).map(l=>(
+<button key={l.name} onClick={()=>pickLeagueLegend(l)} style={{background:"#2C1414",color:WHITE,border:"1px solid #4a1c1c",borderRadius:12,padding:"14px 16px",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<span>{l.name}</span><span style={{color:"#ffe066",fontWeight:900,fontSize:16}}>{l[CAREER_ATTRS[leagueDraftStep].key]}</span>
+</button>
+))}
 </div>
 </div>
 );

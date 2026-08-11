@@ -8636,6 +8636,42 @@ return{label:"😈 Huurling-reputatie",color:RED};
 }
 function formatMoney(m){return"$"+m.toFixed(1)+"M";}
 // ── Growth model: true rating climbs toward the draft ceiling (fast early, flat mid-career, decline after 32), nudged each season.
+// ── Shared attribute redistribution: given a desired OVERALL delta (+ or -), pushes actual attribute points
+// (weighted toward what matters for the position, like a 2K potential/badge system) until overall actually
+// moves by that amount — since overall is a weighted average, distributing raw points alone under- or
+// over-shoots, so we target the overall change directly and let the attributes catch up to it.
+function shiftAttrsToOverallTarget(attrs,pos,delta){
+const newAttrs={...attrs};
+if(Math.abs(delta)<0.5)return newAttrs;
+const w=CAREER_POS_WEIGHTS[pos]||CAREER_POS_WEIGHTS.SF;
+const keys=CAREER_ATTRS.map(a=>a.key);
+const goal=careerOverall(newAttrs,pos)+delta;
+const grow=delta>=0;
+const order=keys.slice().sort((a,b)=>grow?(w[b]||0)-(w[a]||0):(w[a]||0)-(w[b]||0));
+let guard=0;
+while(guard<2500){
+const cur=careerOverall(newAttrs,pos);
+if(grow&&cur>=goal)break;
+if(!grow&&cur<=goal)break;
+const k=order[guard%order.length];
+if(grow){if(newAttrs[k]<99)newAttrs[k]+=1;}
+else{if(newAttrs[k]>25)newAttrs[k]-=1;}
+guard++;
+}
+return newAttrs;
+}
+function growPlayerAttrs(attrs,pos,age,perfDelta){
+let targetGain;
+if(age<=21)targetGain=careerRoll(3,6);
+else if(age<=24)targetGain=careerRoll(2,4);
+else if(age<=27)targetGain=careerRoll(1,3);
+else if(age<=30)targetGain=careerRoll(-1,2);
+else if(age<=33)targetGain=careerRoll(-3,0);
+else if(age<=36)targetGain=careerRoll(-6,-2);
+else targetGain=careerRoll(-10,-4);
+targetGain+=perfDelta*0.5;
+return shiftAttrsToOverallTarget(attrs,pos,targetGain);
+}
 function growTrueRating(prev,ceiling,age,perfDelta){
 let rate;
 if(age<=21)rate=careerRoll(4,8);
@@ -8785,7 +8821,9 @@ const contractDelta=pending.contract?.perfBonus?careerRoll(pending.contract.perf
 const recoveryDelta=pending.recovery?.perfDelta||0;
 const tradeDelta=pending.trade?.perfDelta||0;
 const perfDelta=trainingDelta+eventDelta+nationalDelta+contractDelta+recoveryDelta+tradeDelta;
-const newTrue=growTrueRating(trueRatingBefore,player.overall,age,perfDelta);
+const newAttrs=growPlayerAttrs(player.attrs,player.pos,age,perfDelta);
+const newOverall=careerOverall(newAttrs,player.pos);
+const newTrue=growTrueRating(trueRatingBefore,newOverall,age,perfDelta);
 const seasonRating=Math.max(30,Math.min(99,Math.round(newTrue+careerRoll(-3,3))));
 let role="Bank",minutesFactor=0.4;
 if(seasonRating>=85){role="Ster";minutesFactor=1.0;}
@@ -8844,10 +8882,10 @@ if(seasonRating>=95&&Math.random()<0.18)awards.push("mvp");
 if(player.attrs.def>=90&&seasonRating>=85&&Math.random()<0.15)awards.push("dpoy");
 if(playoffs.champion)awards.push("championship");
 const teamGrowthBonus=teamSuccessGrowthBonus(strength,playoffs);
-const carryTrueRating=Math.round(Math.min(player.overall+3,newTrue+teamGrowthBonus));
+const carryTrueRating=Math.round(Math.min(newOverall+3,newTrue+teamGrowthBonus));
 const teamTier=teamTierLabel(strength);
 const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,potentialCeilingHit,careerEnding,injuryType,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,recovery:pending.recovery||null,trade:pending.trade||null,nationalTeam:!!pending.nationalTeam,olympics:pending.olympics||null,awards,playoffs,teamGrowthBonus};
-return{season,newTrueRating:carryTrueRating,newTeamState:ts};
+return{season,newTrueRating:carryTrueRating,newTeamState:ts,newAttrs,newOverall};
 }
 // ── Auto-pick every choice for a season (used by Quick mode — no UI, just resolves). contractYearsLeft<=0 triggers a fresh negotiation.
 // National-team callup odds scale smoothly with rating instead of a hard cutoff, so call-ups (and Olympic years) actually show up across a normal career.
@@ -9560,15 +9598,20 @@ setStage("modepick");
 
 // ── Quick mode: resolve every season (with auto-picked choices) straight through to retirement.
 function runQuickToEnd(startPlayer,initTs,startTrue){
-let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null,ceiling=startPlayer.overall;
+let age=19,list=[],ts=initTs,trueR=startTrue,peak=startTrue,cyl=4,salary=null;
+let attrs=startPlayer.attrs,overall=startPlayer.overall;
 const olympicPhase=startPlayer.olympicPhase!=null?startPlayer.olympicPhase:0;
 for(let i=0;i<20;i++){
 const isOlympicYear=(age%4)===olympicPhase;
 const pending=autoPendingChoices(cyl,ts,trueR,isOlympicYear);
 if(pending.contract){salary=pending.contract.salaryPerYear;cyl=pending.contract.years;}
-const seasonSalary=salary!=null?salary:rookieScaleSalary(ceiling,Math.min(i,3));
-const{season,newTrueRating,newTeamState}=buildSeason({...startPlayer,overall:ceiling},age,trueR,ts,pending,seasonSalary);
-if(season.majorInjury&&season.potentialCeilingHit)ceiling=Math.max(40,ceiling-Math.round(season.potentialCeilingHit*0.7));
+const seasonSalary=salary!=null?salary:rookieScaleSalary(overall,Math.min(i,3));
+const{season,newTrueRating,newTeamState,newAttrs,newOverall}=buildSeason({...startPlayer,attrs,overall},age,trueR,ts,pending,seasonSalary);
+attrs=newAttrs;overall=newOverall;
+if(season.majorInjury&&season.potentialCeilingHit){
+attrs=shiftAttrsToOverallTarget(attrs,startPlayer.pos,-Math.round(season.potentialCeilingHit*0.7));
+overall=careerOverall(attrs,startPlayer.pos);
+}
 season.pressLine=computePressLine(season,list,startPlayer);
 list.push(season);
 trueR=newTrueRating;peak=Math.max(peak,trueR);ts=newTeamState;
@@ -9578,7 +9621,7 @@ const randForced=!hardForced&&(age+1)>=36&&Math.random()<0.4;
 age++;
 if(hardForced||randForced)break;
 }
-setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setPlayer(p=>({...p,overall:ceiling}));setRetired(true);
+setSeasons(list);setSimAge(age);setTeamState(ts);setTrueRating(trueR);setPeakRating(peak);setPlayer(p=>({...p,overall,attrs}));setRetired(true);
 }
 function startDraftNight(chosenMode){
 setPendingMode(chosenMode);
@@ -9649,7 +9692,7 @@ else{beginTrainingStage();}
 }
 function chooseRecoverySafe(){
 const hit=Math.round(recoveryArc.potentialHit*0.6);
-setPlayer(p=>({...p,overall:Math.max(40,p.overall-hit)}));
+setPlayer(p=>{const newAttrs=shiftAttrsToOverallTarget(p.attrs,p.pos,-hit);return{...p,attrs:newAttrs,overall:careerOverall(newAttrs,p.pos)};});
 setPendingSeason(p=>({...(p||{}),recovery:{icon:"🩹",label:`Rustige revalidatie — permanent -${hit} plafond`,perfDelta:-3}}));
 setRecoveryArc(null);
 proceedAfterRecovery();
@@ -9662,7 +9705,7 @@ setPendingSeason(p=>({...(p||{}),recovery:{icon:"⚠️",label:"Terugval tijdens
 proceedAfterRecovery();
 }else{
 const hit=Math.round(recoveryArc.potentialHit*0.8);
-setPlayer(p=>({...p,overall:Math.max(40,p.overall-hit)}));
+setPlayer(p=>{const newAttrs=shiftAttrsToOverallTarget(p.attrs,p.pos,-hit);return{...p,attrs:newAttrs,overall:careerOverall(newAttrs,p.pos)};});
 setPendingSeason(p=>({...(p||{}),recovery:{icon:"💪",label:`Vervroegde comeback gelukt — permanent -${hit} plafond`,perfDelta:1}}));
 setRecoveryArc(null);
 proceedAfterRecovery();
@@ -9790,7 +9833,8 @@ function doResolveSeason(){doResolveSeasonWith(pendingSeason||{});}
 function doResolveSeasonWith(pending){
 const age=simAge;
 const seasonSalary=activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3));
-const{season,newTrueRating,newTeamState}=buildSeason(player,age,trueRating,teamState,pending,seasonSalary);
+const{season,newTrueRating,newTeamState,newAttrs,newOverall}=buildSeason(player,age,trueRating,teamState,pending,seasonSalary);
+setPlayer(p=>({...p,attrs:newAttrs,overall:newOverall}));
 if(season.majorInjury&&season.potentialCeilingHit&&!recoveryArc){
 setRecoveryArc({potentialHit:season.potentialCeilingHit});
 }

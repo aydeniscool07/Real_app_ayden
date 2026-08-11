@@ -9525,6 +9525,15 @@ const [pendingSeasonEnd,setPendingSeasonEnd]=useState(null);
 const [pendingSeason,setPendingSeason]=useState(null);
 const [trainingOptions,setTrainingOptions]=useState(null);
 const [trainPopup,setTrainPopup]=useState(null);
+const [leagueId,setLeagueId]=useState(null);
+const [leagueDoc,setLeagueDoc]=useState(null);
+const [leagueJoinInput,setLeagueJoinInput]=useState("");
+const [leagueViewedCount,setLeagueViewedCount]=useState(0);
+const [leagueBuildPos,setLeagueBuildPos]=useState(null);
+const [leagueBuildCeilings,setLeagueBuildCeilings]=useState(null);
+const [leagueBuildAlloc,setLeagueBuildAlloc]=useState({});
+const [leagueBuildName,setLeagueBuildName]=useState("");
+const [leagueBusy,setLeagueBusy]=useState(false);
 const [currentEvent,setCurrentEvent]=useState(null);
 const [retired,setRetired]=useState(false);
 const [saved,setSaved]=useState(false);
@@ -9877,6 +9886,120 @@ else{setSeasonStage("recap");}
 function continueCareer(){setSeasonStage(null);startSeasonFlow();}
 function retireNow(){setVoluntaryRetire(true);setRetired(true);setSeasonStage("recap");}
 
+// ══ 2-Player League: shared career via Firestore, gated so neither side sees results until both have decided.
+useEffect(()=>{
+if(!leagueId)return;
+const{_db,_doc,_onSnapshot}=window;
+const unsub=_onSnapshot(_doc(_db,"nba_career_leagues",leagueId),snap=>{
+if(snap.exists())setLeagueDoc(snap.data());
+});
+return ()=>unsub&&unsub();
+},[leagueId]);
+async function fbLeagueMerge(id,data){await waitForFirebase();await window._setDoc(window._doc(window._db,"nba_career_leagues",id),data,{merge:true});}
+function leagueCode(){let s="";const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";for(let i=0;i<5;i++)s+=chars[Math.floor(Math.random()*chars.length)];return s;}
+async function createLeague(){
+const code=leagueCode();
+await fbLeagueMerge(code,{id:code,status:"lobby",mode:null,hostId:authUserId,hostName:myUsername,guestId:null,guestName:null,season:19,players:{},createdAt:new Date().toISOString()});
+setLeagueId(code);
+}
+async function joinLeague(){
+const code=leagueJoinInput.trim().toUpperCase();
+if(!code)return;
+await fbLeagueMerge(code,{guestId:authUserId,guestName:myUsername});
+setLeagueId(code);
+}
+async function chooseLeagueMode(m){
+await fbLeagueMerge(leagueId,{mode:m,status:"building"});
+}
+function startLeagueBuild(pos){
+setLeagueBuildPos(pos);
+const ceilings={};
+const legend=pickRandom(NBA_LEGENDS);
+const legend2=pickRandom(NBA_LEGENDS);
+CAREER_ATTRS.forEach((a,i)=>{
+const src=i%2===0?legend:legend2;
+ceilings[a.key]=Math.max(35,Math.min(99,Math.round(src[a.key]+careerRoll(-8,8))));
+});
+setLeagueBuildCeilings(ceilings);
+setLeagueBuildAlloc({});
+}
+function leagueAllocSpent(){return CAREER_ATTRS.reduce((s,a)=>s+((leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR)-CAREER_ATTR_FLOOR),0);}
+function leagueAdjustAttr(key,delta){
+const cur=leagueBuildAlloc[key]!=null?leagueBuildAlloc[key]:CAREER_ATTR_FLOOR;
+const ceiling=leagueBuildCeilings[key]||99;
+const next=Math.max(CAREER_ATTR_FLOOR,Math.min(ceiling,cur+delta));
+const spentWithout=leagueAllocSpent()-(cur-CAREER_ATTR_FLOOR);
+if(delta>0&&spentWithout+(next-CAREER_ATTR_FLOOR)>CAREER_POINT_BUDGET)return;
+setLeagueBuildAlloc(a=>({...a,[key]:next}));
+}
+async function confirmLeagueBuild(){
+const finalAttrs={};
+CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR;});
+const overall=careerOverall(finalAttrs,leagueBuildPos);
+const team=pickRandom(NBA_TEAMS_STATIC);
+const me={uid:authUserId,name:leagueBuildName.trim()||myUsername||"Speler",username:myUsername,pos:leagueBuildPos,attrs:finalAttrs,ceilings:leagueBuildCeilings,overall,trueRating:overall,team,teamStrength:careerRoll(45,80),contractYearsLeft:4,salary:null,seasons:[],ready:false,trainingChoice:null,retired:false,built:true};
+await fbLeagueMerge(leagueId,{players:{[authUserId]:me}});
+}
+const leagueMyId=authUserId;
+const leagueOtherId=leagueDoc?(leagueDoc.hostId===authUserId?leagueDoc.guestId:leagueDoc.hostId):null;
+const leagueMe=leagueDoc?.players?.[leagueMyId];
+const leagueOther=leagueOtherId?leagueDoc?.players?.[leagueOtherId]:null;
+const leagueIsHost=leagueDoc&&leagueDoc.hostId===authUserId;
+async function submitLeagueTraining(attrDef){
+if(!leagueMe)return;
+const updated={...leagueMe,trainingChoice:{key:attrDef.key,label:attrDef.label,icon:attrDef.icon},ready:true};
+await fbLeagueMerge(leagueId,{players:{[leagueMyId]:updated}});
+}
+useEffect(()=>{
+if(!leagueDoc||leagueDoc.status!=="active"||!leagueIsHost||leagueBusy)return;
+const p1=leagueDoc.players?.[leagueDoc.hostId];
+const p2=leagueDoc.players?.[leagueDoc.guestId];
+if(!p1||!p2||!p1.ready||!p2.ready)return;
+setLeagueBusy(true);
+(async()=>{
+const age=leagueDoc.season;
+const mode=leagueDoc.mode;
+const isOlympicYear=(age%4)===0;
+function resolveOne(pl,other){
+const pending=autoPendingChoices(pl.contractYearsLeft,{team:pl.team,strength:pl.teamStrength},pl.trueRating,isOlympicYear);
+if(pl.trainingChoice)pending.training=pl.trainingChoice;
+let crossedPaths=false;
+if(mode==="rivals"&&pending.trade&&Math.random()<0.3&&other.team.name!==pl.team.name){
+pending.trade={...pending.trade,newTeamState:{team:other.team,strength:other.teamStrength}};
+crossedPaths=true;
+}
+const seasonSalary=pl.salary!=null?pl.salary:rookieScaleSalary(pl.overall,Math.min(pl.seasons.length,3));
+const{season,newTrueRating,newTeamState,newAttrs,newOverall}=buildSeason({...pl},age,pl.trueRating,{team:pl.team,strength:pl.teamStrength},pending,seasonSalary);
+season.crossedPaths=crossedPaths;
+let contractYearsLeft=pl.contractYearsLeft-1,salary=pl.salary;
+if(pending.contract){salary=pending.contract.salaryPerYear;contractYearsLeft=pending.contract.years;}
+return{season,newTrueRating,newTeamState,newAttrs,newOverall,contractYearsLeft,salary};
+}
+let r1=resolveOne(p1,p2);
+let r2=resolveOne(p2,p1);
+if(mode==="coop"){
+// same team: force identical W/L, seed, and playoff outcome for both, driven by the stronger of the two ratings
+const strength=Math.round((p1.teamStrength+p2.teamStrength)/2+careerRoll(-6,6));
+const combinedTeam=p1.team;
+const combinedRating=Math.round((r1.season.rating+r2.season.rating)/2);
+const wins=Math.max(9,Math.min(73,Math.round(41+((strength-55)/55)*30+((combinedRating-75)/75)*12+careerRoll(-4,4))));
+const playoffs=simulateSeasonPlayoffs(combinedTeam,strength,combinedRating,wins);
+[r1,r2].forEach(r=>{
+r.season.team=combinedTeam;r.season.wins=wins;r.season.losses=82-wins;r.season.seed=playoffs.seed;r.season.playoffs=playoffs;
+if(playoffs.champion&&!r.season.awards.includes("championship"))r.season.awards=[...r.season.awards,"championship"];
+r.newTeamState={team:combinedTeam,strength};
+});
+}
+const newP1={...p1,attrs:r1.newAttrs,overall:r1.newOverall,trueRating:r1.newTrueRating,team:r1.newTeamState.team,teamStrength:r1.newTeamState.strength,contractYearsLeft:r1.contractYearsLeft,salary:r1.salary,seasons:[...p1.seasons,r1.season],ready:false,trainingChoice:null,retired:r1.season.careerEnding||age>=38};
+const newP2={...p2,attrs:r2.newAttrs,overall:r2.newOverall,trueRating:r2.newTrueRating,team:r2.newTeamState.team,teamStrength:r2.newTeamState.strength,contractYearsLeft:r2.contractYearsLeft,salary:r2.salary,seasons:[...p2.seasons,r2.season],ready:false,trainingChoice:null,retired:r2.season.careerEnding||age>=38};
+const bothRetired=newP1.retired||newP2.retired;
+await fbLeagueMerge(leagueId,{season:age+1,status:bothRetired?"done":"active",players:{[leagueDoc.hostId]:newP1,[leagueDoc.guestId]:newP2}});
+setLeagueBusy(false);
+})();
+},[leagueDoc,leagueIsHost,leagueBusy]);
+function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});}
+
+
 useEffect(()=>{
 if(stage==="sim"&&mode==="standard"&&seasons.length===0&&!seasonStage&&!retired&&player&&teamState){
 startSeasonFlow();
@@ -9904,7 +10027,8 @@ if(stage==="hub"){
 return(
 <div>
 {!authUserId&&<div style={{color:'#c98a8a',fontSize:12,marginBottom:12,textAlign:"center"}}>Log in via Trivia/Predictions om een carrière te starten en op te slaan.</div>}
-<button onClick={startCreate} disabled={!authUserId} data-testid="career-start-btn" style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:15,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:20,opacity:authUserId?1:0.4}}>🏀 Nieuwe carrière starten</button>
+<button onClick={startCreate} disabled={!authUserId} data-testid="career-start-btn" style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:15,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:12,opacity:authUserId?1:0.4}}>🏀 Nieuwe carrière starten</button>
+<button onClick={()=>setStage("league")} disabled={!authUserId} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:20,opacity:authUserId?1:0.4}}>👥 2-Speler Liga</button>
 {myCareers.length>0&&(
 <div style={{marginBottom:20}}>
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>JOUW CARRIÈRES</div>
@@ -9928,6 +10052,189 @@ return(
 );
 }
 
+if(stage==="league"){
+const backBtn=<button onClick={()=>{leaveLeague();setStage("hub");}} style={{background:"transparent",border:"none",color:'#c98a8a',fontSize:12,cursor:"pointer",marginBottom:14}}>‹ Terug naar hub</button>;
+const panelStyle={background:"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 60%,#000 100%)",borderRadius:18,padding:"18px 14px",border:"1px solid #3a1414",boxShadow:"0 0 24px rgba(232,49,42,0.15) inset"};
+const btnPrimary={background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10};
+const btnSecondary={background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:10};
+// ── Not in a league yet: create or join
+if(!leagueId){
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:4,textAlign:"center"}}>👥 2-Speler Liga</div>
+<div style={{color:'#c98a8a',fontSize:12,marginBottom:18,textAlign:"center"}}>Speel samen — ieder maakt zijn eigen keuzes, niemand ziet het resultaat tot jullie allebei klaar zijn.</div>
+<button onClick={createLeague} style={btnPrimary}>Nieuwe liga starten</button>
+<div style={{color:'#c98a8a',fontSize:11,textAlign:"center",margin:"14px 0 8px"}}>— of join met een code —</div>
+<input value={leagueJoinInput} onChange={e=>setLeagueJoinInput(e.target.value.toUpperCase())} placeholder="CODE" maxLength={5} style={{width:"100%",boxSizing:"border-box",background:"#160a0a",border:"1px solid #3a1414",borderRadius:12,padding:"12px 14px",color:WHITE,fontSize:16,fontWeight:800,letterSpacing:3,textAlign:"center",marginBottom:10}}/>
+<button onClick={joinLeague} disabled={!leagueJoinInput.trim()} style={{...btnSecondary,opacity:leagueJoinInput.trim()?1:0.4}}>Join liga</button>
+</div>
+</div>
+);
+}
+if(!leagueDoc){
+return(<div>{backBtn}<div style={{color:'#c98a8a',fontSize:13,textAlign:"center"}}>Verbinden...</div></div>);
+}
+// ── Lobby: waiting for guest / mode pick
+if(leagueDoc.status==="lobby"){
+const hasGuest=!!leagueDoc.guestId;
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>LIGA CODE</div>
+<div style={{color:"#ffe066",fontWeight:900,fontSize:34,letterSpacing:6,textAlign:"center",marginBottom:16,textShadow:"0 0 12px rgba(255,224,102,0.5)"}}>{leagueId}</div>
+<div style={{color:WHITE,fontSize:13,textAlign:"center",marginBottom:6}}>{leagueDoc.hostName} {leagueIsHost?"(jij)":""}</div>
+<div style={{color:hasGuest?WHITE:'#c98a8a',fontSize:13,textAlign:"center",marginBottom:18}}>{hasGuest?`${leagueDoc.guestName} ${!leagueIsHost?"(jij)":""}`:"Wachten op speler 2…"}</div>
+{leagueIsHost&&hasGuest&&(
+<div>
+<div style={{color:'#c98a8a',fontSize:12,marginBottom:10,textAlign:"center"}}>Kies spelmodus (jij kiest als host):</div>
+<button onClick={()=>chooseLeagueMode("coop")} style={btnPrimary}>🤝 Co-op — zelfde team</button>
+<button onClick={()=>chooseLeagueMode("rivals")} style={btnSecondary}>⚔️ Rivalen — eigen teams, kunnen kruisen</button>
+</div>
+)}
+{!leagueIsHost&&<div style={{color:'#c98a8a',fontSize:12,textAlign:"center"}}>Wachten tot {leagueDoc.hostName} de modus kiest…</div>}
+</div>
+</div>
+);
+}
+// ── Build: each player builds their character
+if(leagueDoc.status==="building"){
+if(!leagueMe){
+if(!leagueBuildPos){
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>{leagueDoc.mode==="coop"?"CO-OP":"RIVALEN"} LIGA</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:14,textAlign:"center"}}>Kies je positie</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+{["PG","SG","SF","PF","C"].map(p=>(<button key={p} onClick={()=>startLeagueBuild(p)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:12,padding:"16px 0",fontWeight:800,fontSize:15,cursor:"pointer"}}>{p}</button>))}
+</div>
+</div>
+</div>
+);
+}
+const spent=leagueAllocSpent(),remaining=CAREER_POINT_BUDGET-spent;
+const ATTR_GRAD={sco:["#ff5b52","#7a0f0a"],plm:["#4fc3ff","#0d3a63"],reb:["#3ddc84","#0d4225"],def:["#b47bff","#3b1a63"],ath:["#ffb545","#7a4d0a"],iq:["#ffe066","#7a5c0a"]};
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<input value={leagueBuildName} onChange={e=>setLeagueBuildName(e.target.value)} placeholder="Spelernaam" style={{width:"100%",boxSizing:"border-box",background:"#160a0a",border:"1px solid #3a1414",borderRadius:10,padding:"10px 12px",color:WHITE,fontSize:14,marginBottom:14}}/>
+<div style={{textAlign:"center",marginBottom:14}}>
+<span style={{color:remaining===0?"#3ddc84":"#ffe066",fontWeight:900,fontSize:24}}>{remaining}</span>
+<span style={{color:'#c98a8a',fontSize:10,letterSpacing:1,textTransform:"uppercase"}}> punten over</span>
+</div>
+<div style={{display:"flex",justifyContent:"space-between",gap:4,marginBottom:14,overflowX:"auto"}}>
+{CAREER_ATTRS.map(a=>{
+const val=leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR;
+const ceiling=leagueBuildCeilings[a.key]||99;
+const pct=Math.max(2,Math.min(100,((val-CAREER_ATTR_FLOOR)/(99-CAREER_ATTR_FLOOR))*100));
+const[top,bot]=ATTR_GRAD[a.key];
+return(
+<div key={a.key} style={{display:"flex",flexDirection:"column",alignItems:"center",flex:"0 0 auto",width:44}}>
+<div style={{color:WHITE,fontWeight:900,fontSize:14,marginBottom:4}}>{val}</div>
+<div style={{position:"relative",width:22,height:110,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:"1px solid #3a1414"}}>
+<div style={{position:"absolute",left:0,right:0,bottom:0,height:`${pct}%`,background:`linear-gradient(180deg,${top},${bot})`,borderRadius:11}}/>
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:3,marginTop:6}}>
+<button onClick={()=>leagueAdjustAttr(a.key,5)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>+</button>
+<button onClick={()=>leagueAdjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>−</button>
+</div>
+<div style={{color:'#c98a8a',fontSize:8,fontWeight:700,textAlign:"center",marginTop:5,textTransform:"uppercase"}}>{a.icon}<br/>{a.label}</div>
+</div>
+);
+})}
+</div>
+<button onClick={confirmLeagueBuild} style={btnPrimary}>Bevestig speler</button>
+</div>
+</div>
+);
+}
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{fontSize:32,textAlign:"center",marginBottom:10}}>⏳</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14,textAlign:"center"}}>Wachten op {leagueOther?leagueOther.name:"speler 2"}…</div>
+</div>
+</div>
+);
+}
+// ── Active career: decision, waiting, or reveal
+if(leagueDoc.status==="active"||leagueDoc.status==="done"){
+if(!leagueMe)return(<div>{backBtn}<div style={{color:'#c98a8a',textAlign:"center"}}>Speler niet gevonden.</div></div>);
+const myCount=leagueMe.seasons.length;
+if(leagueViewedCount<myCount){
+const s=leagueMe.seasons[leagueViewedCount];
+const os=leagueOther?.seasons?.[leagueViewedCount];
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>SEIZOEN ONTHULD — LEEFTIJD {s.age}</div>
+{s.crossedPaths&&<div style={{color:"#ffe066",fontWeight:800,fontSize:13,textAlign:"center",marginBottom:10}}>🔀 Jullie paden kruisten — trade naar {s.team?.name}!</div>}
+{s.awards.includes("championship")&&<div style={{color:"#ffe066",fontWeight:800,fontSize:14,textAlign:"center",marginBottom:10}}>🏆 KAMPIOEN!</div>}
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+<div style={{background:"#160a0a",border:"1px solid #3a1414",borderRadius:12,padding:12}}>
+<div style={{color:"#ffe066",fontWeight:800,fontSize:13,marginBottom:6}}>{leagueMe.name} (jij)</div>
+<div style={{color:WHITE,fontSize:12}}>{s.team?.name} · OVR {s.rating}</div>
+<div style={{color:'#c98a8a',fontSize:12,marginTop:4}}>{s.pts} PTS · {s.reb} REB · {s.ast} AST</div>
+<div style={{color:'#c98a8a',fontSize:12}}>{s.wins}-{s.losses}</div>
+</div>
+{os&&<div style={{background:"#160a0a",border:"1px solid #3a1414",borderRadius:12,padding:12}}>
+<div style={{color:"#ffe066",fontWeight:800,fontSize:13,marginBottom:6}}>{leagueOther.name}</div>
+<div style={{color:WHITE,fontSize:12}}>{os.team?.name} · OVR {os.rating}</div>
+<div style={{color:'#c98a8a',fontSize:12,marginTop:4}}>{os.pts} PTS · {os.reb} REB · {os.ast} AST</div>
+<div style={{color:'#c98a8a',fontSize:12}}>{os.wins}-{os.losses}</div>
+</div>}
+</div>
+<button onClick={()=>setLeagueViewedCount(c=>c+1)} style={btnPrimary}>Door ▸</button>
+</div>
+</div>
+);
+}
+if(leagueMe.retired){
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,textAlign:"center",marginBottom:6}}>Carrière voorbij</div>
+<div style={{color:'#c98a8a',fontSize:12,textAlign:"center"}}>{leagueMe.name} is gestopt na {leagueMe.seasons.length} seizoenen.</div>
+</div>
+</div>
+);
+}
+if(leagueMe.ready){
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{fontSize:32,textAlign:"center",marginBottom:10}}>⏳</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14,textAlign:"center"}}>Klaar! Wachten op {leagueOther?leagueOther.name:"de andere speler"}…</div>
+<div style={{color:'#c98a8a',fontSize:11,textAlign:"center",marginTop:6}}>De bracket blijft verborgen tot jullie allebei klaar zijn.</div>
+</div>
+</div>
+);
+}
+const trainOpts=getTrainingOptions();
+return(
+<div>
+{backBtn}
+<div style={panelStyle}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>LEEFTIJD {leagueDoc.season}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:14,textAlign:"center"}}>Waar focus je je training op?</div>
+<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+{trainOpts.map(a=>(<button key={a.key} onClick={()=>submitLeagueTraining(a)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:12,padding:"16px 8px",fontWeight:700,fontSize:12,cursor:"pointer"}}>{a.icon}<br/>{a.label}</button>))}
+</div>
+</div>
+</div>
+);
+}
+return(<div>{backBtn}</div>);
+}
 if(stage==="create"){
 if(!draftPos){
 return(

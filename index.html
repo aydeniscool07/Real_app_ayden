@@ -8508,6 +8508,17 @@ return{attrs:newAttrs,isGoatBuild:false};
 }
 function careerRoll(min,max){return min+Math.random()*(max-min);}
 function pickRandom(arr){return arr[Math.floor(Math.random()*arr.length)];}
+// ── Ceiling rarity: a legend's raw attribute value is what THEY reached, not a guarantee you inherit it.
+// Most rolls land well below the legend's number — true near-elite potential is rare, so not every build
+// (and not every career) ends up trending toward a 99 overall.
+function rolledCeiling(legendVal){
+const roll=Math.random();
+let ceiling;
+if(roll<0.15)ceiling=legendVal+careerRoll(-3,5); // uncommon: near/at the legend's own level in this skill
+else if(roll<0.60)ceiling=legendVal*0.92+careerRoll(-5,6); // common: strong, above-average potential
+else ceiling=legendVal*0.80+careerRoll(-8,8); // common: solid, realistic potential — most rolls land here
+return Math.max(30,Math.min(99,Math.round(ceiling)));
+}
 function draftLegendTrio(pool,excludeNames){
 const avail=pool.filter(l=>!(excludeNames||[]).includes(l.name));
 const shuffled=avail.slice().sort(()=>Math.random()-0.5);
@@ -9557,7 +9568,7 @@ function pickLegendForAttr(legend){
 const attrKey=CAREER_ATTRS[draftStep].key;
 // jitter the inherited value so identical picks never feel guaranteed-elite — this becomes your CEILING for the skill,
 // the actual value gets set during the point-buy allocation step right after.
-const ceiling=Math.max(30,Math.min(99,Math.round(legend[attrKey]+careerRoll(-8,8))));
+const ceiling=rolledCeiling(legend[attrKey]);
 const newCeilings={...draftAttrs,[attrKey]:ceiling};
 const newNames=[...draftLegendNames,legend.name];
 setDraftAttrs(newCeilings);
@@ -9918,7 +9929,7 @@ const legend=pickRandom(NBA_LEGENDS);
 const legend2=pickRandom(NBA_LEGENDS);
 CAREER_ATTRS.forEach((a,i)=>{
 const src=i%2===0?legend:legend2;
-ceilings[a.key]=Math.max(35,Math.min(99,Math.round(src[a.key]+careerRoll(-8,8))));
+ceilings[a.key]=rolledCeiling(src[a.key]);
 });
 setLeagueBuildCeilings(ceilings);
 setLeagueBuildAlloc({});

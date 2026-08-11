@@ -8640,11 +8640,14 @@ function formatMoney(m){return"$"+m.toFixed(1)+"M";}
 // (weighted toward what matters for the position, like a 2K potential/badge system) until overall actually
 // moves by that amount — since overall is a weighted average, distributing raw points alone under- or
 // over-shoots, so we target the overall change directly and let the attributes catch up to it.
-function shiftAttrsToOverallTarget(attrs,pos,delta){
+// `ceilings` (from your legend draft picks) caps how high each attribute can climb — not every build has the
+// talent to hit 99 everywhere, so growth plateaus at YOUR ceiling, not a universal one.
+function shiftAttrsToOverallTarget(attrs,pos,delta,ceilings){
 const newAttrs={...attrs};
 if(Math.abs(delta)<0.5)return newAttrs;
 const w=CAREER_POS_WEIGHTS[pos]||CAREER_POS_WEIGHTS.SF;
 const keys=CAREER_ATTRS.map(a=>a.key);
+const cap=k=>ceilings&&ceilings[k]!=null?ceilings[k]:99;
 const goal=careerOverall(newAttrs,pos)+delta;
 const grow=delta>=0;
 const order=keys.slice().sort((a,b)=>grow?(w[b]||0)-(w[a]||0):(w[a]||0)-(w[b]||0));
@@ -8654,23 +8657,27 @@ const cur=careerOverall(newAttrs,pos);
 if(grow&&cur>=goal)break;
 if(!grow&&cur<=goal)break;
 const k=order[guard%order.length];
-if(grow){if(newAttrs[k]<99)newAttrs[k]+=1;}
-else{if(newAttrs[k]>25)newAttrs[k]-=1;}
+if(grow){
+if(newAttrs[k]<cap(k))newAttrs[k]+=1;
+}else{
+if(newAttrs[k]>25)newAttrs[k]-=1;
+}
 guard++;
+if(grow&&keys.every(kk=>newAttrs[kk]>=cap(kk)))break; // maxed out on talent — nothing left to grow
 }
 return newAttrs;
 }
-function growPlayerAttrs(attrs,pos,age,perfDelta){
+function growPlayerAttrs(attrs,pos,age,perfDelta,ceilings){
 let targetGain;
-if(age<=21)targetGain=careerRoll(3,6);
-else if(age<=24)targetGain=careerRoll(2,4);
-else if(age<=27)targetGain=careerRoll(1,3);
-else if(age<=30)targetGain=careerRoll(-1,2);
+if(age<=21)targetGain=careerRoll(2,4);
+else if(age<=24)targetGain=careerRoll(1,3);
+else if(age<=27)targetGain=careerRoll(0,2);
+else if(age<=30)targetGain=careerRoll(-1,1);
 else if(age<=33)targetGain=careerRoll(-3,0);
 else if(age<=36)targetGain=careerRoll(-6,-2);
 else targetGain=careerRoll(-10,-4);
-targetGain+=perfDelta*0.5;
-return shiftAttrsToOverallTarget(attrs,pos,targetGain);
+targetGain+=perfDelta*0.6;
+return shiftAttrsToOverallTarget(attrs,pos,targetGain,ceilings);
 }
 function growTrueRating(prev,ceiling,age,perfDelta){
 let rate;
@@ -8821,7 +8828,7 @@ const contractDelta=pending.contract?.perfBonus?careerRoll(pending.contract.perf
 const recoveryDelta=pending.recovery?.perfDelta||0;
 const tradeDelta=pending.trade?.perfDelta||0;
 const perfDelta=trainingDelta+eventDelta+nationalDelta+contractDelta+recoveryDelta+tradeDelta;
-const newAttrs=growPlayerAttrs(player.attrs,player.pos,age,perfDelta);
+const newAttrs=growPlayerAttrs(player.attrs,player.pos,age,perfDelta,player.ceilings);
 const newOverall=careerOverall(newAttrs,player.pos);
 const newTrue=growTrueRating(trueRatingBefore,newOverall,age,perfDelta);
 const seasonRating=Math.max(30,Math.min(99,Math.round(newTrue+careerRoll(-3,3))));
@@ -9592,7 +9599,9 @@ function confirmBuild(){
 const finalAttrs={};
 CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=allocAttrs[a.key]!=null?allocAttrs[a.key]:CAREER_ATTR_FLOOR;});
 const overall=careerOverall(finalAttrs,draftPos);
-setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:finalAttrs,isGoatBuild:isGoatDraft,overall,olympicPhase:Math.floor(Math.random()*4),legends:draftLegendNames});
+const ceilings={};
+CAREER_ATTRS.forEach(a=>{ceilings[a.key]=draftAttrs[a.key]||99;});
+setPlayer({name:draftName.trim()||"Naamloos Talent",number:draftNumber.trim()||String(Math.floor(Math.random()*98)+1),pos:draftPos,nationality:draftNationality,attrs:finalAttrs,ceilings,isGoatBuild:isGoatDraft,overall,olympicPhase:Math.floor(Math.random()*4),legends:draftLegendNames});
 setStage("modepick");
 }
 

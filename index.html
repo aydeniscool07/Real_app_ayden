@@ -10846,14 +10846,73 @@ setPhase("lottery-reveal");
 }
 
 function generateDraftClass(){
-const firsts=["Cooper","Ace","AJ","Cameron","Darryn","Dylan","Nate","Karter","Braylon","Isaiah","Meleek","Tounde","Boogie","Chris","Mikel","Jasper","Malachi","Bryson","Jaeden","Nikolas","Kiyan","Trey","Miles","Kayden","Derik","Jerry","Aday","Yaxel","Nikolaj","Alexandre"];
-const lasts=["Flagg","Bailey","Dybantsa","Boozer","Peterson","Harper","Fland","Knueppel","Newton","Evans","Williams","Coward","Johnson","Jefferson","Brown","Cissoko","Powell","Tounkara","Sarr","Wagner","Anthony","Kaiser","Byrd","Turner","Queen","Broome","Mbako","Sharpe","Topic","Sarr"];
-const positions=["PG","SG","SF","PF","C"];
-const arr=[];const rand=seedRand(Date.now()%77777);
-for(let i=0;i<60;i++){
-const overall=Math.max(55,85-Math.floor(i*0.5)-Math.floor(rand()*5));
-arr.push({id:"p"+i,name:firsts[Math.floor(rand()*firsts.length)]+" "+lasts[Math.floor(rand()*lasts.length)],pos:positions[Math.floor(rand()*positions.length)],age:18+Math.floor(rand()*4),overall,potential:Math.min(99,overall+3+Math.floor(rand()*10))});
-}
+// Echte 2025 NBA Draft klasse (Ronde 1 + 2), met realistische ratings o.b.v. draftpositie/scouting.
+const ROOKIES=[
+{name:"Cooper Flagg",pos:"PF",age:19,overall:82},
+{name:"Dylan Harper",pos:"PG",age:19,overall:78},
+{name:"VJ Edgecombe",pos:"SG",age:20,overall:77},
+{name:"Kon Knueppel",pos:"SG",age:20,overall:76},
+{name:"Ace Bailey",pos:"SF",age:19,overall:76},
+{name:"Tre Johnson",pos:"SG",age:19,overall:75},
+{name:"Jeremiah Fears",pos:"PG",age:19,overall:74},
+{name:"Egor Demin",pos:"PG",age:19,overall:72},
+{name:"Collin Murray-Boyles",pos:"PF",age:20,overall:73},
+{name:"Khaman Maluach",pos:"C",age:19,overall:72},
+{name:"Cedric Coward",pos:"SG",age:22,overall:71},
+{name:"Noa Essengue",pos:"SF",age:18,overall:70},
+{name:"Derik Queen",pos:"C",age:20,overall:74},
+{name:"Carter Bryant",pos:"SF",age:19,overall:68},
+{name:"Thomas Sorber",pos:"C",age:19,overall:70},
+{name:"Yang Hansen",pos:"C",age:20,overall:68},
+{name:"Joan Beringer",pos:"C",age:19,overall:66},
+{name:"Walter Clayton Jr.",pos:"PG",age:22,overall:71},
+{name:"Nolan Traoré",pos:"PG",age:19,overall:67},
+{name:"Kasparas Jakučionis",pos:"SG",age:19,overall:70},
+{name:"Will Riley",pos:"SF",age:19,overall:68},
+{name:"Drake Powell",pos:"SF",age:20,overall:66},
+{name:"Asa Newell",pos:"PF",age:19,overall:69},
+{name:"Nique Clifford",pos:"SG",age:22,overall:67},
+{name:"Jase Richardson",pos:"SG",age:19,overall:70},
+{name:"Ben Saraf",pos:"PG",age:19,overall:66},
+{name:"Danny Wolf",pos:"C",age:21,overall:67},
+{name:"Hugo González",pos:"SF",age:19,overall:65},
+{name:"Liam McNeeley",pos:"SF",age:20,overall:69},
+{name:"Yanic Konan Niederhauser",pos:"C",age:22,overall:63},
+{name:"Rasheer Fleming",pos:"PF",age:22,overall:64},
+{name:"Noah Penda",pos:"SF",age:21,overall:63},
+{name:"Sion James",pos:"SG",age:23,overall:62},
+{name:"Ryan Kalkbrenner",pos:"C",age:23,overall:63},
+{name:"Johni Broome",pos:"C",age:22,overall:64},
+{name:"Adou Thiero",pos:"SF",age:21,overall:61},
+{name:"Chaz Lanier",pos:"SG",age:23,overall:61},
+{name:"Kam Jones",pos:"PG",age:22,overall:60},
+{name:"Alijah Martin",pos:"SG",age:23,overall:60},
+{name:"Micah Peavy",pos:"SF",age:22,overall:60},
+{name:"Koby Brea",pos:"SG",age:23,overall:60},
+{name:"Maxime Raynaud",pos:"C",age:22,overall:62},
+{name:"Jamir Watkins",pos:"SF",age:23,overall:59},
+{name:"Brooks Barnhizer",pos:"SF",age:22,overall:60},
+{name:"Rocco Zikarsky",pos:"C",age:19,overall:58},
+{name:"Amari Williams",pos:"C",age:23,overall:60},
+{name:"Bogoljub Marković",pos:"PF",age:19,overall:59},
+{name:"Javon Small",pos:"PG",age:23,overall:59},
+{name:"Tyrese Proctor",pos:"PG",age:21,overall:59},
+{name:"Kobe Sanders",pos:"SG",age:23,overall:58},
+{name:"Mohamed Diawara",pos:"SF",age:21,overall:59},
+{name:"Alex Toohey",pos:"SF",age:21,overall:58},
+{name:"John Tonje",pos:"SG",age:24,overall:59},
+{name:"Taelon Peter",pos:"SG",age:21,overall:57},
+{name:"Lachlan Olbrich",pos:"C",age:22,overall:58},
+{name:"Will Richard",pos:"SG",age:22,overall:59},
+{name:"Max Shulga",pos:"PG",age:23,overall:57},
+{name:"Saliou Niang",pos:"SF",age:20,overall:57},
+{name:"Jahmai Mashack",pos:"SG",age:22,overall:57}
+];
+const rand=seedRand(Date.now()%77777);
+const arr=ROOKIES.map((r,i)=>{
+const overall=Math.max(52,Math.min(90,r.overall+Math.floor(rand()*5)-2));
+return{id:"p"+i,name:r.name,pos:r.pos,age:r.age,overall,potential:Math.min(99,overall+(r.age<=20?8:4)+Math.floor(rand()*4))};
+});
 setDraftClass(arr);
 }
 
@@ -10877,13 +10936,36 @@ if(nextPick>=totalPicks)setPhase("draft-done");
 }
 
 function startFA(){
-const firsts=["Kyrie","Jimmy","LeBron","Kevin","Chris","Klay","Damian","Paul","Kawhi","Anthony","Draymond","Al","Jrue","Fred","Malcolm","DeMar","Bradley","John","Russell","Kyle"];
-const lasts=["Butler","James","Durant","Paul","Thompson","Lillard","George","Leonard","Davis","Green","Horford","Holiday","VanVleet","Brogdon","DeRozan","Beal","Wall","Westbrook","Lowry","Irving"];
+// Pool van echte NBA-veteranen met realistische ratings.
+const FA_POOL=[
+{name:"Kyrie Irving",pos:"PG",age:33,overall:88},
+{name:"Anthony Davis",pos:"PF",age:32,overall:88},
+{name:"Kawhi Leonard",pos:"SF",age:34,overall:84},
+{name:"Damian Lillard",pos:"PG",age:35,overall:83},
+{name:"Jimmy Butler",pos:"SF",age:36,overall:85},
+{name:"Zach LaVine",pos:"SG",age:30,overall:82},
+{name:"Julius Randle",pos:"PF",age:31,overall:81},
+{name:"Myles Turner",pos:"C",age:29,overall:82},
+{name:"Naz Reid",pos:"C",age:26,overall:80},
+{name:"DeMar DeRozan",pos:"SF",age:36,overall:80},
+{name:"Jrue Holiday",pos:"PG",age:35,overall:79},
+{name:"Nikola Vučević",pos:"C",age:34,overall:79},
+{name:"Paul George",pos:"SF",age:35,overall:78},
+{name:"Fred VanVleet",pos:"PG",age:31,overall:78},
+{name:"CJ McCollum",pos:"SG",age:34,overall:78},
+{name:"Draymond Green",pos:"PF",age:35,overall:77},
+{name:"Bogdan Bogdanović",pos:"SG",age:33,overall:76},
+{name:"Bradley Beal",pos:"SG",age:32,overall:76},
+{name:"Klay Thompson",pos:"SG",age:35,overall:74},
+{name:"Russell Westbrook",pos:"PG",age:37,overall:74},
+{name:"Malcolm Brogdon",pos:"PG",age:32,overall:73},
+{name:"Al Horford",pos:"C",age:39,overall:72}
+];
 const fa=[];const rand=seedRand(Date.now()%88888);
-for(let i=0;i<20;i++){
-const overall=70+Math.floor(rand()*25);
-fa.push({id:"fa"+i,name:firsts[i%firsts.length]+" "+lasts[i%lasts.length],pos:["PG","SG","SF","PF","C"][Math.floor(rand()*5)],age:25+Math.floor(rand()*10),overall,ask:Math.round((overall-65)*1.8*10)/10});
-}
+FA_POOL.forEach((p,i)=>{
+const overall=Math.max(65,Math.min(90,p.overall+Math.floor(rand()*3)-1));
+fa.push({id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask:Math.round((overall-65)*1.8*10)/10});
+});
 setFreeAgents(fa);
 setBudget(Math.max(5,SALARY_CAP-myTeam.cap+30));
 setSigned([]);

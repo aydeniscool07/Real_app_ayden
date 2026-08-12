@@ -10812,6 +10812,46 @@ const NBA_TEAMS=[
 {id:"SAC",name:"Sacramento Kings",record:"22-60",cap:179.2,status:"Over cap",conf:"W"}
 ];
 const SALARY_CAP=154.6;
+// Ruwe schatting van salaris (in $M) o.b.v. rating/leeftijd — gebruikt voor de optionele cap-check bij trades.
+function salaryOf(p){
+let s=Math.pow(Math.max(0,p.overall-55)/40,1.9)*48;
+if(p.age<=23)s*=0.55;else if(p.age>=34)s*=0.85;
+return Math.max(2,Math.round(s*10)/10);
+}
+// Echte rosters (kern van elk team) met realistische ratings — vormt de basis voor trades en de seizoenssimulatie.
+const REAL_ROSTERS={
+BOS:[{name:"Jayson Tatum",pos:"SF",age:28,overall:93},{name:"Derrick White",pos:"PG",age:31,overall:87},{name:"Kristaps Porziņģis",pos:"C",age:30,overall:84},{name:"Payton Pritchard",pos:"PG",age:28,overall:80},{name:"Sam Hauser",pos:"SF",age:27,overall:74},{name:"Luke Kornet",pos:"C",age:30,overall:71},{name:"Al Horford",pos:"C",age:39,overall:74},{name:"Anfernee Simons",pos:"SG",age:27,overall:76},{name:"Baylor Scheierman",pos:"SG",age:23,overall:68},{name:"Neemias Queta",pos:"C",age:26,overall:67},{name:"Jordan Walsh",pos:"SF",age:21,overall:65},{name:"Xavier Tillman",pos:"PF",age:27,overall:68}],
+DET:[{name:"Cade Cunningham",pos:"PG",age:24,overall:90},{name:"Jalen Duren",pos:"C",age:22,overall:84},{name:"Ausar Thompson",pos:"SF",age:23,overall:80},{name:"Duncan Robinson",pos:"SF",age:32,overall:74},{name:"Jaden Ivey",pos:"SG",age:24,overall:78},{name:"Ron Holland II",pos:"SF",age:20,overall:73},{name:"Isaiah Stewart",pos:"C",age:24,overall:76},{name:"Marcus Sasser",pos:"PG",age:24,overall:68},{name:"Paul Reed",pos:"PF",age:26,overall:67},{name:"Simone Fontecchio",pos:"SF",age:30,overall:69},{name:"Tim Hardaway Jr.",pos:"SG",age:33,overall:71},{name:"Daniss Jenkins",pos:"PG",age:24,overall:62}],
+NYK:[{name:"Jalen Brunson",pos:"PG",age:29,overall:90},{name:"Karl-Anthony Towns",pos:"C",age:30,overall:88},{name:"OG Anunoby",pos:"SF",age:28,overall:85},{name:"Mikal Bridges",pos:"SF",age:29,overall:84},{name:"Josh Hart",pos:"SG",age:30,overall:79},{name:"Mitchell Robinson",pos:"C",age:28,overall:76},{name:"Miles McBride",pos:"PG",age:25,overall:74},{name:"Landry Shamet",pos:"SG",age:29,overall:70},{name:"Precious Achiuwa",pos:"PF",age:26,overall:70},{name:"Pacôme Dadiet",pos:"SF",age:20,overall:65},{name:"Guerschon Yabusele",pos:"PF",age:30,overall:71},{name:"Ariel Hukporti",pos:"C",age:22,overall:63}],
+CLE:[{name:"Donovan Mitchell",pos:"SG",age:29,overall:90},{name:"Darius Garland",pos:"PG",age:26,overall:86},{name:"Evan Mobley",pos:"PF",age:24,overall:89},{name:"Jarrett Allen",pos:"C",age:28,overall:82},{name:"De'Andre Hunter",pos:"SF",age:28,overall:79},{name:"Ty Jerome",pos:"PG",age:29,overall:75},{name:"Sam Merrill",pos:"SG",age:30,overall:72},{name:"Craig Porter Jr.",pos:"PG",age:24,overall:65},{name:"Larry Nance Jr.",pos:"PF",age:33,overall:69},{name:"Max Strus",pos:"SG",age:30,overall:74},{name:"Dean Wade",pos:"PF",age:28,overall:68},{name:"Nae'Qwan Tomlin",pos:"PF",age:23,overall:63}],
+ATL:[{name:"Trae Young",pos:"PG",age:27,overall:87},{name:"Jalen Johnson",pos:"PF",age:24,overall:85},{name:"Dyson Daniels",pos:"SG",age:23,overall:82},{name:"Onyeka Okongwu",pos:"C",age:25,overall:80},{name:"Zaccharie Risacher",pos:"SF",age:21,overall:77},{name:"Nickeil Alexander-Walker",pos:"SG",age:27,overall:76},{name:"Kobe Bufkin",pos:"SG",age:22,overall:66},{name:"Vit Krejci",pos:"SF",age:25,overall:66},{name:"Mouhamed Gueye",pos:"PF",age:22,overall:65},{name:"Georges Niang",pos:"PF",age:33,overall:71},{name:"Garrison Mathews",pos:"SG",age:28,overall:66},{name:"David Roddy",pos:"PF",age:23,overall:64}],
+TOR:[{name:"Kawhi Leonard",pos:"SF",age:34,overall:88},{name:"Scottie Barnes",pos:"PF",age:24,overall:87},{name:"Brandon Ingram",pos:"SF",age:28,overall:83},{name:"Immanuel Quickley",pos:"PG",age:26,overall:80},{name:"RJ Barrett",pos:"SG",age:25,overall:81},{name:"Jakob Poeltl",pos:"C",age:30,overall:78},{name:"Gradey Dick",pos:"SG",age:22,overall:73},{name:"Jonathan Mogbo",pos:"PF",age:23,overall:65},{name:"Chucky Hepburn",pos:"PG",age:23,overall:62},{name:"Ja'Kobe Walter",pos:"SG",age:21,overall:66},{name:"Sandro Mamukelashvili",pos:"C",age:26,overall:67},{name:"Jamal Shead",pos:"PG",age:23,overall:65}],
+PHI:[{name:"LeBron James",pos:"SF",age:41,overall:89},{name:"Jaylen Brown",pos:"SG",age:29,overall:88},{name:"Joel Embiid",pos:"C",age:32,overall:86},{name:"Tyrese Maxey",pos:"PG",age:25,overall:87},{name:"VJ Edgecombe",pos:"SG",age:20,overall:76},{name:"Paul George",pos:"SF",age:35,overall:76},{name:"Kelly Oubre Jr.",pos:"SF",age:30,overall:76},{name:"Andre Drummond",pos:"C",age:32,overall:73},{name:"Quentin Grimes",pos:"SG",age:25,overall:74},{name:"Justin Edwards",pos:"SF",age:21,overall:65},{name:"Jared Butler",pos:"PG",age:24,overall:63},{name:"Adem Bona",pos:"C",age:22,overall:66}],
+ORL:[{name:"Paolo Banchero",pos:"PF",age:23,overall:86},{name:"Franz Wagner",pos:"SF",age:24,overall:85},{name:"Desmond Bane",pos:"SG",age:27,overall:84},{name:"Jalen Suggs",pos:"PG",age:24,overall:79},{name:"Wendell Carter Jr.",pos:"C",age:26,overall:76},{name:"Anthony Black",pos:"PG",age:22,overall:74},{name:"Goga Bitadze",pos:"C",age:26,overall:71},{name:"Moritz Wagner",pos:"C",age:24,overall:74},{name:"Tristan da Silva",pos:"SF",age:24,overall:68},{name:"Cole Anthony",pos:"PG",age:25,overall:71},{name:"Jett Howard",pos:"SG",age:22,overall:63},{name:"Jalen Hood-Schifino",pos:"PG",age:23,overall:63}],
+CHA:[{name:"LaMelo Ball",pos:"PG",age:24,overall:85},{name:"Brandon Miller",pos:"SF",age:23,overall:79},{name:"Miles Bridges",pos:"PF",age:27,overall:78},{name:"Nick Richards",pos:"C",age:28,overall:75},{name:"Kon Knueppel",pos:"SG",age:20,overall:74},{name:"Grant Williams",pos:"PF",age:27,overall:72},{name:"Josh Green",pos:"SG",age:25,overall:71},{name:"Tidjane Salaün",pos:"PF",age:20,overall:65},{name:"Moussa Diabaté",pos:"C",age:23,overall:65},{name:"Seth Curry",pos:"SG",age:35,overall:68},{name:"Damion Baugh",pos:"PG",age:24,overall:62},{name:"Vasilije Micić",pos:"PG",age:31,overall:68}],
+MIA:[{name:"Bam Adebayo",pos:"C",age:28,overall:85},{name:"Tyler Herro",pos:"SG",age:26,overall:84},{name:"Andrew Wiggins",pos:"SF",age:31,overall:77},{name:"Jaime Jaquez Jr.",pos:"SF",age:24,overall:76},{name:"Kel'el Ware",pos:"C",age:22,overall:74},{name:"Davion Mitchell",pos:"PG",age:27,overall:72},{name:"Terry Rozier",pos:"PG",age:31,overall:76},{name:"Nikola Jović",pos:"SF",age:22,overall:71},{name:"Pelle Larsson",pos:"SG",age:23,overall:65},{name:"Haywood Highsmith",pos:"SF",age:29,overall:68},{name:"Alec Burks",pos:"SG",age:34,overall:68},{name:"Dru Smith",pos:"PG",age:26,overall:63}],
+MIL:[{name:"Giannis Antetokounmpo",pos:"PF",age:31,overall:96},{name:"Myles Turner",pos:"C",age:29,overall:82},{name:"Kyle Kuzma",pos:"PF",age:31,overall:76},{name:"Ryan Rollins",pos:"PG",age:22,overall:75},{name:"AJ Green",pos:"SG",age:25,overall:72},{name:"Gary Trent Jr.",pos:"SG",age:27,overall:74},{name:"Bobby Portis",pos:"PF",age:30,overall:78},{name:"Taurean Prince",pos:"SF",age:31,overall:70},{name:"Andre Jackson Jr.",pos:"SF",age:23,overall:66},{name:"Kevin Porter Jr.",pos:"PG",age:25,overall:70},{name:"Chris Livingston",pos:"SF",age:22,overall:62},{name:"Jericho Sims",pos:"C",age:25,overall:65}],
+CHI:[{name:"Josh Giddey",pos:"PG",age:23,overall:80},{name:"Coby White",pos:"SG",age:26,overall:79},{name:"Nikola Vučević",pos:"C",age:35,overall:79},{name:"Matas Buzelis",pos:"PF",age:21,overall:75},{name:"Ayo Dosunmu",pos:"SG",age:26,overall:74},{name:"Patrick Williams",pos:"SF",age:24,overall:73},{name:"Zach Collins",pos:"C",age:28,overall:71},{name:"Julian Phillips",pos:"SF",age:22,overall:65},{name:"Kevin Huerter",pos:"SG",age:27,overall:72},{name:"Tre Jones",pos:"PG",age:25,overall:69},{name:"Isaac Okoro",pos:"SF",age:24,overall:71},{name:"Jalen Smith",pos:"PF",age:25,overall:66}],
+BKN:[{name:"Cam Thomas",pos:"SG",age:24,overall:79},{name:"Nic Claxton",pos:"C",age:26,overall:76},{name:"Michael Porter Jr.",pos:"SF",age:28,overall:79},{name:"Noah Clowney",pos:"PF",age:21,overall:72},{name:"Dennis Schröder",pos:"PG",age:32,overall:74},{name:"Terance Mann",pos:"SF",age:27,overall:71},{name:"Day'Ron Sharpe",pos:"C",age:23,overall:69},{name:"Tyrese Martin",pos:"SG",age:24,overall:62},{name:"Trendon Watford",pos:"PF",age:24,overall:65},{name:"Keon Johnson",pos:"SG",age:23,overall:64},{name:"Killian Hayes",pos:"PG",age:24,overall:62},{name:"Ziaire Williams",pos:"SF",age:23,overall:73}],
+IND:[{name:"Tyrese Haliburton",pos:"PG",age:26,overall:82},{name:"Pascal Siakam",pos:"PF",age:32,overall:85},{name:"Bennedict Mathurin",pos:"SG",age:24,overall:79},{name:"Andrew Nembhard",pos:"PG",age:26,overall:77},{name:"T.J. McConnell",pos:"PG",age:33,overall:74},{name:"Aaron Nesmith",pos:"SF",age:26,overall:74},{name:"Obi Toppin",pos:"PF",age:27,overall:74},{name:"Jarace Walker",pos:"PF",age:22,overall:68},{name:"Ben Sheppard",pos:"SG",age:24,overall:66},{name:"Isaiah Jackson",pos:"C",age:23,overall:68},{name:"James Wiseman",pos:"C",age:24,overall:66},{name:"Enrique Freeman",pos:"PF",age:23,overall:61}],
+WAS:[{name:"Bilal Coulibaly",pos:"SF",age:21,overall:76},{name:"Alex Sarr",pos:"C",age:21,overall:75},{name:"Corey Kispert",pos:"SF",age:27,overall:72},{name:"Marcus Smart",pos:"PG",age:32,overall:76},{name:"AJ Johnson",pos:"SG",age:22,overall:68},{name:"Malcolm Brogdon",pos:"PG",age:33,overall:73},{name:"Jonas Valančiūnas",pos:"C",age:33,overall:74},{name:"Justin Champagnie",pos:"SF",age:23,overall:64},{name:"Kyshawn George",pos:"SF",age:21,overall:68},{name:"Cam Whitmore",pos:"SF",age:21,overall:68},{name:"Anthony Gill",pos:"PF",age:31,overall:62},{name:"Tristan Vukcevic",pos:"C",age:22,overall:63}],
+OKC:[{name:"Shai Gilgeous-Alexander",pos:"PG",age:27,overall:97},{name:"Jalen Williams",pos:"SF",age:24,overall:89},{name:"Chet Holmgren",pos:"C",age:24,overall:87},{name:"Isaiah Hartenstein",pos:"C",age:28,overall:80},{name:"Luguentz Dort",pos:"SF",age:27,overall:78},{name:"Aaron Wiggins",pos:"SG",age:27,overall:74},{name:"Cason Wallace",pos:"SG",age:22,overall:75},{name:"Kenrich Williams",pos:"SF",age:30,overall:71},{name:"Ajay Mitchell",pos:"SG",age:23,overall:68},{name:"Alex Caruso",pos:"SG",age:31,overall:76},{name:"Jaylin Williams",pos:"PF",age:23,overall:68},{name:"Isaiah Joe",pos:"SG",age:25,overall:70}],
+SAS:[{name:"Victor Wembanyama",pos:"C",age:22,overall:96},{name:"De'Aaron Fox",pos:"PG",age:28,overall:87},{name:"Stephon Castle",pos:"SG",age:21,overall:80},{name:"Devin Vassell",pos:"SF",age:25,overall:79},{name:"Tobias Harris",pos:"PF",age:33,overall:75},{name:"Harrison Barnes",pos:"SF",age:34,overall:74},{name:"Keldon Johnson",pos:"SF",age:25,overall:75},{name:"Jeremy Sochan",pos:"PF",age:22,overall:76},{name:"Chris Paul",pos:"PG",age:40,overall:76},{name:"Sidy Cissoko",pos:"SF",age:21,overall:63},{name:"Bismack Biyombo",pos:"C",age:33,overall:65},{name:"Charles Bassey",pos:"C",age:24,overall:62}],
+DEN:[{name:"Nikola Jokić",pos:"C",age:31,overall:98},{name:"Jamal Murray",pos:"PG",age:29,overall:86},{name:"Aaron Gordon",pos:"PF",age:30,overall:82},{name:"Cameron Johnson",pos:"SF",age:30,overall:78},{name:"Christian Braun",pos:"SG",age:25,overall:77},{name:"Peyton Watson",pos:"SF",age:24,overall:77},{name:"Julian Strawther",pos:"SG",age:23,overall:68},{name:"Zeke Nnaji",pos:"PF",age:24,overall:65},{name:"Jalen Pickett",pos:"PG",age:24,overall:63},{name:"DaRon Holmes II",pos:"PF",age:21,overall:67},{name:"Spencer Jones",pos:"SF",age:23,overall:62},{name:"Vlatko Čančar",pos:"SF",age:28,overall:64}],
+LAL:[{name:"Luka Dončić",pos:"PG",age:27,overall:96},{name:"Austin Reaves",pos:"SG",age:28,overall:85},{name:"Walker Kessler",pos:"C",age:24,overall:80},{name:"Jaxson Hayes",pos:"C",age:26,overall:71},{name:"Jarred Vanderbilt",pos:"PF",age:27,overall:73},{name:"Dalton Knecht",pos:"SG",age:24,overall:73},{name:"Rui Hachimura",pos:"PF",age:28,overall:79},{name:"Gabe Vincent",pos:"PG",age:29,overall:72},{name:"Jordan Goodwin",pos:"PG",age:27,overall:65},{name:"Maxi Kleber",pos:"PF",age:33,overall:68},{name:"Christian Wood",pos:"C",age:30,overall:68},{name:"Bronny James",pos:"PG",age:21,overall:62}],
+HOU:[{name:"Kevin Durant",pos:"SF",age:37,overall:90},{name:"Alperen Şengün",pos:"C",age:23,overall:87},{name:"Amen Thompson",pos:"SF",age:23,overall:82},{name:"Fred VanVleet",pos:"PG",age:32,overall:79},{name:"Jabari Smith Jr.",pos:"PF",age:22,overall:78},{name:"Reed Sheppard",pos:"PG",age:21,overall:74},{name:"Steven Adams",pos:"C",age:32,overall:75},{name:"Tari Eason",pos:"PF",age:24,overall:74},{name:"Aaron Holiday",pos:"PG",age:29,overall:66},{name:"Jae'Sean Tate",pos:"SF",age:30,overall:68},{name:"Josh Okogie",pos:"SG",age:27,overall:65},{name:"Jeff Green",pos:"PF",age:39,overall:66}],
+MIN:[{name:"Anthony Edwards",pos:"SG",age:24,overall:93},{name:"Julius Randle",pos:"PF",age:31,overall:82},{name:"Rudy Gobert",pos:"C",age:34,overall:82},{name:"Jaden McDaniels",pos:"SF",age:25,overall:79},{name:"Mike Conley",pos:"PG",age:38,overall:74},{name:"Naz Reid",pos:"C",age:24,overall:80},{name:"Donte DiVincenzo",pos:"SG",age:28,overall:76},{name:"Terrence Shannon Jr.",pos:"SG",age:24,overall:68},{name:"Joe Ingles",pos:"SF",age:37,overall:65},{name:"Luka Garza",pos:"C",age:26,overall:63},{name:"Rob Dillingham",pos:"PG",age:21,overall:66},{name:"Josh Minott",pos:"SF",age:23,overall:62}],
+PHX:[{name:"Devin Booker",pos:"SG",age:30,overall:90},{name:"Jalen Green",pos:"SG",age:24,overall:78},{name:"Dillon Brooks",pos:"PF",age:30,overall:76},{name:"Mark Williams",pos:"C",age:24,overall:77},{name:"Luke Kennard",pos:"SG",age:32,overall:75},{name:"Collin Gillespie",pos:"PG",age:25,overall:70},{name:"Oso Ighodaro",pos:"C",age:23,overall:66},{name:"Ryan Dunn",pos:"SF",age:21,overall:70},{name:"Jalen Bridges",pos:"SF",age:23,overall:62},{name:"Monté Morris",pos:"PG",age:30,overall:66},{name:"Cody Martin",pos:"SF",age:30,overall:66},{name:"Bol Bol",pos:"C",age:26,overall:64}],
+LAC:[{name:"Norman Powell",pos:"SG",age:33,overall:78},{name:"Ivica Zubac",pos:"C",age:29,overall:80},{name:"Derrick Jones Jr.",pos:"SF",age:25,overall:74},{name:"John Collins",pos:"PF",age:28,overall:74},{name:"Kris Dunn",pos:"PG",age:32,overall:72},{name:"Amir Coffey",pos:"SG",age:29,overall:71},{name:"Kobe Brown",pos:"PF",age:24,overall:65},{name:"Cam Christie",pos:"SG",age:20,overall:62},{name:"Jordan Miller",pos:"SF",age:24,overall:62},{name:"Trentyn Flowers",pos:"SF",age:20,overall:61},{name:"Josh Primo",pos:"SG",age:22,overall:63},{name:"Brandon Boston Jr.",pos:"SG",age:24,overall:63}],
+POR:[{name:"Deandre Ayton",pos:"C",age:28,overall:78},{name:"Shaedon Sharpe",pos:"SG",age:23,overall:79},{name:"Toumani Camara",pos:"PF",age:25,overall:75},{name:"Donovan Clingan",pos:"C",age:21,overall:76},{name:"Scoot Henderson",pos:"PG",age:24,overall:76},{name:"Jrue Holiday",pos:"PG",age:36,overall:82},{name:"Jerami Grant",pos:"PF",age:31,overall:76},{name:"Robert Williams III",pos:"C",age:28,overall:71},{name:"Matisse Thybulle",pos:"SF",age:28,overall:68},{name:"Rayan Rupert",pos:"SF",age:21,overall:65},{name:"Duop Reath",pos:"C",age:26,overall:63},{name:"Kris Murray",pos:"SF",age:24,overall:63}],
+GSW:[{name:"Stephen Curry",pos:"PG",age:38,overall:92},{name:"Jimmy Butler",pos:"SF",age:37,overall:87},{name:"Draymond Green",pos:"PF",age:36,overall:78},{name:"Brandin Podziemski",pos:"SG",age:23,overall:76},{name:"Moses Moody",pos:"SG",age:24,overall:74},{name:"Jonathan Kuminga",pos:"PF",age:24,overall:78},{name:"Buddy Hield",pos:"SG",age:32,overall:74},{name:"Gary Payton II",pos:"SG",age:33,overall:72},{name:"Quinten Post",pos:"C",age:23,overall:65},{name:"Trayce Jackson-Davis",pos:"C",age:25,overall:68},{name:"De'Anthony Melton",pos:"PG",age:27,overall:68},{name:"Pat Spencer",pos:"PG",age:26,overall:60}],
+DAL:[{name:"Anthony Davis",pos:"PF",age:33,overall:87},{name:"Kyrie Irving",pos:"PG",age:34,overall:86},{name:"Klay Thompson",pos:"SG",age:36,overall:74},{name:"Cooper Flagg",pos:"PF",age:20,overall:79},{name:"P.J. Washington",pos:"PF",age:27,overall:76},{name:"Dereck Lively II",pos:"C",age:21,overall:75},{name:"Daniel Gafford",pos:"C",age:27,overall:75},{name:"Naji Marshall",pos:"SF",age:27,overall:71},{name:"Max Christie",pos:"SG",age:22,overall:71},{name:"Olivier-Maxence Prosper",pos:"PF",age:22,overall:64},{name:"Jaden Hardy",pos:"SG",age:23,overall:68},{name:"Dwight Powell",pos:"C",age:34,overall:64}],
+NOP:[{name:"Zion Williamson",pos:"PF",age:26,overall:82},{name:"Trey Murphy III",pos:"SF",age:26,overall:80},{name:"CJ McCollum",pos:"SG",age:35,overall:78},{name:"Herbert Jones",pos:"SF",age:27,overall:77},{name:"Yves Missi",pos:"C",age:21,overall:73},{name:"Jose Alvarado",pos:"PG",age:28,overall:72},{name:"Dejounte Murray",pos:"PG",age:29,overall:78},{name:"Saddiq Bey",pos:"SF",age:26,overall:68},{name:"Jordan Hawkins",pos:"SG",age:23,overall:68},{name:"Karlo Matković",pos:"PF",age:24,overall:63},{name:"Jeremiah Robinson-Earl",pos:"PF",age:25,overall:65},{name:"Antonio Reeves",pos:"SG",age:24,overall:64}],
+MEM:[{name:"Ja Morant",pos:"PG",age:27,overall:88},{name:"Jaren Jackson Jr.",pos:"PF",age:26,overall:85},{name:"Zach Edey",pos:"C",age:24,overall:75},{name:"Santi Aldama",pos:"PF",age:25,overall:74},{name:"Scotty Pippen Jr.",pos:"PG",age:25,overall:71},{name:"Vince Williams Jr.",pos:"SF",age:25,overall:71},{name:"GG Jackson II",pos:"PF",age:21,overall:68},{name:"Jaylen Wells",pos:"SF",age:21,overall:68},{name:"John Konchar",pos:"SG",age:29,overall:64},{name:"Cam Spencer",pos:"SG",age:24,overall:62},{name:"Jay Huff",pos:"C",age:27,overall:61},{name:"Yuki Kawamura",pos:"PG",age:24,overall:60}],
+UTA:[{name:"Lauri Markkanen",pos:"PF",age:29,overall:85},{name:"Keyonte George",pos:"PG",age:23,overall:76},{name:"Isaiah Collier",pos:"PG",age:22,overall:73},{name:"Taylor Hendricks",pos:"PF",age:22,overall:73},{name:"Svi Mykhailiuk",pos:"SG",age:29,overall:68},{name:"Cody Williams",pos:"SF",age:22,overall:70},{name:"Collin Sexton",pos:"PG",age:27,overall:74},{name:"Kyle Filipowski",pos:"C",age:21,overall:68},{name:"Brice Sensabaugh",pos:"SF",age:22,overall:65},{name:"Jusuf Nurkić",pos:"C",age:31,overall:68},{name:"Elijah Harkless",pos:"SG",age:24,overall:60},{name:"Micah Potter",pos:"C",age:25,overall:61}],
+SAC:[{name:"Domantas Sabonis",pos:"C",age:30,overall:86},{name:"DeMar DeRozan",pos:"SF",age:37,overall:80},{name:"Zach LaVine",pos:"SG",age:31,overall:82},{name:"Malik Monk",pos:"SG",age:28,overall:78},{name:"Keegan Murray",pos:"PF",age:26,overall:76},{name:"Devin Carter",pos:"PG",age:24,overall:70},{name:"Doug McDermott",pos:"SF",age:33,overall:68},{name:"Jake LaRavia",pos:"PF",age:23,overall:68},{name:"Isaac Jones",pos:"PF",age:23,overall:60},{name:"Trey Lyles",pos:"PF",age:29,overall:65},{name:"Colby Jones",pos:"SG",age:22,overall:61},{name:"Jae Crowder",pos:"PF",age:35,overall:66}]
+
+};
 const [phase,setPhase]=useState("select");
 const [myTeamId,setMyTeamId]=useState(null);
 const [lottery,setLottery]=useState(null);
@@ -10824,12 +10864,20 @@ const [budget,setBudget]=useState(0);
 const [result,setResult]=useState(null);
 const [msg,setMsg]=useState("");
 const [faMarket,setFaMarket]=useState("classic"); // "classic" = grote geshuffelde pool | "current" = actuele markt zomer 2026
+const [rosters,setRosters]=useState(null); // teamId -> spelerslijst, gebruikt voor trades + seizoenssimulatie
+const [tradeTeamId,setTradeTeamId]=useState(null);
+const [tradeGive,setTradeGive]=useState(null);
+const [tradeGet,setTradeGet]=useState(null);
+const [tradeMsg,setTradeMsg]=useState("");
+const [tradeLog,setTradeLog]=useState([]);
+const [capMode,setCapMode]=useState("free"); // "free" = alleen waarde telt | "strict" = salarissen moeten ongeveer matchen
 
 const myTeam=NBA_TEAMS.find(t=>t.id===myTeamId);
 
 function seedRand(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
 
 function startLottery(){
+setRosters(JSON.parse(JSON.stringify(REAL_ROSTERS)));
 const bottom14=[...NBA_TEAMS].sort((a,b)=>{const [aw]=a.record.split("-").map(Number);const [bw]=b.record.split("-").map(Number);return aw-bw;}).slice(0,14);
 const rand=seedRand(Date.now()%99999);
 const weighted=[];
@@ -10985,29 +11033,25 @@ const FA_POOL_CLASSIC=[
 ];
 // Actuele markt: echte NBA free agents uit de zomer van 2026 (stand medio 2026, marktsituatie kan intussen wijzigen).
 const FA_POOL_CURRENT=[
-{name:"Jalen Duren",pos:"C",age:22,overall:82},
 {name:"James Harden",pos:"PG",age:36,overall:86},
-{name:"Rui Hachimura",pos:"PF",age:28,overall:79},
-{name:"Draymond Green",pos:"PF",age:36,overall:77},
-{name:"Peyton Watson",pos:"SF",age:24,overall:77},
-{name:"Bennedict Mathurin",pos:"SG",age:24,overall:79},
-{name:"Jonathan Kuminga",pos:"PF",age:23,overall:78},
 {name:"Khris Middleton",pos:"SF",age:35,overall:76},
 {name:"Russell Westbrook",pos:"PG",age:37,overall:74},
 {name:"Jordan Clarkson",pos:"SG",age:34,overall:76},
 {name:"Bruce Brown",pos:"SG",age:29,overall:74},
-{name:"Gary Trent Jr.",pos:"SG",age:27,overall:74},
 {name:"Nicolas Batum",pos:"SF",age:37,overall:70},
-{name:"Gary Payton II",pos:"SG",age:33,overall:72},
-{name:"Gabe Vincent",pos:"PG",age:30,overall:72},
-{name:"Nick Richards",pos:"C",age:28,overall:73},
 {name:"Brandon Williams",pos:"PG",age:24,overall:68},
 {name:"Ochai Agbaji",pos:"SG",age:26,overall:71},
 {name:"Patrick Baldwin Jr.",pos:"SF",age:24,overall:67},
-{name:"Xavier Tillman Sr.",pos:"C",age:27,overall:70}
+{name:"Furkan Korkmaz",pos:"SG",age:28,overall:68},
+{name:"P.J. Tucker",pos:"PF",age:40,overall:62},
+{name:"Delon Wright",pos:"PG",age:33,overall:68},
+{name:"Kevin Love",pos:"PF",age:37,overall:68},
+{name:"Marvin Bagley III",pos:"PF",age:27,overall:68},
+{name:"Danilo Gallinari",pos:"SF",age:37,overall:65}
 ];
 const rand=seedRand(Date.now()%88888);
-const sourcePool=faMarket==="current"?FA_POOL_CURRENT:FA_POOL_CLASSIC;
+const rosterNames=new Set(Object.values(rosters||REAL_ROSTERS).flat().map(p=>p.name));
+const sourcePool=(faMarket==="current"?FA_POOL_CURRENT:FA_POOL_CLASSIC).filter(p=>!rosterNames.has(p.name));
 // Shuffle en pak tot 20 verschillende spelers, zodat elke nieuwe run een andere FA-markt heeft.
 const shuffled=[...sourcePool];
 for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
@@ -11029,18 +11073,57 @@ setSigned([...signed,p]);setBudget(budget-p.ask);setFreeAgents(freeAgents.filter
 
 function simulateSeason(){
 const myPicks=Object.entries(drafted).filter(([_,d])=>d.teamId===myTeamId).map(([pid])=>draftClass.find(p=>p.id===pid));
-const draftBoost=myPicks.reduce((s,p)=>s+p.overall,0)/(myPicks.length||1);
-const faBoost=signed.reduce((s,p)=>s+p.overall,0)/Math.max(1,signed.length);
-const [w]=myTeam.record.split("-").map(Number);
+const coreRoster=(rosters&&rosters[myTeamId])||REAL_ROSTERS[myTeamId]||[];
+// Kernroster (na eventuele trades) + rookies (iets minder impact als eerstejaars) + FA signings (volle impact).
+const fullRoster=[
+...coreRoster.map(p=>({...p,eff:p.overall})),
+...myPicks.map(p=>({...p,eff:p.overall-4})),
+...signed.map(p=>({...p,eff:p.overall}))
+];
+const top=fullRoster.sort((a,b)=>b.eff-a.eff).slice(0,8);
+const teamRating=top.reduce((s,p)=>s+p.eff,0)/Math.max(1,top.length);
 const rand=seedRand(Date.now()%11111);
-let projWins=w+Math.round((draftBoost-70)*0.4+(faBoost-70)*0.3+(rand()-0.5)*10);
-projWins=Math.max(15,Math.min(72,projWins));
+let projWins=Math.round((teamRating-58)*2.05+(rand()-0.5)*8);
+projWins=Math.max(12,Math.min(73,projWins));
 const seed=projWins>=55?1:projWins>=48?4:projWins>=42?6:projWins>=36?8:null;
-setResult({wins:projWins,losses:82-projWins,seed,champion:projWins>=60&&rand()>0.7,draftPicks:myPicks,signings:signed});
+setResult({wins:projWins,losses:82-projWins,seed,champion:projWins>=60&&rand()>0.7,draftPicks:myPicks,signings:signed,teamRating:Math.round(teamRating*10)/10});
 setPhase("result");
 }
 
-function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);}
+function proposeTrade(){
+if(!tradeTeamId||!tradeGive||!tradeGet){return;}
+const rand=seedRand(Date.now()%54321);
+const myPlayer=rosters[myTeamId].find(p=>p.name===tradeGive);
+const theirPlayer=rosters[tradeTeamId].find(p=>p.name===tradeGet);
+if(!myPlayer||!theirPlayer)return;
+if(capMode==="strict"){
+const mySal=salaryOf(myPlayer),theirSal=salaryOf(theirPlayer);
+const bigger=Math.max(mySal,theirSal),smaller=Math.min(mySal,theirSal);
+// Vereenvoudigde CBA-regel: uitgaand salaris mag max ~35% afwijken van inkomend salaris.
+if((bigger-smaller)/bigger>0.35){
+setTradeMsg(`🚫 Salarissen matchen niet onder de cap-regels: $${mySal}M ↔ $${theirSal}M (max ~35% verschil toegestaan).`);
+setTimeout(()=>setTradeMsg(""),4500);
+return;
+}
+}
+// AI accepteert als het aanbod ongeveer gelijkwaardig is (of in hun voordeel), met een beetje speling.
+const tolerance=4+Math.floor(rand()*4);
+const accepted=myPlayer.overall>=theirPlayer.overall-tolerance;
+if(accepted){
+const newRosters={...rosters};
+newRosters[myTeamId]=rosters[myTeamId].filter(p=>p.name!==tradeGive).concat([theirPlayer]);
+newRosters[tradeTeamId]=rosters[tradeTeamId].filter(p=>p.name!==tradeGet).concat([myPlayer]);
+setRosters(newRosters);
+setTradeLog([...tradeLog,{out:myPlayer.name,in:theirPlayer.name,team:tradeTeamId}]);
+setTradeMsg(`✅ Deal geaccepteerd: ${myPlayer.name} ▸ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} voor ${theirPlayer.name}`);
+}else{
+setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen meer waarde terug voor ${theirPlayer.name} (OVR ${theirPlayer.overall}).`);
+}
+setTradeGive(null);setTradeGet(null);
+setTimeout(()=>setTradeMsg(""),4000);
+}
+
+function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGive(null);setTradeGet(null);setTradeMsg("");setTradeLog([]);}
 
 const btn={background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 18px",fontWeight:800,fontSize:13,cursor:"pointer",width:"100%"};
 const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
@@ -11053,6 +11136,13 @@ if(phase==="select")return(<div>
 <div style={{display:"flex",gap:8}}>
 <div data-testid="gm-fa-mode-classic" onClick={()=>setFaMarket("classic")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:faMarket==="classic"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>🎲 Geshuffeld<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>willekeurige 20 uit grote pool</div></div>
 <div data-testid="gm-fa-mode-current" onClick={()=>setFaMarket("current")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:faMarket==="current"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>📅 Actueel (zomer '26)<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>echte markt, kan intussen zijn veranderd</div></div>
+</div>
+</div>
+<div style={{...card,padding:12}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:8}}>CAP REGELS BIJ TRADES</div>
+<div style={{display:"flex",gap:8}}>
+<div data-testid="gm-cap-mode-free" onClick={()=>setCapMode("free")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:capMode==="free"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>🔓 Vrij<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>alleen spelerswaarde telt</div></div>
+<div data-testid="gm-cap-mode-strict" onClick={()=>setCapMode("strict")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:capMode==="strict"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>🔒 Strikt<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>salarissen moeten kloppen</div></div>
 </div>
 </div>
 {["E","W"].map(conf=>(<div key={conf}>
@@ -11119,6 +11209,47 @@ return(<div>
 <div><div style={{color:GREY,fontSize:10}}>PICK #{p.pickNo}</div><div style={{color:WHITE,fontWeight:700,fontSize:14}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age} · OVR {p.overall}</div></div>
 <div style={{color:RED,fontWeight:800,fontSize:20}}>{p.overall}</div>
 </div>))}
+<button data-testid="gm-goto-trades" onClick={()=>setPhase("trades")} style={{...btn,marginTop:14}}>Naar Trade Markt ▸</button>
+</div>);
+}
+
+if(phase==="trades"){
+const myRoster=(rosters&&rosters[myTeamId])||[];
+const otherTeams=NBA_TEAMS.filter(t=>t.id!==myTeamId);
+const theirRoster=tradeTeamId&&rosters?rosters[tradeTeamId]:[];
+const myTotalSalary=myRoster.reduce((s,p)=>s+salaryOf(p),0);
+return(<div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>TRADE MARKT</div>
+{capMode==="strict"&&<div style={{...card,textAlign:"center",padding:10}}>
+<div style={{color:GREY,fontSize:11}}>GESCHATTE TEAM SALARIS</div>
+<div style={{color:myTotalSalary>SALARY_CAP?"#ff453a":"#30d158",fontSize:20,fontWeight:900}}>${myTotalSalary.toFixed(1)}M <span style={{color:GREY,fontSize:11,fontWeight:400}}>/ ${SALARY_CAP}M cap</span></div>
+</div>}
+<div style={{color:GREY,fontSize:11,margin:"6px 0"}}>JOUW ROSTER — kies een speler om aan te bieden</div>
+{myRoster.map(p=>(
+<div key={p.name} data-testid={`gm-trade-give-${p.name}`} onClick={()=>setTradeGive(p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGive===p.name?`1px solid ${RED}`:"1px solid transparent"}}>
+<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
+<div style={{color:RED,fontWeight:800,fontSize:16}}>{p.overall}</div>
+</div>))}
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>KIES EEN HANDELSPARTNER</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+{otherTeams.map(t=>(
+<div key={t.id} data-testid={`gm-trade-team-${t.id}`} onClick={()=>{setTradeTeamId(t.id);setTradeGet(null);}} style={{padding:"6px 10px",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,background:tradeTeamId===t.id?RED:INPUTBG,color:WHITE}}>{t.id}</div>
+))}
+</div>
+{tradeTeamId&&(<>
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>{NBA_TEAMS.find(t=>t.id===tradeTeamId).name.toUpperCase()} — kies een speler die je wilt</div>
+{theirRoster.map(p=>(
+<div key={p.name} data-testid={`gm-trade-get-${p.name}`} onClick={()=>setTradeGet(p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGet===p.name?`1px solid ${RED}`:"1px solid transparent"}}>
+<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
+<div style={{color:RED,fontWeight:800,fontSize:16}}>{p.overall}</div>
+</div>))}
+</>)}
+{tradeMsg&&<div style={{...card,background:"#3a1a1a",color:"#ff9500",textAlign:"center",fontSize:12}}>{tradeMsg}</div>}
+<button data-testid="gm-propose-trade" onClick={proposeTrade} disabled={!tradeGive||!tradeGet} style={{...btn,marginTop:10,opacity:(!tradeGive||!tradeGet)?0.5:1}}>Doe het bod ▸</button>
+{tradeLog.length>0&&(<>
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>VOLTOOIDE TRADES</div>
+{tradeLog.map((t,i)=>(<div key={i} style={{...card,padding:8,fontSize:11,color:GREY}}>{t.out} ▸ {NBA_TEAMS.find(x=>x.id===t.team).name} · ontvangen: {t.in}</div>))}
+</>)}
 <button data-testid="gm-start-fa" onClick={startFA} style={{...btn,marginTop:14}}>Naar Free Agency ▸</button>
 </div>);
 }

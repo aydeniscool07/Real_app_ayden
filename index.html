@@ -10823,6 +10823,7 @@ const [signed,setSigned]=useState([]);
 const [budget,setBudget]=useState(0);
 const [result,setResult]=useState(null);
 const [msg,setMsg]=useState("");
+const [faMarket,setFaMarket]=useState("classic"); // "classic" = grote geshuffelde pool | "current" = actuele markt zomer 2026
 
 const myTeam=NBA_TEAMS.find(t=>t.id===myTeamId);
 
@@ -10846,67 +10847,68 @@ setPhase("lottery-reveal");
 }
 
 function generateDraftClass(){
-// Echte 2025 NBA Draft klasse (Ronde 1 + 2), met realistische ratings o.b.v. draftpositie/scouting.
+// Echte 2026 NBA Draft klasse (Ronde 1 + 2), met realistische ratings o.b.v. draftpositie/scouting.
 const ROOKIES=[
-{name:"Cooper Flagg",pos:"PF",age:19,overall:82},
-{name:"Dylan Harper",pos:"PG",age:19,overall:78},
-{name:"VJ Edgecombe",pos:"SG",age:20,overall:77},
-{name:"Kon Knueppel",pos:"SG",age:20,overall:76},
-{name:"Ace Bailey",pos:"SF",age:19,overall:76},
-{name:"Tre Johnson",pos:"SG",age:19,overall:75},
-{name:"Jeremiah Fears",pos:"PG",age:19,overall:74},
-{name:"Egor Demin",pos:"PG",age:19,overall:72},
-{name:"Collin Murray-Boyles",pos:"PF",age:20,overall:73},
-{name:"Khaman Maluach",pos:"C",age:19,overall:72},
-{name:"Cedric Coward",pos:"SG",age:22,overall:71},
-{name:"Noa Essengue",pos:"SF",age:18,overall:70},
-{name:"Derik Queen",pos:"C",age:20,overall:74},
-{name:"Carter Bryant",pos:"SF",age:19,overall:68},
-{name:"Thomas Sorber",pos:"C",age:19,overall:70},
-{name:"Yang Hansen",pos:"C",age:20,overall:68},
-{name:"Joan Beringer",pos:"C",age:19,overall:66},
-{name:"Walter Clayton Jr.",pos:"PG",age:22,overall:71},
-{name:"Nolan Traoré",pos:"PG",age:19,overall:67},
-{name:"Kasparas Jakučionis",pos:"SG",age:19,overall:70},
-{name:"Will Riley",pos:"SF",age:19,overall:68},
-{name:"Drake Powell",pos:"SF",age:20,overall:66},
-{name:"Asa Newell",pos:"PF",age:19,overall:69},
-{name:"Nique Clifford",pos:"SG",age:22,overall:67},
-{name:"Jase Richardson",pos:"SG",age:19,overall:70},
-{name:"Ben Saraf",pos:"PG",age:19,overall:66},
-{name:"Danny Wolf",pos:"C",age:21,overall:67},
-{name:"Hugo González",pos:"SF",age:19,overall:65},
-{name:"Liam McNeeley",pos:"SF",age:20,overall:69},
-{name:"Yanic Konan Niederhauser",pos:"C",age:22,overall:63},
-{name:"Rasheer Fleming",pos:"PF",age:22,overall:64},
-{name:"Noah Penda",pos:"SF",age:21,overall:63},
-{name:"Sion James",pos:"SG",age:23,overall:62},
-{name:"Ryan Kalkbrenner",pos:"C",age:23,overall:63},
-{name:"Johni Broome",pos:"C",age:22,overall:64},
-{name:"Adou Thiero",pos:"SF",age:21,overall:61},
-{name:"Chaz Lanier",pos:"SG",age:23,overall:61},
-{name:"Kam Jones",pos:"PG",age:22,overall:60},
-{name:"Alijah Martin",pos:"SG",age:23,overall:60},
-{name:"Micah Peavy",pos:"SF",age:22,overall:60},
-{name:"Koby Brea",pos:"SG",age:23,overall:60},
-{name:"Maxime Raynaud",pos:"C",age:22,overall:62},
-{name:"Jamir Watkins",pos:"SF",age:23,overall:59},
-{name:"Brooks Barnhizer",pos:"SF",age:22,overall:60},
-{name:"Rocco Zikarsky",pos:"C",age:19,overall:58},
-{name:"Amari Williams",pos:"C",age:23,overall:60},
-{name:"Bogoljub Marković",pos:"PF",age:19,overall:59},
-{name:"Javon Small",pos:"PG",age:23,overall:59},
-{name:"Tyrese Proctor",pos:"PG",age:21,overall:59},
-{name:"Kobe Sanders",pos:"SG",age:23,overall:58},
-{name:"Mohamed Diawara",pos:"SF",age:21,overall:59},
-{name:"Alex Toohey",pos:"SF",age:21,overall:58},
-{name:"John Tonje",pos:"SG",age:24,overall:59},
-{name:"Taelon Peter",pos:"SG",age:21,overall:57},
-{name:"Lachlan Olbrich",pos:"C",age:22,overall:58},
-{name:"Will Richard",pos:"SG",age:22,overall:59},
-{name:"Max Shulga",pos:"PG",age:23,overall:57},
-{name:"Saliou Niang",pos:"SF",age:20,overall:57},
-{name:"Jahmai Mashack",pos:"SG",age:22,overall:57}
+{name:"AJ Dybantsa",pos:"SF",age:19,overall:81},
+{name:"Darryn Peterson",pos:"SG",age:19,overall:79},
+{name:"Cameron Boozer",pos:"PF",age:19,overall:78},
+{name:"Caleb Wilson",pos:"PF",age:19,overall:76},
+{name:"Keaton Wagler",pos:"PG",age:19,overall:73},
+{name:"Mikel Brown Jr.",pos:"PG",age:18,overall:74},
+{name:"Darius Acuff Jr.",pos:"PG",age:19,overall:73},
+{name:"Kingston Flemings",pos:"PG",age:19,overall:72},
+{name:"Morez Johnson Jr.",pos:"PF",age:19,overall:71},
+{name:"Brayden Burries",pos:"SG",age:19,overall:72},
+{name:"Yaxel Lendeborg",pos:"PF",age:22,overall:71},
+{name:"Aday Mara",pos:"C",age:20,overall:69},
+{name:"Nate Ament",pos:"SF",age:19,overall:70},
+{name:"Hannes Steinbach",pos:"C",age:20,overall:67},
+{name:"Dailyn Swain",pos:"SF",age:20,overall:66},
+{name:"Bennett Stirtz",pos:"PG",age:23,overall:66},
+{name:"Ebuka Okorie",pos:"SG",age:20,overall:64},
+{name:"Christian Anderson",pos:"PG",age:20,overall:65},
+{name:"Allen Graves",pos:"PF",age:22,overall:63},
+{name:"Jayden Quaintance",pos:"C",age:19,overall:68},
+{name:"Karim López",pos:"SF",age:19,overall:63},
+{name:"Labaron Philon Jr.",pos:"PG",age:19,overall:66},
+{name:"Zuby Ejiofor",pos:"C",age:21,overall:64},
+{name:"Cameron Carr",pos:"SG",age:20,overall:62},
+{name:"Sergio De Larrea",pos:"PG",age:19,overall:65},
+{name:"Tarris Reed Jr.",pos:"C",age:21,overall:63},
+{name:"Chris Cenac Jr.",pos:"C",age:20,overall:62},
+{name:"Joshua Jefferson",pos:"PF",age:21,overall:62},
+{name:"Alex Karaban",pos:"SF",age:22,overall:63},
+{name:"Koa Peat",pos:"PF",age:19,overall:67},
+{name:"Bruce Thornton",pos:"PG",age:22,overall:60},
+{name:"Richie Saunders",pos:"SG",age:23,overall:59},
+{name:"Isaiah Evans",pos:"SG",age:19,overall:61},
+{name:"Meleek Thomas",pos:"SG",age:20,overall:60},
+{name:"Trevon Brazile",pos:"PF",age:23,overall:59},
+{name:"Baba Miller",pos:"PF",age:22,overall:59},
+{name:"Ryan Conwell",pos:"SG",age:23,overall:59},
+{name:"Braden Smith",pos:"PG",age:21,overall:60},
+{name:"Jack Kayil",pos:"SG",age:19,overall:58},
+{name:"Dillon Mitchell",pos:"SF",age:22,overall:59},
+{name:"Otega Oweh",pos:"SG",age:22,overall:59},
+{name:"Ja'Kobi Gillespie",pos:"PG",age:22,overall:58},
+{name:"Tyler Bilodeau",pos:"PF",age:22,overall:58},
+{name:"Maliq Brown",pos:"PF",age:22,overall:59},
+{name:"Emanuel Sharp",pos:"SG",age:22,overall:58},
+{name:"Felix Okpara",pos:"C",age:22,overall:58},
+{name:"Tyler Nickel",pos:"SG",age:22,overall:57},
+{name:"Tobi Lawal",pos:"PF",age:22,overall:57},
+{name:"Bryce Hopkins",pos:"PF",age:22,overall:58},
+{name:"Jaden Bradley",pos:"PG",age:22,overall:57},
+{name:"Izaiyah Nelson",pos:"SG",age:22,overall:57},
+{name:"Henri Veesaar",pos:"C",age:22,overall:57},
+{name:"Ugonna Onyenso",pos:"C",age:22,overall:57},
+{name:"Lajae Jones",pos:"SG",age:21,overall:57},
+{name:"Nick Martinelli",pos:"SF",age:22,overall:57},
+{name:"Vsevolod Ishchenko",pos:"PF",age:20,overall:56},
+{name:"Narcisse Ngoy",pos:"PF",age:20,overall:56},
+{name:"Jaron Pierre Jr.",pos:"PG",age:22,overall:56},
+{name:"Trey Kaufman-Renn",pos:"PF",age:23,overall:57},
+{name:"Malique Lewis",pos:"SF",age:19,overall:56}
 ];
 const rand=seedRand(Date.now()%77777);
 const arr=ROOKIES.map((r,i)=>{
@@ -10936,8 +10938,8 @@ if(nextPick>=totalPicks)setPhase("draft-done");
 }
 
 function startFA(){
-// Pool van echte NBA-veteranen met realistische ratings.
-const FA_POOL=[
+// Grote pool van echte NBA-veteranen — elke nieuwe game selecteert willekeurig 20 spelers hieruit.
+const FA_POOL_CLASSIC=[
 {name:"Kyrie Irving",pos:"PG",age:33,overall:88},
 {name:"Anthony Davis",pos:"PF",age:32,overall:88},
 {name:"Kawhi Leonard",pos:"SF",age:34,overall:84},
@@ -10959,12 +10961,60 @@ const FA_POOL=[
 {name:"Klay Thompson",pos:"SG",age:35,overall:74},
 {name:"Russell Westbrook",pos:"PG",age:37,overall:74},
 {name:"Malcolm Brogdon",pos:"PG",age:32,overall:73},
-{name:"Al Horford",pos:"C",age:39,overall:72}
+{name:"Al Horford",pos:"C",age:39,overall:72},
+{name:"Aaron Gordon",pos:"PF",age:30,overall:82},
+{name:"Derrick White",pos:"PG",age:31,overall:83},
+{name:"Jalen Brunson",pos:"PG",age:29,overall:87},
+{name:"Mikal Bridges",pos:"SF",age:29,overall:81},
+{name:"Tyrese Maxey",pos:"PG",age:25,overall:85},
+{name:"Alperen Şengün",pos:"C",age:23,overall:86},
+{name:"Jalen Williams",pos:"SF",age:24,overall:86},
+{name:"Franz Wagner",pos:"SF",age:24,overall:85},
+{name:"Paolo Banchero",pos:"PF",age:23,overall:86},
+{name:"Scottie Barnes",pos:"PF",age:24,overall:84},
+{name:"Domantas Sabonis",pos:"C",age:29,overall:86},
+{name:"De'Aaron Fox",pos:"PG",age:28,overall:86},
+{name:"Trae Young",pos:"PG",age:27,overall:83},
+{name:"Jamal Murray",pos:"PG",age:29,overall:83},
+{name:"Kristaps Porziņģis",pos:"C",age:30,overall:80},
+{name:"Brook Lopez",pos:"C",age:38,overall:75},
+{name:"Cameron Johnson",pos:"SF",age:29,overall:76},
+{name:"Herbert Jones",pos:"SF",age:27,overall:74},
+{name:"Norman Powell",pos:"SG",age:32,overall:78},
+{name:"Coby White",pos:"PG",age:26,overall:79}
 ];
-const fa=[];const rand=seedRand(Date.now()%88888);
-FA_POOL.forEach((p,i)=>{
-const overall=Math.max(65,Math.min(90,p.overall+Math.floor(rand()*3)-1));
-fa.push({id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask:Math.round((overall-65)*1.8*10)/10});
+// Actuele markt: echte NBA free agents uit de zomer van 2026 (stand medio 2026, marktsituatie kan intussen wijzigen).
+const FA_POOL_CURRENT=[
+{name:"Jalen Duren",pos:"C",age:22,overall:82},
+{name:"James Harden",pos:"PG",age:36,overall:86},
+{name:"Rui Hachimura",pos:"PF",age:28,overall:79},
+{name:"Draymond Green",pos:"PF",age:36,overall:77},
+{name:"Peyton Watson",pos:"SF",age:24,overall:77},
+{name:"Bennedict Mathurin",pos:"SG",age:24,overall:79},
+{name:"Jonathan Kuminga",pos:"PF",age:23,overall:78},
+{name:"Khris Middleton",pos:"SF",age:35,overall:76},
+{name:"Russell Westbrook",pos:"PG",age:37,overall:74},
+{name:"Jordan Clarkson",pos:"SG",age:34,overall:76},
+{name:"Bruce Brown",pos:"SG",age:29,overall:74},
+{name:"Gary Trent Jr.",pos:"SG",age:27,overall:74},
+{name:"Nicolas Batum",pos:"SF",age:37,overall:70},
+{name:"Gary Payton II",pos:"SG",age:33,overall:72},
+{name:"Gabe Vincent",pos:"PG",age:30,overall:72},
+{name:"Nick Richards",pos:"C",age:28,overall:73},
+{name:"Brandon Williams",pos:"PG",age:24,overall:68},
+{name:"Ochai Agbaji",pos:"SG",age:26,overall:71},
+{name:"Patrick Baldwin Jr.",pos:"SF",age:24,overall:67},
+{name:"Xavier Tillman Sr.",pos:"C",age:27,overall:70}
+];
+const rand=seedRand(Date.now()%88888);
+const sourcePool=faMarket==="current"?FA_POOL_CURRENT:FA_POOL_CLASSIC;
+// Shuffle en pak tot 20 verschillende spelers, zodat elke nieuwe run een andere FA-markt heeft.
+const shuffled=[...sourcePool];
+for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
+const pool=shuffled.slice(0,Math.min(20,shuffled.length));
+const fa=pool.map((p,i)=>{
+const overall=Math.max(65,Math.min(92,p.overall+Math.floor(rand()*3)-1));
+return{id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask:Math.round((overall-65)*1.8*10)/10};
 });
 setFreeAgents(fa);
 setBudget(Math.max(5,SALARY_CAP-myTeam.cap+30));
@@ -10998,6 +11048,13 @@ const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
 if(phase==="select")return(<div>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>🧢 GENERAL MANAGER · KIES JE FRANCHISE</div>
 <div style={{color:WHITE,fontSize:12,marginBottom:14,textAlign:"center",opacity:0.7}}>Neem de leiding van een NBA franchise voor een volledig offseason. Lottery → Draft → Free Agency.</div>
+<div style={{...card,padding:12}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:8}}>FREE AGENT MARKT</div>
+<div style={{display:"flex",gap:8}}>
+<div data-testid="gm-fa-mode-classic" onClick={()=>setFaMarket("classic")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:faMarket==="classic"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>🎲 Geshuffeld<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>willekeurige 20 uit grote pool</div></div>
+<div data-testid="gm-fa-mode-current" onClick={()=>setFaMarket("current")} style={{flex:1,textAlign:"center",padding:"8px 6px",borderRadius:10,cursor:"pointer",background:faMarket==="current"?RED:INPUTBG,color:WHITE,fontSize:12,fontWeight:700}}>📅 Actueel (zomer '26)<div style={{fontSize:10,opacity:0.8,fontWeight:400}}>echte markt, kan intussen zijn veranderd</div></div>
+</div>
+</div>
 {["E","W"].map(conf=>(<div key={conf}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,margin:"14px 0 8px"}}>{conf==="E"?"EASTERN CONFERENCE":"WESTERN CONFERENCE"}</div>
 {NBA_TEAMS.filter(t=>t.conf===conf).map(t=>(

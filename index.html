@@ -8831,6 +8831,18 @@ return null;
 }
 // ── Core season builder — shared by both the interactive (Standard) and auto-resolved (Quick) paths.
 // `pending` bundles whatever choices were made this season: {training,event,contract,nationalTeam,nationalFatigue}.
+// ── Shared "what happens next" decision after any season resolves (playoffs reveal / forced retirement /
+// voluntary retirement offer / plain recap) — used by both single-player and 2-player league resolution so
+// the two modes make this call identically.
+function decidePostSeasonStage(season,age,newTrueRating,newPeak){
+const hardForced=season.careerEnding||(age+1)>=39||((age+1)>=34&&newTrueRating<50);
+let offerChoice=false,forced=hardForced;
+if(!hardForced){
+if((age+1)>=34&&newTrueRating<newPeak-10)offerChoice=true;
+else if((age+1)>=36)offerChoice=true;
+}
+return{forced,offerChoice};
+}
 function buildSeason(player,age,trueRatingBefore,teamStateBefore,pending,salary){
 const trainingDelta=pending.training?careerRoll(2,6):0;
 const eventDelta=pending.event?.perfDelta||0;
@@ -9540,6 +9552,9 @@ const [leagueId,setLeagueId]=useState(null);
 const [leagueDoc,setLeagueDoc]=useState(null);
 const [leagueJoinInput,setLeagueJoinInput]=useState("");
 const [leagueViewedCount,setLeagueViewedCount]=useState(0);
+const [leagueTurnMode,setLeagueTurnMode]=useState(false);
+const [leagueWaitingForReveal,setLeagueWaitingForReveal]=useState(false);
+const [leagueSyncedCount,setLeagueSyncedCount]=useState(0);
 const [leagueBuildPos,setLeagueBuildPos]=useState(null);
 const [leagueBuildCeilings,setLeagueBuildCeilings]=useState(null);
 const [leagueBuildAlloc,setLeagueBuildAlloc]=useState({});
@@ -9863,6 +9878,7 @@ doResolveSeason();
 }
 function doResolveSeason(){doResolveSeasonWith(pendingSeason||{});}
 function doResolveSeasonWith(pending){
+if(leagueTurnMode){submitLeagueSeasonPending(pending);return;}
 const age=simAge;
 const seasonSalary=activeSalary!=null?activeSalary:rookieScaleSalary(player.overall,Math.min(seasons.length,3));
 const{season,newTrueRating,newTeamState,newAttrs,newOverall}=buildSeason(player,age,trueRating,teamState,pending,seasonSalary);
@@ -9875,12 +9891,7 @@ const newSeasons=[...seasons,season];
 const newPeak=Math.max(peakRating,newTrueRating);
 setSeasons(newSeasons);setTrueRating(newTrueRating);setPeakRating(newPeak);setTeamState(newTeamState);setSimAge(age+1);setPendingSeason(null);
 setContractYearsLeft(y=>y-1);
-const hardForced=season.careerEnding||(age+1)>=39||((age+1)>=34&&newTrueRating<50);
-let offerChoice=false,forced=hardForced;
-if(!hardForced){
-if((age+1)>=34&&newTrueRating<newPeak-10)offerChoice=true;
-else if((age+1)>=36)offerChoice=true;
-}
+const{forced,offerChoice}=decidePostSeasonStage(season,age,newTrueRating,newPeak);
 if(season.playoffs&&season.playoffs.made){
 setRevealedRounds(0);
 setPendingSeasonEnd({forced,offerChoice});
@@ -9898,7 +9909,12 @@ else if(info.offerChoice){setSeasonStage("retireChoice");}
 else{setSeasonStage("recap");}
 }
 function continueCareer(){setSeasonStage(null);startSeasonFlow();}
-function retireNow(){setVoluntaryRetire(true);setRetired(true);setSeasonStage("recap");}
+function retireNow(){
+setVoluntaryRetire(true);setRetired(true);setSeasonStage("recap");
+if(leagueTurnMode&&leagueMe){
+fbLeagueMerge(leagueId,{players:{[leagueMyId]:{...leagueMe,attrs:player.attrs,overall:player.overall,retired:true}}});
+}
+}
 
 // ══ 2-Player League: shared career via Firestore, gated so neither side sees results until both have decided.
 useEffect(()=>{
@@ -9961,7 +9977,7 @@ const finalAttrs={};
 CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR;});
 const overall=careerOverall(finalAttrs,leagueBuildPos);
 const team=pickRandom(NBA_TEAMS_STATIC);
-const me={uid:authUserId,name:leagueBuildName.trim()||myUsername||"Speler",username:myUsername,pos:leagueBuildPos,attrs:finalAttrs,ceilings:leagueBuildCeilings,overall,trueRating:overall,team,teamStrength:careerRoll(45,80),contractYearsLeft:4,salary:null,seasons:[],ready:false,trainingChoice:null,retired:false,built:true};
+const me={uid:authUserId,name:leagueBuildName.trim()||myUsername||"Speler",username:myUsername,pos:leagueBuildPos,attrs:finalAttrs,ceilings:leagueBuildCeilings,overall,trueRating:overall,peakRating:overall,team,teamStrength:careerRoll(45,80),contractYearsLeft:4,salary:null,reputation:0,leadershipCount:0,rival:null,forkPoints:[],olympicPhase:Math.floor(Math.random()*4),legends:leagueDraftNames,number:String(Math.floor(Math.random()*98)+1),seasons:[],ready:false,pendingSeason:null,retired:false,built:true};
 await fbLeagueMerge(leagueId,{players:{[authUserId]:me}});
 }
 const leagueMyId=authUserId;
@@ -9984,11 +10000,85 @@ extra={players:{[leagueDoc.guestId]:{...p2,team:p1.team,teamStrength:p1.teamStre
 await fbLeagueMerge(leagueId,{...extra,status:"active"});
 })();
 },[leagueDoc,leagueIsHost]);
-async function submitLeagueTraining(attrDef){
+async function submitLeagueSeasonPending(pending){
 if(!leagueMe)return;
-const updated={...leagueMe,trainingChoice:{key:attrDef.key,label:attrDef.label,icon:attrDef.icon},ready:true};
+const updated={...leagueMe,attrs:player.attrs,overall:player.overall,contractYearsLeft,salary:activeSalary,reputation,leadershipCount,rival,forkPoints,peakRating,pendingSeason:pending,ready:true};
 await fbLeagueMerge(leagueId,{players:{[leagueMyId]:updated}});
+setLeagueWaitingForReveal(true);
 }
+// ── Enter my turn for the current league season: hydrate the SAME local state single-player uses, then run the
+// exact same interactive stage machine (training/event/contract/trade/recovery/national/playoffs/retirement) —
+// multiplayer is single-player's real flow, just synced at the end instead of resolved instantly.
+function enterLeagueTurn(){
+if(!leagueMe)return;
+const hydratedTeamState={team:leagueMe.team,strength:leagueMe.teamStrength};
+const hydratedContractYearsLeft=leagueMe.contractYearsLeft;
+const last=leagueMe.seasons[leagueMe.seasons.length-1];
+const hydratedRecoveryArc=(last&&last.majorInjury&&last.potentialCeilingHit)?{potentialHit:last.potentialCeilingHit}:null;
+setPlayer({name:leagueMe.name,pos:leagueMe.pos,attrs:leagueMe.attrs,ceilings:leagueMe.ceilings,overall:leagueMe.overall,isGoatBuild:false,olympicPhase:leagueMe.olympicPhase!=null?leagueMe.olympicPhase:0,legends:leagueMe.legends||[],number:leagueMe.number||"",nationality:null});
+setTrueRating(leagueMe.trueRating);
+setPeakRating(leagueMe.peakRating||leagueMe.overall);
+setTeamState(hydratedTeamState);
+setSeasons(leagueMe.seasons);
+setSimAge(leagueDoc.season);
+setContractYearsLeft(hydratedContractYearsLeft);
+setActiveSalary(leagueMe.salary);
+setReputation(leagueMe.reputation||0);
+setLeadershipCount(leagueMe.leadershipCount||0);
+setRival(leagueMe.rival||null);
+setForkPoints(leagueMe.forkPoints||[]);
+setOriginalTeamName(leagueMe.team.name);
+setRetired(false);
+setVoluntaryRetire(false);
+setLeagueSyncedCount(leagueMe.seasons.length);
+setLeagueWaitingForReveal(false);
+setRecoveryArc(hydratedRecoveryArc);
+setTradeShock(null);setTeamOffers(null);setPendingContractBase(null);setTeamBrowserList(null);setPendingStayOption(null);
+setLeagueTurnMode(true);
+setMode("standard");
+setStage("sim");
+setPendingSeason({});
+// mirrors startSeasonFlow — inlined because the state above hasn't flushed to hooks yet this tick
+if(hydratedRecoveryArc){setSeasonStage("recovery");}
+else if(hydratedContractYearsLeft<=0){setSeasonStage("contract");}
+else if(Math.random()<0.07){
+const newTeam=pickRandom(NBA_TEAMS_STATIC.filter(t=>t.name!==hydratedTeamState.team.name));
+setTradeShock({team:newTeam,reason:pickRandom(TRADE_REASONS)});
+setSeasonStage("tradeShock");
+}else{
+setTrainingOptions(getTrainingOptions());
+setSeasonStage("training");
+}
+}
+// ── Once the host resolves a season both players submitted, this picks up the freshly-synced result and
+// routes to the exact same post-season screen single-player would show (playoffs bracket / recap / retire choice).
+useEffect(()=>{
+if(!leagueTurnMode||!leagueWaitingForReveal||!leagueMe)return;
+if(leagueMe.ready)return;
+const newCount=leagueMe.seasons.length;
+if(newCount<=leagueSyncedCount)return;
+const season=leagueMe.seasons[newCount-1];
+setSeasons(leagueMe.seasons);
+setTrueRating(leagueMe.trueRating);
+setTeamState({team:leagueMe.team,strength:leagueMe.teamStrength});
+setSimAge(leagueDoc.season);
+setPlayer(p=>({...p,attrs:leagueMe.attrs,overall:leagueMe.overall}));
+setContractYearsLeft(leagueMe.contractYearsLeft);
+setActiveSalary(leagueMe.salary);
+setReputation(leagueMe.reputation||0);
+setLeadershipCount(leagueMe.leadershipCount||0);
+setRival(leagueMe.rival||null);
+setForkPoints(leagueMe.forkPoints||[]);
+const newPeak=Math.max(leagueMe.peakRating||leagueMe.overall,leagueMe.trueRating);
+setPeakRating(newPeak);
+setLeagueSyncedCount(newCount);
+setLeagueWaitingForReveal(false);
+const{forced,offerChoice}=decidePostSeasonStage(season,leagueDoc.season-1,leagueMe.trueRating,newPeak);
+if(season.playoffs&&season.playoffs.made){setRevealedRounds(0);setPendingSeasonEnd({forced,offerChoice});setSeasonStage("playoffs");}
+else if(forced){setRetired(true);setSeasonStage("recap");}
+else if(offerChoice){setSeasonStage("retireChoice");}
+else{setSeasonStage("recap");}
+},[leagueDoc,leagueTurnMode,leagueWaitingForReveal]);
 useEffect(()=>{
 if(!leagueDoc||leagueDoc.status!=="active"||!leagueIsHost||leagueBusy)return;
 const p1=leagueDoc.players?.[leagueDoc.hostId];
@@ -9998,13 +10088,11 @@ setLeagueBusy(true);
 (async()=>{
 const age=leagueDoc.season;
 const mode=leagueDoc.mode;
-const isOlympicYear=(age%4)===0;
 function resolveOne(pl,other){
-const pending=autoPendingChoices(pl.contractYearsLeft,{team:pl.team,strength:pl.teamStrength},pl.trueRating,isOlympicYear);
-if(pl.trainingChoice)pending.training=pl.trainingChoice;
+let pending={...(pl.pendingSeason||{})};
 let crossedPaths=false;
 if(mode==="rivals"&&pending.trade&&Math.random()<0.3&&other.team.name!==pl.team.name){
-pending.trade={...pending.trade,newTeamState:{team:other.team,strength:other.teamStrength}};
+pending={...pending,trade:{...pending.trade,newTeamState:{team:other.team,strength:other.teamStrength}}};
 crossedPaths=true;
 }
 const seasonSalary=pl.salary!=null?pl.salary:rookieScaleSalary(pl.overall,Math.min(pl.seasons.length,3));
@@ -10029,14 +10117,14 @@ if(playoffs.champion&&!r.season.awards.includes("championship"))r.season.awards=
 r.newTeamState={team:combinedTeam,strength};
 });
 }
-const newP1={...p1,attrs:r1.newAttrs,overall:r1.newOverall,trueRating:r1.newTrueRating,team:r1.newTeamState.team,teamStrength:r1.newTeamState.strength,contractYearsLeft:r1.contractYearsLeft,salary:r1.salary,seasons:[...p1.seasons,r1.season],ready:false,trainingChoice:null,retired:r1.season.careerEnding||age>=38};
-const newP2={...p2,attrs:r2.newAttrs,overall:r2.newOverall,trueRating:r2.newTrueRating,team:r2.newTeamState.team,teamStrength:r2.newTeamState.strength,contractYearsLeft:r2.contractYearsLeft,salary:r2.salary,seasons:[...p2.seasons,r2.season],ready:false,trainingChoice:null,retired:r2.season.careerEnding||age>=38};
+const newP1={...p1,attrs:r1.newAttrs,overall:r1.newOverall,trueRating:r1.newTrueRating,peakRating:Math.max(p1.peakRating||p1.overall,r1.newTrueRating),team:r1.newTeamState.team,teamStrength:r1.newTeamState.strength,contractYearsLeft:r1.contractYearsLeft,salary:r1.salary,seasons:[...p1.seasons,r1.season],ready:false,pendingSeason:null,retired:r1.season.careerEnding||age>=38};
+const newP2={...p2,attrs:r2.newAttrs,overall:r2.newOverall,trueRating:r2.newTrueRating,peakRating:Math.max(p2.peakRating||p2.overall,r2.newTrueRating),team:r2.newTeamState.team,teamStrength:r2.newTeamState.strength,contractYearsLeft:r2.contractYearsLeft,salary:r2.salary,seasons:[...p2.seasons,r2.season],ready:false,pendingSeason:null,retired:r2.season.careerEnding||age>=38};
 const bothRetired=newP1.retired||newP2.retired;
 await fbLeagueMerge(leagueId,{season:age+1,status:bothRetired?"done":"active",players:{[leagueDoc.hostId]:newP1,[leagueDoc.guestId]:newP2}});
 setLeagueBusy(false);
 })();
 },[leagueDoc,leagueIsHost,leagueBusy]);
-function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});setLeagueDraftStep(0);setLeagueDraftTrio(null);setLeagueDraftNames([]);}
+function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});setLeagueDraftStep(0);setLeagueDraftTrio(null);setLeagueDraftNames([]);setLeagueTurnMode(false);setLeagueWaitingForReveal(false);setLeagueSyncedCount(0);}
 
 
 useEffect(()=>{
@@ -10275,16 +10363,14 @@ return(
 </div>
 );
 }
-const trainOpts=getTrainingOptions();
 return(
 <div>
 {backBtn}
 <div style={panelStyle}>
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4,textAlign:"center"}}>LEEFTIJD {leagueDoc.season}</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:14,textAlign:"center"}}>Waar focus je je training op?</div>
-<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
-{trainOpts.map(a=>(<button key={a.key} onClick={()=>submitLeagueTraining(a)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:12,padding:"16px 8px",fontWeight:700,fontSize:12,cursor:"pointer"}}>{a.icon}<br/>{a.label}</button>))}
-</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:14,textAlign:"center"}}>Klaar voor je volgende seizoen?</div>
+<div style={{color:'#c98a8a',fontSize:12,marginBottom:16,textAlign:"center"}}>Training, gebeurtenissen, contracten, trades — precies zoals in solo. Zodra je klaar bent wacht je op {leagueOther?leagueOther.name:"de andere speler"}.</div>
+<button onClick={enterLeagueTurn} style={btnPrimary}>🏀 Speel dit seizoen ▸</button>
 </div>
 </div>
 );
@@ -10466,7 +10552,19 @@ const isCaptain=leadershipCount>=4;
 const finalScore=score+(isCaptain?15:0);
 const verdict=careerVerdict(finalScore);
 const hallOfFame=computeHallOfFameVerdict(finalScore,reputation,isCaptain);
-return(<CareerResultCard player={player} seasons={seasons} score={finalScore} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} regret={regret} isCaptain={isCaptain} hallOfFame={hallOfFame} onDone={backToHub} onPlayAgain={()=>{backToHub();startCreate();}}/>);
+const backToLeague=()=>{setLeagueTurnMode(false);setStage("league");};
+return(<CareerResultCard player={player} seasons={seasons} score={finalScore} totals={totals} verdict={verdict} retiredAge={simAge} voluntaryRetire={voluntaryRetire} regret={regret} isCaptain={isCaptain} hallOfFame={hallOfFame} onDone={leagueTurnMode?backToLeague:backToHub} onPlayAgain={leagueTurnMode?backToLeague:(()=>{backToHub();startCreate();})}/>);
+}
+if(leagueTurnMode&&leagueWaitingForReveal){
+return(
+<div>
+<div style={{background:"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 60%,#000 100%)",borderRadius:18,padding:"28px 20px",border:"1px solid #3a1414",boxShadow:"0 0 24px rgba(232,49,42,0.15) inset",textAlign:"center"}}>
+<div style={{fontSize:32,marginBottom:10}}>⏳</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:14,marginBottom:6}}>Klaar! Wachten op {leagueOther?leagueOther.name:"de andere speler"}…</div>
+<div style={{color:'#c98a8a',fontSize:11}}>De bracket blijft verborgen tot jullie allebei klaar zijn.</div>
+</div>
+</div>
+);
 }
 if(mode==="quick"){
 return(

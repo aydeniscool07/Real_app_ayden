@@ -10866,15 +10866,38 @@ const [msg,setMsg]=useState("");
 const [faMarket,setFaMarket]=useState("classic"); // "classic" = grote geshuffelde pool | "current" = actuele markt zomer 2026
 const [rosters,setRosters]=useState(null); // teamId -> spelerslijst, gebruikt voor trades + seizoenssimulatie
 const [tradeTeamId,setTradeTeamId]=useState(null);
-const [tradeGive,setTradeGive]=useState(null);
-const [tradeGet,setTradeGet]=useState(null);
+const [tradeGiveList,setTradeGiveList]=useState([]);
+const [tradeGetList,setTradeGetList]=useState([]);
+const [tradeGivePick,setTradeGivePick]=useState(false);
+const [tradeGetPick,setTradeGetPick]=useState(false);
 const [tradeMsg,setTradeMsg]=useState("");
 const [tradeLog,setTradeLog]=useState([]);
+const [incomingOffers,setIncomingOffers]=useState([]);
 const [capMode,setCapMode]=useState("free"); // "free" = alleen waarde telt | "strict" = salarissen moeten ongeveer matchen
+const PICK_VALUE=64; // geschatte OVR-waarde van een toekomstig 1e-ronde pick, voor trade-balans
 
 const myTeam=NBA_TEAMS.find(t=>t.id===myTeamId);
 
 function seedRand(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+
+// Simuleert 1 wedstrijd o.b.v. ratingverschil (logistische winkans, met kleine thuisvoordeel-marge voor de hogere seed).
+function simGame(ratingA,ratingB,rand,homeBoostA){
+const diff=(ratingA+ (homeBoostA||0))-ratingB;
+const probA=1/(1+Math.pow(10,-diff/11));
+return rand()<probA;
+}
+// Simuleert een best-of-7 serie, retourneert winnaar + score string (bv "4-2").
+// Simuleert een best-of-7 serie, retourneert de twee teams, winnaar en score string (bv "4-2").
+function simSeries(teamA,teamB,rand){
+let winsA=0,winsB=0;
+while(winsA<4&&winsB<4){
+const gameNo=winsA+winsB;
+const aHome=[0,1,4,6].includes(gameNo); // 2-2-1-1-1 homecourt patroon, hogere seed = team A
+const homeBoost=aHome?2.5:-2.5;
+if(simGame(teamA.rating,teamB.rating,rand,homeBoost))winsA++;else winsB++;
+}
+return winsA>winsB?{a:teamA,b:teamB,winner:teamA,loser:teamB,score:`${winsA}-${winsB}`}:{a:teamA,b:teamB,winner:teamB,loser:teamA,score:`${winsB}-${winsA}`};
+}
 
 function startLottery(){
 setRosters(JSON.parse(JSON.stringify(REAL_ROSTERS)));
@@ -11072,58 +11095,200 @@ setSigned([...signed,p]);setBudget(budget-p.ask);setFreeAgents(freeAgents.filter
 }
 
 function simulateSeason(){
-const myPicks=Object.entries(drafted).filter(([_,d])=>d.teamId===myTeamId).map(([pid])=>draftClass.find(p=>p.id===pid));
-const coreRoster=(rosters&&rosters[myTeamId])||REAL_ROSTERS[myTeamId]||[];
-// Kernroster (na eventuele trades) + rookies (iets minder impact als eerstejaars) + FA signings (volle impact).
+const rand=seedRand(Date.now()%11111);
+const topAvg=(arr,n)=>{const s=[...arr].sort((a,b)=>b.eff-a.eff).slice(0,n);return s.reduce((a,p)=>a+p.eff,0)/Math.max(1,s.length);};
+// Bouw voor alle 30 teams het eindroster (na trades + draft, en voor jouw team ook FA-signings) en projecteer win-totalen.
+const league=NBA_TEAMS.map(t=>{
+const coreRoster=(rosters&&rosters[t.id])||REAL_ROSTERS[t.id]||[];
+const picks=Object.entries(drafted).filter(([_,d])=>d.teamId===t.id).map(([pid])=>draftClass.find(p=>p.id===pid)).filter(Boolean);
+const faSignings=t.id===myTeamId?signed:[];
 const fullRoster=[
 ...coreRoster.map(p=>({...p,eff:p.overall})),
-...myPicks.map(p=>({...p,eff:p.overall-4})),
-...signed.map(p=>({...p,eff:p.overall}))
+...picks.map(p=>({...p,eff:p.overall-4})),
+...faSignings.map(p=>({...p,eff:p.overall}))
 ];
-const top=fullRoster.sort((a,b)=>b.eff-a.eff).slice(0,8);
-const teamRating=top.reduce((s,p)=>s+p.eff,0)/Math.max(1,top.length);
-const rand=seedRand(Date.now()%11111);
-let projWins=Math.round((teamRating-58)*2.05+(rand()-0.5)*8);
-projWins=Math.max(12,Math.min(73,projWins));
-const seed=projWins>=55?1:projWins>=48?4:projWins>=42?6:projWins>=36?8:null;
-setResult({wins:projWins,losses:82-projWins,seed,champion:projWins>=60&&rand()>0.7,draftPicks:myPicks,signings:signed,teamRating:Math.round(teamRating*10)/10});
+const originalRating=topAvg(REAL_ROSTERS[t.id].map(p=>({...p,eff:p.overall})),8);
+const currentRating=topAvg(fullRoster,8);
+const delta=currentRating-originalRating;
+const [baseWins]=t.record.split("-").map(Number);
+let projWins=Math.round(baseWins+delta*3+(rand()-0.5)*6);
+projWins=Math.max(8,Math.min(75,projWins));
+return{id:t.id,name:t.name,conf:t.conf,wins:projWins,losses:82-projWins,rating:Math.round(currentRating*10)/10,roster:fullRoster,picks};
+});
+const myPicks=league.find(t=>t.id===myTeamId).picks;
+
+// Conference-stand.
+const standings={E:league.filter(t=>t.conf==="E").sort((a,b)=>b.wins-a.wins),W:league.filter(t=>t.conf==="W").sort((a,b)=>b.wins-a.wins)};
+const myConf=myTeam.conf;
+const mySeed=standings[myConf].findIndex(t=>t.id===myTeamId)+1;
+
+// Play-in tournament (7 t/m 10) per conferentie: 7v8 → winnaar is 7-seed; 9v10 → verliezer eruit; loser(7v8) vs winner(9v10) → 8-seed.
+function runPlayIn(confTeams){
+const [s7,s8,s9,s10]=confTeams;
+const g1=simSeries===null?null:null; // placeholder unused
+const gameAB=simGame(s7.rating,s8.rating,rand,1.5);
+const seed7=gameAB?s7:s8;
+const loser78=gameAB?s8:s7;
+const gameCD=simGame(s9.rating,s10.rating,rand,1.5);
+const winner910=gameCD?s9:s10;
+const finalGame=simGame(loser78.rating,winner910.rating,rand,1.5);
+const seed8=finalGame?loser78:winner910;
+return[seed7,seed8];
+}
+const bracketSeeds={};
+["E","W"].forEach(c=>{
+const top6=standings[c].slice(0,6);
+const [seed7,seed8]=runPlayIn(standings[c].slice(6,10));
+bracketSeeds[c]=[...top6,seed7,seed8]; // index0=1-seed ... index7=8-seed
+});
+
+// Playoff bracket: R1 (1v8,4v5,3v6,2v7 volgens standaard NBA-bracketvolgorde), conf-semi's, conf-finales, NBA Finals.
+function runBracket(seeds){ // seeds[0..7] = 1..8 seed
+const order=[[0,7],[3,4],[2,5],[1,6]]; // 1v8,4v5,3v6,2v7
+const r1=order.map(([a,b])=>simSeries(seeds[a],seeds[b],rand));
+const semiPairs=[[r1[0].winner,r1[1].winner],[r1[2].winner,r1[3].winner]];
+const r2=semiPairs.map(([a,b])=>simSeries(a,b,rand));
+const confFinal=simSeries(r2[0].winner,r2[1].winner,rand);
+return{r1,r2,confFinal,champion:confFinal.winner};
+}
+const bracketE=runBracket(bracketSeeds.E);
+const bracketW=runBracket(bracketSeeds.W);
+const finals=simSeries(bracketE.champion,bracketW.champion,rand);
+const champion=finals.winner;
+
+// Volg jouw team door de play-in/playoffs (of noteer eliminatie/gemist).
+let journey=[];
+let stillIn=mySeed<=10;
+if(mySeed>=7&&mySeed<=10){
+const myConfBracket=bracketSeeds[myConf];
+const madeIt=myConfBracket.some(t=>t.id===myTeamId);
+journey.push({round:"Play-in",opponent:null,result:madeIt?"Geplaatst voor de playoffs":"Uitgeschakeld in de play-in"});
+stillIn=madeIt;
+}else if(mySeed>10){
+journey.push({round:"Seizoen",opponent:null,result:"Buiten de play-in geëindigd"});
+stillIn=false;
+}
+if(stillIn&&mySeed<=10){
+const myBracket=myConf==="E"?bracketE:bracketW;
+const rounds=[{name:"1e ronde",series:myBracket.r1},{name:"Conf. Halve Finale",series:myBracket.r2},{name:"Conf. Finale",series:[myBracket.confFinal]}];
+for(const rnd of rounds){
+const s=rnd.series.find(x=>x.a.id===myTeamId||x.b.id===myTeamId);
+if(!s){stillIn=false;break;}
+const won=s.winner.id===myTeamId;
+const opp=s.a.id===myTeamId?s.b:s.a;
+journey.push({round:rnd.name,opponent:opp.name,result:won?`Gewonnen ${s.score}`:`Verloren ${s.score}`});
+if(!won){stillIn=false;break;}
+}
+if(stillIn){
+const opp=finals.a.id===myTeamId?finals.b:finals.a;
+const won=finals.winner.id===myTeamId;
+journey.push({round:"NBA Finals",opponent:opp.name,result:won?`Gewonnen ${finals.score}`:`Verloren ${finals.score}`});
+}
+}
+
+// Awards: MVP (beste speler op een goed team), ROY (beste rookie uit de draftklasse), Finals MVP (beste speler op het kampioensteam).
+const allPlayersScored=league.flatMap(t=>t.roster.slice().sort((a,b)=>b.eff-a.eff).slice(0,8).map(p=>({...p,teamName:t.name,teamId:t.id,score:p.eff+(t.wins-41)*0.3})));
+const mvp=allPlayersScored.sort((a,b)=>b.score-a.score)[0];
+const allRookies=Object.entries(drafted).map(([pid,d])=>({...draftClass.find(p=>p.id===pid),teamName:NBA_TEAMS.find(t=>t.id===d.teamId).name,teamId:d.teamId})).filter(p=>p.name);
+const roy=allRookies.sort((a,b)=>b.overall-a.overall)[0];
+const champRoster=champion.roster.slice().sort((a,b)=>b.eff-a.eff);
+const finalsMvp=champRoster[0];
+
+setResult({
+wins:league.find(t=>t.id===myTeamId).wins,
+losses:league.find(t=>t.id===myTeamId).losses,
+seed:mySeed<=10?mySeed:null,
+teamRating:league.find(t=>t.id===myTeamId).rating,
+draftPicks:myPicks,
+signings:signed,
+champion:champion.id===myTeamId,
+standings,
+myConf,
+journey,
+finals,
+championTeam:champion,
+mvp,roy,finalsMvp:champion.id===myTeamId?finalsMvp:null,
+});
 setPhase("result");
 }
 
+function generateOffers(){
+const rand=seedRand(Date.now()%99991);
+const others=[...NBA_TEAMS.filter(t=>t.id!==myTeamId)];
+// Shuffle en pak 3 teams die een bod komen doen.
+for(let i=others.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[others[i],others[j]]=[others[j],others[i]];}
+const chosen=others.slice(0,3);
+const offers=chosen.map(t=>{
+const myRoster=rosters[myTeamId];
+const theirRoster=rosters[t.id];
+if(!myRoster||!theirRoster||myRoster.length===0||theirRoster.length===0)return null;
+// Ze azen vooral op een van jouw betere spelers.
+const myByOverall=[...myRoster].sort((a,b)=>b.overall-a.overall);
+const wanted=myByOverall[Math.floor(rand()*Math.min(5,myByOverall.length))];
+// Ze bieden een eigen speler met ongeveer dezelfde waarde — soms een beetje over-, soms onderbetaald.
+const targetValue=wanted.overall+Math.round((rand()-0.5)*14);
+const offered=[...theirRoster].sort((a,b)=>Math.abs(a.overall-targetValue)-Math.abs(b.overall-targetValue))[0];
+if(!offered)return null;
+return{id:`${t.id}-${wanted.name}-${Date.now()}-${Math.floor(rand()*1000)}`,teamId:t.id,give:[offered.name],get:[wanted.name]};
+}).filter(Boolean);
+setIncomingOffers(offers);
+}
+
+function acceptOffer(offer){
+const theirPlayers=rosters[offer.teamId].filter(p=>offer.give.includes(p.name));
+const myPlayers=rosters[myTeamId].filter(p=>offer.get.includes(p.name));
+if(theirPlayers.length===0||myPlayers.length===0){setIncomingOffers(incomingOffers.filter(o=>o.id!==offer.id));return;}
+const newRosters={...rosters};
+newRosters[myTeamId]=rosters[myTeamId].filter(p=>!offer.get.includes(p.name)).concat(theirPlayers);
+newRosters[offer.teamId]=rosters[offer.teamId].filter(p=>!offer.give.includes(p.name)).concat(myPlayers);
+setRosters(newRosters);
+setTradeLog([...tradeLog,{out:offer.get.join(", "),in:offer.give.join(", "),team:offer.teamId}]);
+setIncomingOffers(incomingOffers.filter(o=>o.id!==offer.id));
+setTradeMsg(`✅ Trade geaccepteerd met ${NBA_TEAMS.find(x=>x.id===offer.teamId).name}: ${offer.get.join(", ")} ▸ voor ${offer.give.join(", ")}`);
+setTimeout(()=>setTradeMsg(""),4500);
+}
+
+function declineOffer(offerId){setIncomingOffers(incomingOffers.filter(o=>o.id!==offerId));}
+
 function proposeTrade(){
-if(!tradeTeamId||!tradeGive||!tradeGet){return;}
+if(!tradeTeamId||(tradeGiveList.length===0&&!tradeGivePick)||(tradeGetList.length===0&&!tradeGetPick)){return;}
 const rand=seedRand(Date.now()%54321);
-const myPlayer=rosters[myTeamId].find(p=>p.name===tradeGive);
-const theirPlayer=rosters[tradeTeamId].find(p=>p.name===tradeGet);
-if(!myPlayer||!theirPlayer)return;
+const myPlayers=rosters[myTeamId].filter(p=>tradeGiveList.includes(p.name));
+const theirPlayers=rosters[tradeTeamId].filter(p=>tradeGetList.includes(p.name));
+if(myPlayers.length!==tradeGiveList.length||theirPlayers.length!==tradeGetList.length)return;
+const myValue=myPlayers.reduce((s,p)=>s+p.overall,0)+(tradeGivePick?PICK_VALUE:0);
+const theirValue=theirPlayers.reduce((s,p)=>s+p.overall,0)+(tradeGetPick?PICK_VALUE:0);
 if(capMode==="strict"){
-const mySal=salaryOf(myPlayer),theirSal=salaryOf(theirPlayer);
-const bigger=Math.max(mySal,theirSal),smaller=Math.min(mySal,theirSal);
+const mySal=myPlayers.reduce((s,p)=>s+salaryOf(p),0);
+const theirSal=theirPlayers.reduce((s,p)=>s+salaryOf(p),0);
+const bigger=Math.max(mySal,theirSal,0.1),smaller=Math.min(mySal,theirSal);
 // Vereenvoudigde CBA-regel: uitgaand salaris mag max ~35% afwijken van inkomend salaris.
 if((bigger-smaller)/bigger>0.35){
-setTradeMsg(`🚫 Salarissen matchen niet onder de cap-regels: $${mySal}M ↔ $${theirSal}M (max ~35% verschil toegestaan).`);
+setTradeMsg(`🚫 Salarissen matchen niet onder de cap-regels: $${mySal.toFixed(1)}M ↔ $${theirSal.toFixed(1)}M (max ~35% verschil toegestaan).`);
 setTimeout(()=>setTradeMsg(""),4500);
 return;
 }
 }
 // AI accepteert als het aanbod ongeveer gelijkwaardig is (of in hun voordeel), met een beetje speling.
-const tolerance=4+Math.floor(rand()*4);
-const accepted=myPlayer.overall>=theirPlayer.overall-tolerance;
+const tolerance=4+Math.floor(rand()*5);
+const accepted=myValue>=theirValue-tolerance;
+const giveNames=myPlayers.map(p=>p.name).join(", ")+(tradeGivePick?" + toekomstig 1e-rondepick":"");
+const getNames=theirPlayers.map(p=>p.name).join(", ")+(tradeGetPick?" + toekomstig 1e-rondepick":"");
 if(accepted){
 const newRosters={...rosters};
-newRosters[myTeamId]=rosters[myTeamId].filter(p=>p.name!==tradeGive).concat([theirPlayer]);
-newRosters[tradeTeamId]=rosters[tradeTeamId].filter(p=>p.name!==tradeGet).concat([myPlayer]);
+newRosters[myTeamId]=rosters[myTeamId].filter(p=>!tradeGiveList.includes(p.name)).concat(theirPlayers);
+newRosters[tradeTeamId]=rosters[tradeTeamId].filter(p=>!tradeGetList.includes(p.name)).concat(myPlayers);
 setRosters(newRosters);
-setTradeLog([...tradeLog,{out:myPlayer.name,in:theirPlayer.name,team:tradeTeamId}]);
-setTradeMsg(`✅ Deal geaccepteerd: ${myPlayer.name} ▸ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} voor ${theirPlayer.name}`);
+setTradeLog([...tradeLog,{out:giveNames,in:getNames,team:tradeTeamId}]);
+setTradeMsg(`✅ Deal geaccepteerd: ${giveNames} ▸ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} voor ${getNames}`);
 }else{
-setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen meer waarde terug voor ${theirPlayer.name} (OVR ${theirPlayer.overall}).`);
+setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen meer waarde terug voor ${getNames}.`);
 }
-setTradeGive(null);setTradeGet(null);
-setTimeout(()=>setTradeMsg(""),4000);
+setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);
+setTimeout(()=>setTradeMsg(""),4500);
 }
 
-function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGive(null);setTradeGet(null);setTradeMsg("");setTradeLog([]);}
+function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);setTradeMsg("");setTradeLog([]);setIncomingOffers([]);}
 
 const btn={background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 18px",fontWeight:800,fontSize:13,cursor:"pointer",width:"100%"};
 const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
@@ -11209,7 +11374,7 @@ return(<div>
 <div><div style={{color:GREY,fontSize:10}}>PICK #{p.pickNo}</div><div style={{color:WHITE,fontWeight:700,fontSize:14}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age} · OVR {p.overall}</div></div>
 <div style={{color:RED,fontWeight:800,fontSize:20}}>{p.overall}</div>
 </div>))}
-<button data-testid="gm-goto-trades" onClick={()=>setPhase("trades")} style={{...btn,marginTop:14}}>Naar Trade Markt ▸</button>
+<button data-testid="gm-goto-trades" onClick={()=>{generateOffers();setPhase("trades");}} style={{...btn,marginTop:14}}>Naar Trade Markt ▸</button>
 </div>);
 }
 
@@ -11218,34 +11383,65 @@ const myRoster=(rosters&&rosters[myTeamId])||[];
 const otherTeams=NBA_TEAMS.filter(t=>t.id!==myTeamId);
 const theirRoster=tradeTeamId&&rosters?rosters[tradeTeamId]:[];
 const myTotalSalary=myRoster.reduce((s,p)=>s+salaryOf(p),0);
+const myValue=myRoster.filter(p=>tradeGiveList.includes(p.name)).reduce((s,p)=>s+p.overall,0)+(tradeGivePick?PICK_VALUE:0);
+const theirValue=theirRoster.filter(p=>tradeGetList.includes(p.name)).reduce((s,p)=>s+p.overall,0)+(tradeGetPick?PICK_VALUE:0);
+const toggle=(list,setList,name)=>{setList(list.includes(name)?list.filter(n=>n!==name):[...list,name]);};
 return(<div>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>TRADE MARKT</div>
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:8}}>Selecteer meerdere spelers per kant voor multi-player deals, en voeg eventueel een toekomstig pick toe.</div>
 {capMode==="strict"&&<div style={{...card,textAlign:"center",padding:10}}>
 <div style={{color:GREY,fontSize:11}}>GESCHATTE TEAM SALARIS</div>
 <div style={{color:myTotalSalary>SALARY_CAP?"#ff453a":"#30d158",fontSize:20,fontWeight:900}}>${myTotalSalary.toFixed(1)}M <span style={{color:GREY,fontSize:11,fontWeight:400}}>/ ${SALARY_CAP}M cap</span></div>
 </div>}
-<div style={{color:GREY,fontSize:11,margin:"6px 0"}}>JOUW ROSTER — kies een speler om aan te bieden</div>
+
+{incomingOffers.length>0&&(<>
+<div style={{color:GREY,fontSize:11,margin:"6px 0"}}>📨 INKOMENDE TRADE-VOORSTELLEN</div>
+{incomingOffers.map(o=>(
+<div key={o.id} style={{...card,padding:12,border:`1px solid ${RED}`}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:12,marginBottom:6}}>{NBA_TEAMS.find(t=>t.id===o.teamId).name}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:8}}>Biedt <span style={{color:WHITE,fontWeight:700}}>{o.give.join(", ")}</span> voor jouw <span style={{color:WHITE,fontWeight:700}}>{o.get.join(", ")}</span></div>
+<div style={{display:"flex",gap:8}}>
+<button data-testid={`gm-accept-offer-${o.id}`} onClick={()=>acceptOffer(o)} style={{flex:1,background:"#30d158",color:"#062910",border:"none",borderRadius:8,padding:"8px 0",fontWeight:800,fontSize:12,cursor:"pointer"}}>Accepteren</button>
+<button data-testid={`gm-decline-offer-${o.id}`} onClick={()=>declineOffer(o.id)} style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:8,padding:"8px 0",fontWeight:800,fontSize:12,cursor:"pointer"}}>Afwijzen</button>
+</div>
+</div>
+))}
+<button data-testid="gm-refresh-offers" onClick={generateOffers} style={{...btn,background:INPUTBG,marginBottom:6}}>🔄 Nieuwe voorstellen</button>
+</>)}
+{incomingOffers.length===0&&<button data-testid="gm-refresh-offers" onClick={generateOffers} style={{...btn,background:INPUTBG,marginBottom:6}}>🔄 Vraag naar voorstellen</button>}
+
+<div style={{color:GREY,fontSize:11,margin:"6px 0"}}>JOUW ROSTER — vink spelers aan om aan te bieden</div>
 {myRoster.map(p=>(
-<div key={p.name} data-testid={`gm-trade-give-${p.name}`} onClick={()=>setTradeGive(p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGive===p.name?`1px solid ${RED}`:"1px solid transparent"}}>
-<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
+<div key={p.name} data-testid={`gm-trade-give-${p.name}`} onClick={()=>toggle(tradeGiveList,setTradeGiveList,p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGiveList.includes(p.name)?`1px solid ${RED}`:"1px solid transparent"}}>
+<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{tradeGiveList.includes(p.name)?"☑":"☐"} {p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
 <div style={{color:RED,fontWeight:800,fontSize:16}}>{p.overall}</div>
 </div>))}
+<div data-testid="gm-trade-give-pick" onClick={()=>setTradeGivePick(!tradeGivePick)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGivePick?`1px solid ${RED}`:"1px solid transparent"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{tradeGivePick?"☑":"☐"} 🔮 Toekomstig 1e-ronde pick</div><div style={{color:GREY,fontWeight:700,fontSize:13}}>~{PICK_VALUE}</div>
+</div>
 <div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>KIES EEN HANDELSPARTNER</div>
 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
 {otherTeams.map(t=>(
-<div key={t.id} data-testid={`gm-trade-team-${t.id}`} onClick={()=>{setTradeTeamId(t.id);setTradeGet(null);}} style={{padding:"6px 10px",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,background:tradeTeamId===t.id?RED:INPUTBG,color:WHITE}}>{t.id}</div>
+<div key={t.id} data-testid={`gm-trade-team-${t.id}`} onClick={()=>{setTradeTeamId(t.id);setTradeGetList([]);setTradeGetPick(false);}} style={{padding:"6px 10px",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,background:tradeTeamId===t.id?RED:INPUTBG,color:WHITE}}>{t.id}</div>
 ))}
 </div>
 {tradeTeamId&&(<>
-<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>{NBA_TEAMS.find(t=>t.id===tradeTeamId).name.toUpperCase()} — kies een speler die je wilt</div>
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>{NBA_TEAMS.find(t=>t.id===tradeTeamId).name.toUpperCase()} — vink spelers aan die je wilt</div>
 {theirRoster.map(p=>(
-<div key={p.name} data-testid={`gm-trade-get-${p.name}`} onClick={()=>setTradeGet(p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGet===p.name?`1px solid ${RED}`:"1px solid transparent"}}>
-<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
+<div key={p.name} data-testid={`gm-trade-get-${p.name}`} onClick={()=>toggle(tradeGetList,setTradeGetList,p.name)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGetList.includes(p.name)?`1px solid ${RED}`:"1px solid transparent"}}>
+<div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{tradeGetList.includes(p.name)?"☑":"☐"} {p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age}{capMode==="strict"?` · $${salaryOf(p)}M`:""}</div></div>
 <div style={{color:RED,fontWeight:800,fontSize:16}}>{p.overall}</div>
 </div>))}
+<div data-testid="gm-trade-get-pick" onClick={()=>setTradeGetPick(!tradeGetPick)} style={{...card,padding:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",border:tradeGetPick?`1px solid ${RED}`:"1px solid transparent"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{tradeGetPick?"☑":"☐"} 🔮 Toekomstig 1e-ronde pick</div><div style={{color:GREY,fontWeight:700,fontSize:13}}>~{PICK_VALUE}</div>
+</div>
 </>)}
+{(tradeGiveList.length>0||tradeGetList.length>0)&&<div style={{...card,padding:10,textAlign:"center"}}>
+<div style={{color:GREY,fontSize:11}}>WAARDE-CHECK</div>
+<div style={{color:WHITE,fontSize:14,fontWeight:700}}>Jij geeft: {myValue} &nbsp;vs&nbsp; Jij krijgt: {theirValue}</div>
+</div>}
 {tradeMsg&&<div style={{...card,background:"#3a1a1a",color:"#ff9500",textAlign:"center",fontSize:12}}>{tradeMsg}</div>}
-<button data-testid="gm-propose-trade" onClick={proposeTrade} disabled={!tradeGive||!tradeGet} style={{...btn,marginTop:10,opacity:(!tradeGive||!tradeGet)?0.5:1}}>Doe het bod ▸</button>
+<button data-testid="gm-propose-trade" onClick={proposeTrade} disabled={!tradeTeamId||(tradeGiveList.length===0&&!tradeGivePick)||(tradeGetList.length===0&&!tradeGetPick)} style={{...btn,marginTop:10,opacity:(!tradeTeamId||(tradeGiveList.length===0&&!tradeGivePick)||(tradeGetList.length===0&&!tradeGetPick))?0.5:1}}>Doe het bod ▸</button>
 {tradeLog.length>0&&(<>
 <div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>VOLTOOIDE TRADES</div>
 {tradeLog.map((t,i)=>(<div key={i} style={{...card,padding:8,fontSize:11,color:GREY}}>{t.out} ▸ {NBA_TEAMS.find(x=>x.id===t.team).name} · ontvangen: {t.in}</div>))}
@@ -11279,14 +11475,45 @@ return(<div>
 }
 
 if(phase==="result"){
+const confStandings=result.standings[result.myConf];
 return(<div>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>SEIZOEN RESULTAAT · {myTeam.name}</div>
 <div style={{...card,textAlign:"center",padding:24,background:result.champion?"linear-gradient(180deg,#8B6914,#1C1C1E)":"linear-gradient(180deg,#2a0808,#1C1C1E)"}}>
 {result.champion&&<div style={{fontSize:48,marginBottom:8}}>🏆</div>}
 <div style={{color:WHITE,fontSize:48,fontWeight:900}}>{result.wins}-{result.losses}</div>
-<div style={{color:GREY,fontSize:12,marginTop:4}}>{result.seed?`#${result.seed} seed · ${result.seed<=6?"Playoffs":"Play-in"}`:"Buiten play-in"}</div>
+<div style={{color:GREY,fontSize:12,marginTop:4}}>{result.seed?`#${result.seed} seed · ${result.myConf==="E"?"Oost":"West"} · Team rating ${result.teamRating}`:"Buiten play-in"}</div>
 {result.champion&&<div style={{color:"#FFD700",fontWeight:800,fontSize:18,marginTop:10}}>NBA CHAMPIONS!</div>}
 </div>
+
+{result.journey&&result.journey.length>0&&(<>
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>PLAYOFF-TRAJECT</div>
+{result.journey.map((j,i)=>(<div key={i} style={{...card,padding:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<div><div style={{color:WHITE,fontWeight:700,fontSize:12}}>{j.round}</div>{j.opponent&&<div style={{color:GREY,fontSize:11}}>vs {j.opponent}</div>}</div>
+<div style={{color:j.result.startsWith("Gewonnen")||j.result.includes("Geplaatst")?"#30d158":"#ff453a",fontWeight:700,fontSize:12}}>{j.result}</div>
+</div>))}
+</>)}
+
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>{result.myConf==="E"?"OOSTELIJKE":"WESTELIJKE"} CONFERENTIE STAND</div>
+<div style={{...card,padding:0,overflow:"hidden"}}>
+{confStandings.map((t,i)=>(<div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 12px",borderBottom:i<confStandings.length-1?`1px solid ${DIVIDER}`:"none",background:t.id===myTeamId?"rgba(232,49,42,0.15)":"transparent"}}>
+<div style={{color:t.id===myTeamId?WHITE:GREY,fontWeight:t.id===myTeamId?800:400,fontSize:12}}>{i+1}. {t.name}{i===5&&<span style={{color:GREY,fontSize:10}}> · play-in ▾</span>}</div>
+<div style={{color:t.id===myTeamId?WHITE:GREY,fontWeight:t.id===myTeamId?800:400,fontSize:12}}>{t.wins}-{t.losses}</div>
+</div>))}
+</div>
+
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>NBA FINALS</div>
+<div style={{...card,textAlign:"center",padding:14}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:700}}>{result.finals.a.name} vs {result.finals.b.name}</div>
+<div style={{color:"#FFD700",fontSize:16,fontWeight:900,marginTop:4}}>🏆 {result.championTeam.name} · {result.finals.score}</div>
+</div>
+
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>SEIZOENSPRIJZEN</div>
+<div style={{...card,padding:10}}>
+<div style={{color:WHITE,fontSize:12}}>🏅 <b>MVP:</b> {result.mvp.name} <span style={{color:GREY}}>({result.mvp.teamName}, OVR {result.mvp.overall})</span></div>
+<div style={{color:WHITE,fontSize:12,marginTop:6}}>🌟 <b>Rookie of the Year:</b> {result.roy?result.roy.name:"—"} <span style={{color:GREY}}>{result.roy?`(${result.roy.teamName}, OVR ${result.roy.overall})`:""}</span></div>
+{result.finalsMvp&&<div style={{color:"#FFD700",fontSize:12,marginTop:6}}>🏆 <b>Finals MVP:</b> {result.finalsMvp.name} <span style={{color:GREY}}>(OVR {result.finalsMvp.overall})</span></div>}
+</div>
+
 <div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>OFFSEASON MOVES</div>
 <div style={{...card}}>
 <div style={{color:WHITE,fontSize:12,marginBottom:4}}><b>{result.draftPicks.length}</b> draft picks · <b>{result.signings.length}</b> FA signings</div>

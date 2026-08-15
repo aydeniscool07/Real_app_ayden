@@ -8763,6 +8763,97 @@ const res=resolveSeries(seriesWinProb(edge));
 const winner=res.win?westChamp:eastChamp;
 return{aName:westChamp.name,bName:eastChamp.name,winnerName:winner.name,gamesFor:res.win?res.gamesFor:res.gamesAgainst,gamesAgainst:res.win?res.gamesAgainst:res.gamesFor,mineInvolved:!!(westChamp.isMine||eastChamp.isMine),mineWon:westChamp.isMine?res.win:(eastChamp.isMine?!res.win:null)};
 }
+// ── Shared 2-player playoff picture: builds ONE league-wide bracket per conference (with both real players'
+// teams seeded into whichever conference field they belong to) so a "rivals" league season is a single shared
+// outcome instead of two independently-rolled fantasies — and flags it when the two players' teams actually
+// meet in a round, so that moment can get a special callout in the UI.
+function simulateDualSeasonPlayoffs(p1,p2){
+// p1/p2: {team,strength,rating,wins}
+function ratingBoost(name){
+if(name===p1.team.name)return(p1.rating-75)/220;
+if(name===p2.team.name)return(p2.rating-75)/220;
+return 0;
+}
+function buildField(conf){
+const mineEntries=[];
+if(p1.team.conf===conf)mineEntries.push({name:p1.team.name,wins:p1.wins,strength:p1.strength,owner:"p1"});
+if(p2.team.conf===conf)mineEntries.push({name:p2.team.name,wins:p2.wins,strength:p2.strength,owner:"p2"});
+const mineNames=mineEntries.map(e=>e.name);
+const others=NBA_TEAMS_STATIC.filter(t=>t.conf===conf&&!mineNames.includes(t.name)).map(t=>({name:t.name,wins:Math.round(careerRoll(24,58)),strength:careerRoll(30,90)}));
+const all=[...mineEntries,...others];
+all.sort((a,b)=>b.wins-a.wins);
+return all.slice(0,8).map((t,i)=>({...t,seed:i+1}));
+}
+function simBracket(field){
+const bySeed={};field.forEach(t=>{bySeed[t.seed]=t;});
+let positions=BRACKET_ORDER.map(s=>bySeed[s]).filter(Boolean);
+const roundNames=["Eerste ronde","Halve finale conf.","Conferencefinale"];
+const rounds=[];
+for(let r=0;r<3;r++){
+const matchups=[];const winners=[];
+for(let i=0;i<positions.length;i+=2){
+const a=positions[i],b=positions[i+1];
+if(!a||!b)continue;
+const seedDiff=b.seed-a.seed;
+const strengthDiff=a.strength-b.strength;
+let edge=seedDiff*0.045+strengthDiff/300+careerRoll(-0.03,0.03);
+edge+=ratingBoost(a.name)-ratingBoost(b.name);
+const res=resolveSeries(seriesWinProb(edge));
+const winner=res.win?a:b;
+const headToHead=!!(a.owner&&b.owner);
+matchups.push({round:roundNames[r],aSeed:a.seed,aName:a.name,bSeed:b.seed,bName:b.name,winnerSeed:winner.seed,winnerName:winner.name,gamesFor:res.win?res.gamesFor:res.gamesAgainst,gamesAgainst:res.win?res.gamesAgainst:res.gamesFor,aOwner:a.owner||null,bOwner:b.owner||null,headToHead,winnerOwner:winner.owner||null});
+winners.push(winner);
+}
+rounds.push({name:roundNames[r],matchups});
+positions=winners;
+}
+return{rounds,champion:positions[0]};
+}
+const fieldEast=buildField("East"),fieldWest=buildField("West");
+const bracketEast=simBracket(fieldEast),bracketWest=simBracket(fieldWest);
+const westChamp=bracketWest.champion,eastChamp=bracketEast.champion;
+const finals=(()=>{
+const strengthDiff=westChamp.strength-eastChamp.strength;
+let edge=strengthDiff/300+careerRoll(-0.03,0.03);
+edge+=ratingBoost(westChamp.name)-ratingBoost(eastChamp.name);
+const res=resolveSeries(seriesWinProb(edge));
+const winner=res.win?westChamp:eastChamp;
+const headToHead=!!(westChamp.owner&&eastChamp.owner);
+return{aName:westChamp.name,bName:eastChamp.name,winnerName:winner.name,gamesFor:res.win?res.gamesFor:res.gamesAgainst,gamesAgainst:res.win?res.gamesAgainst:res.gamesFor,aOwner:westChamp.owner||null,bOwner:eastChamp.owner||null,headToHead,winnerOwner:winner.owner||null};
+})();
+function extractFor(owner,rating){
+const conf=owner==="p1"?p1.team.conf:p2.team.conf;
+const bracket=conf==="East"?bracketEast:bracketWest;
+const field=conf==="East"?fieldEast:fieldWest;
+const myEntry=field.find(t=>t.owner===owner);
+if(!myEntry)return{made:false,seed:null};
+let eliminatedRoundIndex=null;
+let headToHeadMoment=null;
+for(let i=0;i<3;i++){
+const m=bracket.rounds[i].matchups.find(x=>x.aOwner===owner||x.bOwner===owner);
+if(!m)continue;
+if(m.headToHead&&!headToHeadMoment){
+headToHeadMoment={round:m.round,won:m.winnerOwner===owner,gamesFor:m.gamesFor,gamesAgainst:m.gamesAgainst};
+}
+if(m.winnerOwner!==owner){eliminatedRoundIndex=i;break;}
+}
+const inFinals=finals.aOwner===owner||finals.bOwner===owner;
+if(finals.headToHead&&inFinals&&!headToHeadMoment){
+headToHeadMoment={round:"NBA Finals",won:finals.winnerOwner===owner,gamesFor:finals.gamesFor,gamesAgainst:finals.gamesAgainst};
+}
+if(eliminatedRoundIndex===null&&inFinals&&finals.winnerOwner!==owner)eliminatedRoundIndex=3;
+const attachStats=m=>{
+const mineInvolved=m.aOwner===owner||m.bOwner===owner;
+if(!mineInvolved)return{...m,mineInvolved:false,mineWon:null};
+const mineWon=m.winnerOwner===owner;
+return{...m,mineInvolved:true,mineWon,ppg:Math.round(careerRoll(14,32)*10)/10,rpg:Math.round(careerRoll(3,10)*10)/10,apg:Math.round(careerRoll(2,9)*10)/10};
+};
+const myBracket={...bracket,rounds:bracket.rounds.map(r=>({...r,matchups:r.matchups.map(attachStats)}))};
+const champion=inFinals&&finals.winnerOwner===owner;
+return{made:true,seed:myEntry.seed,myConf:conf,otherConf:conf==="East"?"West":"East",myBracket,otherBracket:conf==="East"?bracketWest:bracketEast,finals:attachStats(finals),champion,eliminatedRoundIndex,headToHeadMoment};
+}
+return{p1Result:extractFor("p1",p1.rating),p2Result:extractFor("p2",p2.rating)};
+}
 // ── Full-season playoff picture: both conference brackets (proper seeding) plus the Finals, from the player's perspective.
 function simulateSeasonPlayoffs(myTeam,myStrength,myRating,myWins){
 const myField=buildConferenceField(myTeam.conf,myTeam.name,myWins,myStrength);
@@ -9115,6 +9206,12 @@ return(
 </div>
 ))}
 {po.made&&po.champion&&<div style={{color:"#f5a524",fontWeight:800,fontSize:12,marginTop:4}}>🏆 NBA KAMPIOEN</div>}
+{po.headToHeadMoment&&(
+<div style={{background:"linear-gradient(135deg,#2C1414,#160a0a)",border:`1px solid ${po.headToHeadMoment.won?"#27AE60":RED}`,borderRadius:10,padding:"8px 10px",marginTop:8}}>
+<div style={{color:"#ffe066",fontSize:9,fontWeight:800,letterSpacing:1,marginBottom:2}}>⚔️ RIVALEN TREFFEN ELKAAR</div>
+<div style={{color:WHITE,fontSize:11}}>{po.headToHeadMoment.round}: {po.headToHeadMoment.won?"Jij wint":"Jij verliest"} van je liga-rivaal — {po.headToHeadMoment.gamesFor}-{po.headToHeadMoment.gamesAgainst}</div>
+</div>
+)}
 </div>
 )}
 {showBracket&&<PlayoffBracketModal season={season} onClose={()=>setShowBracket(false)}/>}
@@ -9563,6 +9660,9 @@ const [leagueDraftTrio,setLeagueDraftTrio]=useState(null);
 const [leagueDraftNames,setLeagueDraftNames]=useState([]);
 const [leagueBuildName,setLeagueBuildName]=useState("");
 const [leagueBusy,setLeagueBusy]=useState(false);
+const [leagueDraftNightSpinning,setLeagueDraftNightSpinning]=useState(false);
+const [leagueDraftNightDisplay,setLeagueDraftNightDisplay]=useState(null);
+const [leagueDraftNightResult,setLeagueDraftNightResult]=useState(null);
 const [currentEvent,setCurrentEvent]=useState(null);
 const [retired,setRetired]=useState(false);
 const [saved,setSaved]=useState(false);
@@ -9972,12 +10072,41 @@ const spentWithout=leagueAllocSpent()-(cur-CAREER_ATTR_FLOOR);
 if(delta>0&&spentWithout+(next-CAREER_ATTR_FLOOR)>CAREER_POINT_BUDGET)return;
 setLeagueBuildAlloc(a=>({...a,[key]:next}));
 }
-async function confirmLeagueBuild(){
+function startLeagueDraftNight(){
+setLeagueDraftNightResult(null);
+setLeagueDraftNightDisplay(null);
+setLeagueDraftNightSpinning(true);
+}
+useEffect(()=>{
+if(!leagueDraftNightSpinning)return;
+let ticks=0;
+const maxTicks=18;
+const interval=setInterval(()=>{
+ticks++;
+setLeagueDraftNightDisplay({pick:Math.floor(Math.random()*30)+1,team:pickRandom(NBA_TEAMS_STATIC)});
+if(ticks>=maxTicks){
+clearInterval(interval);
 const finalAttrs={};
 CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR;});
 const overall=careerOverall(finalAttrs,leagueBuildPos);
+const pick=rollDraftPick(overall);
+const strength=draftPickTeamStrength(pick);
 const team=pickRandom(NBA_TEAMS_STATIC);
-const me={uid:authUserId,name:leagueBuildName.trim()||myUsername||"Speler",username:myUsername,pos:leagueBuildPos,attrs:finalAttrs,ceilings:leagueBuildCeilings,overall,trueRating:overall,peakRating:overall,team,teamStrength:careerRoll(45,80),contractYearsLeft:4,salary:null,reputation:0,leadershipCount:0,rival:null,forkPoints:[],olympicPhase:Math.floor(Math.random()*4),legends:leagueDraftNames,number:String(Math.floor(Math.random()*98)+1),seasons:[],ready:false,pendingSeason:null,retired:false,built:true};
+setLeagueDraftNightDisplay({pick,team});
+setLeagueDraftNightResult({pick,team,strength});
+setLeagueDraftNightSpinning(false);
+}
+},110);
+return()=>clearInterval(interval);
+// eslint-disable-next-line
+},[leagueDraftNightSpinning]);
+async function confirmLeagueBuild(drafted){
+const finalAttrs={};
+CAREER_ATTRS.forEach(a=>{finalAttrs[a.key]=leagueBuildAlloc[a.key]!=null?leagueBuildAlloc[a.key]:CAREER_ATTR_FLOOR;});
+const overall=careerOverall(finalAttrs,leagueBuildPos);
+const team=drafted?drafted.team:pickRandom(NBA_TEAMS_STATIC);
+const teamStrength=drafted?drafted.strength:careerRoll(45,80);
+const me={uid:authUserId,name:leagueBuildName.trim()||myUsername||"Speler",username:myUsername,pos:leagueBuildPos,attrs:finalAttrs,ceilings:leagueBuildCeilings,overall,trueRating:overall,peakRating:overall,team,teamStrength,contractYearsLeft:4,salary:null,reputation:0,leadershipCount:0,rival:null,forkPoints:[],olympicPhase:Math.floor(Math.random()*4),legends:leagueDraftNames,number:String(Math.floor(Math.random()*98)+1),seasons:[],ready:false,pendingSeason:null,retired:false,built:true};
 await fbLeagueMerge(leagueId,{players:{[authUserId]:me}});
 }
 const leagueMyId=authUserId;
@@ -10104,6 +10233,18 @@ return{season,newTrueRating,newTeamState,newAttrs,newOverall,contractYearsLeft,s
 }
 let r1=resolveOne(p1,p2);
 let r2=resolveOne(p2,p1);
+if(mode==="rivals"){
+// Eén gedeeld liga-seizoen: jullie beide teams zitten in dezelfde gesimuleerde bracket i.p.v. elk hun eigen fantasie,
+// dus als jullie elkaar treffen is dat een echt, gedeeld playoff-moment voor beide spelers.
+const dual=simulateDualSeasonPlayoffs(
+{team:r1.newTeamState.team,strength:r1.newTeamState.strength,rating:r1.season.rating,wins:r1.season.wins},
+{team:r2.newTeamState.team,strength:r2.newTeamState.strength,rating:r2.season.rating,wins:r2.season.wins}
+);
+r1.season.seed=dual.p1Result.seed;r1.season.playoffs=dual.p1Result;
+r2.season.seed=dual.p2Result.seed;r2.season.playoffs=dual.p2Result;
+if(dual.p1Result.champion&&!r1.season.awards.includes("championship"))r1.season.awards=[...r1.season.awards,"championship"];
+if(dual.p2Result.champion&&!r2.season.awards.includes("championship"))r2.season.awards=[...r2.season.awards,"championship"];
+}
 if(mode==="coop"){
 // same team: force identical W/L, seed, and playoff outcome for both, driven by the stronger of the two ratings
 const strength=Math.round((p1.teamStrength+p2.teamStrength)/2+careerRoll(-6,6));
@@ -10124,7 +10265,7 @@ await fbLeagueMerge(leagueId,{season:age+1,status:bothRetired?"done":"active",pl
 setLeagueBusy(false);
 })();
 },[leagueDoc,leagueIsHost,leagueBusy]);
-function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});setLeagueDraftStep(0);setLeagueDraftTrio(null);setLeagueDraftNames([]);setLeagueTurnMode(false);setLeagueWaitingForReveal(false);setLeagueSyncedCount(0);}
+function leaveLeague(){setLeagueId(null);setLeagueDoc(null);setLeagueViewedCount(0);setLeagueBuildPos(null);setLeagueBuildCeilings(null);setLeagueBuildAlloc({});setLeagueDraftStep(0);setLeagueDraftTrio(null);setLeagueDraftNames([]);setLeagueTurnMode(false);setLeagueWaitingForReveal(false);setLeagueSyncedCount(0);setLeagueDraftNightSpinning(false);setLeagueDraftNightDisplay(null);setLeagueDraftNightResult(null);}
 
 
 useEffect(()=>{
@@ -10260,6 +10401,35 @@ return(
 </div>
 );
 }
+if(leagueDraftNightSpinning||leagueDraftNightResult){
+return(
+<div>
+{backBtn}
+<div style={{...panelStyle,textAlign:"center"}}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>DRAFT NIGHT</div>
+<div style={{fontSize:38,marginBottom:14}}>🎡</div>
+<div style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:16,padding:"26px 16px",marginBottom:20}}>
+{leagueDraftNightDisplay?(
+<>
+<div style={{color:leagueDraftNightSpinning?'#c98a8a':"#f5a524",fontWeight:900,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{leagueDraftNightDisplay.pick}</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:16}}>{leagueDraftNightDisplay.team.name}</div>
+</>
+):(
+<div style={{color:'#c98a8a',fontSize:14}}>Het wiel begint te draaien...</div>
+)}
+</div>
+{leagueDraftNightSpinning&&<div style={{color:'#c98a8a',fontSize:13}}>🎡 Het wiel draait...</div>}
+{!leagueDraftNightSpinning&&leagueDraftNightResult&&(
+<>
+<div style={{color:WHITE,fontSize:14,marginBottom:6}}>Je bent gedraft als <b>pick #{leagueDraftNightResult.pick}</b> door de</div>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:18,marginBottom:18}}>{leagueDraftNightResult.team.name}</div>
+<button onClick={()=>confirmLeagueBuild(leagueDraftNightResult)} style={btnPrimary}>Start je carrière ▸</button>
+</>
+)}
+</div>
+</div>
+);
+}
 const spent=leagueAllocSpent(),remaining=CAREER_POINT_BUDGET-spent;
 const ATTR_GRAD={sco:["#ff5b52","#7a0f0a"],plm:["#4fc3ff","#0d3a63"],reb:["#3ddc84","#0d4225"],def:["#b47bff","#3b1a63"],ath:["#ffb545","#7a4d0a"],iq:["#ffe066","#7a5c0a"]};
 return(
@@ -10292,7 +10462,7 @@ return(
 );
 })}
 </div>
-<button onClick={confirmLeagueBuild} style={btnPrimary}>Bevestig speler</button>
+<button onClick={startLeagueDraftNight} style={btnPrimary}>Bevestig speler ▸</button>
 </div>
 </div>
 );
@@ -10744,6 +10914,11 @@ return(
 {headerEl}
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>PLAY-OFFS · SEED #{po.seed}</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je hebt de play-offs gehaald! 🏀</div>
+{po.headToHeadMoment&&(
+<div style={{background:"linear-gradient(135deg,#2C1414,#160a0a)",border:`1px solid #ffe066`,borderRadius:12,padding:"10px 12px",marginBottom:14,textAlign:"center"}}>
+<div style={{color:"#ffe066",fontSize:11,fontWeight:800,letterSpacing:1}}>⚔️ JULLIE TREFFEN ELKAAR — {po.headToHeadMoment.round.toUpperCase()}</div>
+</div>
+)}
 <PlayoffBracketView playoffs={po} revealedRounds={revealedRounds}/>
 <BracketRoundStats playoffs={po} revealedRounds={revealedRounds}/>
 {!done&&<button onClick={revealNextRound} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>{roundBtnLabel}</button>}
@@ -10812,6 +10987,39 @@ const NBA_TEAMS=[
 {id:"SAC",name:"Sacramento Kings",record:"22-60",cap:179.2,status:"Over cap",conf:"W"}
 ];
 const SALARY_CAP=154.6;
+// Echte NBA-coaches met een eigen speelstijl. "team" = wie hem nu al heeft (jouw standaard-optie); alle anderen zijn in te huren.
+const COACHES=[
+{id:"mazzulla",name:"Joe Mazzulla",team:"BOS",style:"Modern 3PT-aanval",desc:"Laat het team massaal van buiten schieten, hoog tempo.",winBonus:2,rookieBoost:0,starBoost:1},
+{id:"bickerstaff",name:"J.B. Bickerstaff",team:"DET",style:"Defensieve Discipline",desc:"Bouwt alles rond een fysieke, harde defense.",winBonus:2,rookieBoost:0,starBoost:0},
+{id:"brown",name:"Mike Brown",team:"NYK",style:"Motion Offense",desc:"Continue beweging zonder bal, deelt de bal rond.",winBonus:1,rookieBoost:0,starBoost:1},
+{id:"atkinson",name:"Kenny Atkinson",team:"CLE",style:"Moderne Ontwikkeling",desc:"Focus op groei van jong talent binnen een gestructureerd systeem.",winBonus:1,rookieBoost:2,starBoost:0},
+{id:"snyder",name:"Quin Snyder",team:"ATL",style:"Tempo-Innovator",desc:"Extreem hoog tempo, veel transition buckets.",winBonus:2,rookieBoost:0,starBoost:0},
+{id:"rajakovic",name:"Darko Rajaković",team:"TOR",style:"Uptempo Rebuild",desc:"Geeft jonge spelers veel speeltijd en vrijheid.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"nurse",name:"Nick Nurse",team:"PHI",style:"Schematische Innovator",desc:"Wisselt constant van defensieve schema's, moeilijk te lezen.",winBonus:2,rookieBoost:1,starBoost:0},
+{id:"mosley",name:"Jamahl Mosley",team:"ORL",style:"Defensieve Cultuur",desc:"Eén van de beste defensieve teams bouwen, rustig tempo.",winBonus:1,rookieBoost:0,starBoost:0},
+{id:"lee",name:"Charles Lee",team:"CHA",style:"Uptempo Ontwikkeling",desc:"Snel spel, veel kansen voor jonge kern.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"spoelstra",name:"Erik Spoelstra",team:"MIA",style:"Cultuur & Defense",desc:"Legendarische discipline en aanpassingsvermogen.",winBonus:3,rookieBoost:0,starBoost:0},
+{id:"rivers",name:"Doc Rivers",team:"MIL",style:"Ster-Centrisch Isolatie",desc:"Bouwt alles rond de iso-mogelijkheden van je beste speler.",winBonus:0,rookieBoost:0,starBoost:3},
+{id:"donovan",name:"Billy Donovan",team:"CHI",style:"Motion & Ruimte",desc:"Balbeweging en driepunters, flexibel systeem.",winBonus:1,rookieBoost:0,starBoost:0},
+{id:"fernandez",name:"Jordi Fernández",team:"BKN",style:"Ontwikkelingsfocus",desc:"Geduldige rebuild, veel reps voor jong talent.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"carlisle",name:"Rick Carlisle",team:"IND",style:"Analytics Innovator",desc:"Data-gedreven schotselectie en snel tempo.",winBonus:2,rookieBoost:0,starBoost:0},
+{id:"keefe",name:"Brian Keefe",team:"WAS",style:"Rebuild Geduld",desc:"Bouwt langzaam een fundament met jonge spelers.",winBonus:0,rookieBoost:1,starBoost:0},
+{id:"daigneault",name:"Mark Daigneault",team:"OKC",style:"Ontwikkelingsgoeroe",desc:"Combineert winnen nu met de beste speler­ontwikkeling in de league.",winBonus:2,rookieBoost:3,starBoost:0},
+{id:"johnson",name:"Mitch Johnson",team:"SAS",style:"Motion & Ontwikkeling",desc:"Popovich-stijl beweging, focus op fundamentals.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"adelman",name:"David Adelman",team:"DEN",style:"Ster-Centrisch Systeem",desc:"Bouwt de aanval rond een dominante bigman/playmaker.",winBonus:1,rookieBoost:0,starBoost:2},
+{id:"redick",name:"JJ Redick",team:"LAL",style:"Moderne Aanval",desc:"Spacing en snelle beslissingen, sterspeler-vriendelijk.",winBonus:1,rookieBoost:0,starBoost:1},
+{id:"udoka",name:"Ime Udoka",team:"HOU",style:"Defensieve Hardheid",desc:"Fysiek, agressief, wint met defense.",winBonus:2,rookieBoost:0,starBoost:0},
+{id:"finch",name:"Chris Finch",team:"MIN",style:"Ster-Centrische Flow",desc:"Laat het spel rond de sterren stromen zonder ze te overbelasten.",winBonus:1,rookieBoost:0,starBoost:2},
+{id:"ott",name:"Jordan Ott",team:"PHX",style:"Uptempo Rebuild",desc:"Nieuw systeem, veel vrijheid voor jong talent.",winBonus:0,rookieBoost:1,starBoost:0},
+{id:"lue",name:"Tyronn Lue",team:"LAC",style:"Playoff Meesterbrein",desc:"Uitstekend in het aanpassen tijdens een play-off serie.",winBonus:2,rookieBoost:0,starBoost:0},
+{id:"billups",name:"Chauncey Billups",team:"POR",style:"Uptempo Rebuild",desc:"Snel, jong, leergierig systeem.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"kerr",name:"Steve Kerr",team:"GSW",style:"Motion Offense / Tempo",desc:"De originele beweging-zonder-bal aanval, hoog tempo.",winBonus:2,rookieBoost:0,starBoost:2},
+{id:"kidd",name:"Jason Kidd",team:"DAL",style:"Ster-Centrische Controle",desc:"Bouwt alles rond ballcontrole van je sterspeler.",winBonus:0,rookieBoost:0,starBoost:2},
+{id:"green",name:"Willie Green",team:"NOP",style:"Ster-Centrische Flow",desc:"Vloeiend aanvalssysteem rond de kernspelers.",winBonus:1,rookieBoost:0,starBoost:1},
+{id:"iisalo",name:"Tuomas Iisalo",team:"MEM",style:"Moderne Ontwikkeling",desc:"Europese motion-principes, focus op groei.",winBonus:0,rookieBoost:2,starBoost:0},
+{id:"hardy",name:"Will Hardy",team:"UTA",style:"Ontwikkelingsfocus",desc:"Eén van de beste jonge coaches in player development.",winBonus:1,rookieBoost:3,starBoost:0},
+{id:"christie",name:"Doug Christie",team:"SAC",style:"Uptempo Rebuild",desc:"Energiek, snel, in opbouw.",winBonus:1,rookieBoost:1,starBoost:0}
+];
 // Ruwe schatting van salaris (in $M) o.b.v. rating/leeftijd — gebruikt voor de optionele cap-check bij trades.
 function salaryOf(p){
 let s=Math.pow(Math.max(0,p.overall-55)/40,1.9)*48;
@@ -10873,6 +11081,8 @@ const [tradeGetPick,setTradeGetPick]=useState(false);
 const [tradeMsg,setTradeMsg]=useState("");
 const [tradeLog,setTradeLog]=useState([]);
 const [incomingOffers,setIncomingOffers]=useState([]);
+const [startingLineup,setStartingLineup]=useState({});
+const [coachId,setCoachId]=useState(null);
 const [capMode,setCapMode]=useState("free"); // "free" = alleen waarde telt | "strict" = salarissen moeten ongeveer matchen
 const PICK_VALUE=64; // geschatte OVR-waarde van een toekomstig 1e-ronde pick, voor trade-balans
 
@@ -10901,6 +11111,7 @@ return winsA>winsB?{a:teamA,b:teamB,winner:teamA,loser:teamB,score:`${winsA}-${w
 
 function startLottery(){
 setRosters(JSON.parse(JSON.stringify(REAL_ROSTERS)));
+setCoachId(COACHES.find(c=>c.team===myTeamId)?.id||null);
 const bottom14=[...NBA_TEAMS].sort((a,b)=>{const [aw]=a.record.split("-").map(Number);const [bw]=b.record.split("-").map(Number);return aw-bw;}).slice(0,14);
 const rand=seedRand(Date.now()%99999);
 const weighted=[];
@@ -11097,21 +11308,29 @@ setSigned([...signed,p]);setBudget(budget-p.ask);setFreeAgents(freeAgents.filter
 function simulateSeason(){
 const rand=seedRand(Date.now()%11111);
 const topAvg=(arr,n)=>{const s=[...arr].sort((a,b)=>b.eff-a.eff).slice(0,n);return s.reduce((a,p)=>a+p.eff,0)/Math.max(1,s.length);};
-// Bouw voor alle 30 teams het eindroster (na trades + draft, en voor jouw team ook FA-signings) en projecteer win-totalen.
+const coach=COACHES.find(c=>c.id===coachId);
+const starterNames=Object.values(startingLineup);
+// Bouw voor alle 30 teams het eindroster (na trades + draft, en voor jouw team ook FA-signings + coach/lineup-effecten) en projecteer win-totalen.
 const league=NBA_TEAMS.map(t=>{
+const isMe=t.id===myTeamId;
 const coreRoster=(rosters&&rosters[t.id])||REAL_ROSTERS[t.id]||[];
 const picks=Object.entries(drafted).filter(([_,d])=>d.teamId===t.id).map(([pid])=>draftClass.find(p=>p.id===pid)).filter(Boolean);
-const faSignings=t.id===myTeamId?signed:[];
-const fullRoster=[
-...coreRoster.map(p=>({...p,eff:p.overall})),
-...picks.map(p=>({...p,eff:p.overall-4})),
+const faSignings=isMe?signed:[];
+const rookieDiscount=isMe&&coach?Math.max(0,4-coach.rookieBoost):4;
+let fullRoster=[
+...coreRoster.map(p=>({...p,eff:p.overall+(isMe&&starterNames.includes(p.name)?2:0)})), // je gekozen starting five krijgt een kleine fit-bonus
+...picks.map(p=>({...p,eff:p.overall-rookieDiscount})),
 ...faSignings.map(p=>({...p,eff:p.overall}))
 ];
+if(isMe&&coach&&coach.starBoost>0&&fullRoster.length>0){
+const topIdx=fullRoster.reduce((best,p,i,arr)=>p.eff>arr[best].eff?i:best,0);
+fullRoster=fullRoster.map((p,i)=>i===topIdx?{...p,eff:p.eff+coach.starBoost}:p);
+}
 const originalRating=topAvg(REAL_ROSTERS[t.id].map(p=>({...p,eff:p.overall})),8);
 const currentRating=topAvg(fullRoster,8);
 const delta=currentRating-originalRating;
 const [baseWins]=t.record.split("-").map(Number);
-let projWins=Math.round(baseWins+delta*3+(rand()-0.5)*6);
+let projWins=Math.round(baseWins+delta*3+(isMe&&coach?coach.winBonus:0)+(rand()-0.5)*6);
 projWins=Math.max(8,Math.min(75,projWins));
 return{id:t.id,name:t.name,conf:t.conf,wins:projWins,losses:82-projWins,rating:Math.round(currentRating*10)/10,roster:fullRoster,picks};
 });
@@ -11208,6 +11427,8 @@ journey,
 finals,
 championTeam:champion,
 mvp,roy,finalsMvp:champion.id===myTeamId?finalsMvp:null,
+coach,
+lineup:startingLineup,
 });
 setPhase("result");
 }
@@ -11288,7 +11509,32 @@ setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick
 setTimeout(()=>setTradeMsg(""),4500);
 }
 
-function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);setTradeMsg("");setTradeLog([]);setIncomingOffers([]);}
+function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);setTradeMsg("");setTradeLog([]);setIncomingOffers([]);setStartingLineup({});setCoachId(null);}
+
+function myFinalRoster(){
+const core=(rosters&&rosters[myTeamId])||[];
+const picks=Object.entries(drafted).filter(([_,d])=>d.teamId===myTeamId).map(([pid])=>draftClass.find(p=>p.id===pid)).filter(Boolean);
+return[...core,...picks,...signed];
+}
+
+function initLineupDefaults(){
+const roster=myFinalRoster();
+const byOverall=[...roster].sort((a,b)=>b.overall-a.overall);
+const POS=["PG","SG","SF","PF","C"];
+const lineup={};
+const used=new Set();
+POS.forEach(pos=>{
+const match=byOverall.find(p=>p.pos===pos&&!used.has(p.name));
+if(match){lineup[pos]=match.name;used.add(match.name);}
+});
+POS.forEach(pos=>{
+if(!lineup[pos]){
+const fallback=byOverall.find(p=>!used.has(p.name));
+if(fallback){lineup[pos]=fallback.name;used.add(fallback.name);}
+}
+});
+setStartingLineup(lineup);
+}
 
 const btn={background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 18px",fontWeight:800,fontSize:13,cursor:"pointer",width:"100%"};
 const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
@@ -11470,7 +11716,56 @@ return(<div>
 <div><div style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</div><div style={{color:GREY,fontSize:11}}>{p.pos} · Age {p.age} · OVR {p.overall}</div></div>
 <div style={{color:p.ask>budget?"#ff453a":"#30d158",fontWeight:800}}>${p.ask}M/yr</div>
 </div>))}
-<button data-testid="gm-sim-season" onClick={simulateSeason} style={{...btn,marginTop:14}}>Simuleer seizoen ▸</button>
+<button data-testid="gm-goto-lineup" onClick={()=>{initLineupDefaults();setPhase("lineup");}} style={{...btn,marginTop:14}}>Basisopstelling & Coach ▸</button>
+</div>);
+}
+
+if(phase==="lineup"){
+const roster=myFinalRoster();
+const POS=["PG","SG","SF","PF","C"];
+const usedNames=Object.values(startingLineup);
+const currentCoach=COACHES.find(c=>c.id===coachId);
+const otherCoaches=COACHES.filter(c=>c.team!==myTeamId);
+const defaultCoach=COACHES.find(c=>c.team===myTeamId);
+const startersRating=POS.reduce((s,pos)=>{const p=roster.find(x=>x.name===startingLineup[pos]);return s+(p?p.overall:0);},0)/Math.max(1,POS.filter(pos=>startingLineup[pos]).length);
+return(<div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>BASISOPSTELLING & COACH</div>
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:10}}>Stel je eigen starting five samen zoals jij het als GM voor je ziet, en kies wie de leiding krijgt op de bank.</div>
+
+<div style={{...card,textAlign:"center",padding:10}}>
+<div style={{color:GREY,fontSize:11}}>GEM. RATING STARTING FIVE</div>
+<div style={{color:WHITE,fontSize:24,fontWeight:900}}>{startersRating.toFixed(1)}</div>
+</div>
+
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>STARTING FIVE</div>
+{POS.map(pos=>(
+<div key={pos} style={{...card,padding:10}}>
+<div style={{color:RED,fontWeight:800,fontSize:11,marginBottom:6}}>{pos}</div>
+<select data-testid={`gm-lineup-${pos}`} value={startingLineup[pos]||""} onChange={e=>setStartingLineup({...startingLineup,[pos]:e.target.value})} style={{width:"100%",background:INPUTBG,color:WHITE,border:"none",borderRadius:8,padding:"8px 10px",fontSize:13,fontWeight:700}}>
+<option value="">— kies een speler —</option>
+{roster.map(p=>(<option key={p.name} value={p.name} disabled={usedNames.includes(p.name)&&startingLineup[pos]!==p.name}>{p.name} ({p.pos} · OVR {p.overall}){usedNames.includes(p.name)&&startingLineup[pos]!==p.name?" — al gekozen":""}</option>))}
+</select>
+</div>
+))}
+
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>COACH</div>
+{defaultCoach&&(
+<div data-testid={`gm-coach-${defaultCoach.id}`} onClick={()=>setCoachId(defaultCoach.id)} style={{...card,padding:10,cursor:"pointer",border:coachId===defaultCoach.id?`1px solid ${RED}`:"1px solid transparent"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{coachId===defaultCoach.id?"☑":"☐"} {defaultCoach.name} <span style={{color:GREY,fontWeight:400}}>(huidige coach)</span></div>
+<div style={{color:RED,fontSize:11,fontWeight:700,marginTop:2}}>{defaultCoach.style}</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{defaultCoach.desc}</div>
+</div>
+)}
+<div style={{color:GREY,fontSize:11,margin:"10px 0 6px"}}>OF HUUR EEN ANDERE NBA-COACH</div>
+{otherCoaches.map(c=>(
+<div key={c.id} data-testid={`gm-coach-${c.id}`} onClick={()=>setCoachId(c.id)} style={{...card,padding:10,cursor:"pointer",border:coachId===c.id?`1px solid ${RED}`:"1px solid transparent"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{coachId===c.id?"☑":"☐"} {c.name} <span style={{color:GREY,fontWeight:400}}>({NBA_TEAMS.find(t=>t.id===c.team).name})</span></div>
+<div style={{color:RED,fontSize:11,fontWeight:700,marginTop:2}}>{c.style}</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{c.desc}</div>
+</div>
+))}
+
+<button data-testid="gm-sim-season" onClick={simulateSeason} disabled={POS.some(pos=>!startingLineup[pos])||!coachId} style={{...btn,marginTop:14,opacity:(POS.some(pos=>!startingLineup[pos])||!coachId)?0.5:1}}>Simuleer seizoen ▸</button>
 </div>);
 }
 
@@ -11484,6 +11779,12 @@ return(<div>
 <div style={{color:GREY,fontSize:12,marginTop:4}}>{result.seed?`#${result.seed} seed · ${result.myConf==="E"?"Oost":"West"} · Team rating ${result.teamRating}`:"Buiten play-in"}</div>
 {result.champion&&<div style={{color:"#FFD700",fontWeight:800,fontSize:18,marginTop:10}}>NBA CHAMPIONS!</div>}
 </div>
+
+{result.coach&&<div style={{...card,padding:10}}>
+<div style={{color:GREY,fontSize:11}}>COACH</div>
+<div style={{color:WHITE,fontSize:13,fontWeight:700}}>{result.coach.name} <span style={{color:RED,fontWeight:700}}>· {result.coach.style}</span></div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>Starting five: {Object.values(result.lineup).join(", ")}</div>
+</div>}
 
 {result.journey&&result.journey.length>0&&(<>
 <div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>PLAYOFF-TRAJECT</div>

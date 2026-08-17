@@ -11166,7 +11166,29 @@ setPhase("lottery-reveal");
 }
 
 function generateDraftClass(){
-// Echte 2026 NBA Draft klasse (Ronde 1 + 2), met realistische ratings o.b.v. draftpositie/scouting.
+if(seasonNumber>1){
+// Vanaf seizoen 2 bestaat er geen echte draftklasse meer (die ligt nog in de toekomst), dus genereren we een
+// nieuwe, plausibele klasse per seizoen — net als in het echt verandert de instroom van talent elk jaar.
+const FIRST=["Marcus","Jaylen","Elijah","Malik","Isaiah","Cameron","Devin","Trey","Jordan","Xavier","Zion","Amir","Caleb","Nathaniel","DeShawn","Kevin","Anthony","Tyler","Bryce","Jaxon","Terrence","Malachi","Antoine","Dominic","Julian","Sebastian","Marquis","Elias","Cassius","Damon","Rasheed","Cody","Emmanuel","Josiah","Kaden","Legend","Maxwell","Nico","Omari","Preston"];
+const LAST=["Carter","Bailey","Thornton","Reeves","Whitfield","Sanders","Coleman","Hayes","Griffin","Patterson","Mercer","Dawson","Ellison","Fontaine","Grayson","Holloway","Ingram","Jefferson","Kessler","Lawson","Mosley","Norwood","Osei","Pearson","Quincy","Rowland","Sterling","Tillman","Underwood","Vance","Walsh","Xiong","Yates","Zimmerman","Beaumont","Castellanos","Delgado","Ferreira","Nakamura","Okonkwo"];
+const POS=["PG","SG","SF","PF","C"];
+const rand=seedRand((Date.now()+seasonNumber*9173)%77777);
+const used=new Set();
+const arr=[];
+for(let i=0;i<60;i++){
+let name;
+do{name=FIRST[Math.floor(rand()*FIRST.length)]+" "+LAST[Math.floor(rand()*LAST.length)];}while(used.has(name));
+used.add(name);
+const baseOverall=82-i*0.45;
+const overall=Math.max(52,Math.min(90,Math.round(baseOverall+Math.floor(rand()*5)-2)));
+const age=18+Math.floor(rand()*5);
+const pos=POS[Math.floor(rand()*POS.length)];
+arr.push({id:"p"+i,name,pos,age,overall,potential:Math.min(99,overall+(age<=20?8:4)+Math.floor(rand()*4))});
+}
+setDraftClass(arr);
+return;
+}
+// Echte 2026 NBA Draft klasse (Ronde 1 + 2), met realistische ratings o.b.v. draftpositie/scouting — voor je eerste seizoen.
 const ROOKIES=[
 {name:"AJ Dybantsa",pos:"SF",age:19,overall:81},
 {name:"Darryn Peterson",pos:"SG",age:19,overall:79},
@@ -11467,6 +11489,7 @@ mvp,roy,finalsMvp:champion.id===myTeamId?finalsMvp:null,
 coach,
 lineup:startingLineup,
 leagueWins:Object.fromEntries(league.map(t=>[t.id,t.wins])),
+allTeamPicks:Object.fromEntries(league.map(t=>[t.id,t.picks])),
 });
 setPhase("result");
 }
@@ -11600,14 +11623,11 @@ setPhase("fired");
 return;
 }
 
-// Ga door: verwerk dit seizoens draftpicks en FA-signings permanent in het roster, en laat de kern een jaartje ouder worden.
+// Ga door: verwerk dit seizoens draftpicks en FA-signings permanent in het roster, en laat de hele league een jaartje ouder worden —
+// niet alleen jouw team, anders blijft de rest van de competitie eeuwig stilstaan terwijl jij evolueert.
 const rand=seedRand(Date.now()%33333);
-const newRosterRaw=[
-...(rosters[myTeamId]||[]),
-...result.draftPicks.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall})),
-...signed.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall}))
-];
-const aged=newRosterRaw.map(p=>{
+function ageRoster(list){
+return list.map(p=>{
 const age=p.age+1;
 let overall=p.overall;
 if(age<=24)overall=Math.min(99,overall+Math.round(rand()*3));
@@ -11615,7 +11635,23 @@ else if(age>=33)overall=Math.max(45,overall-1-Math.round(rand()*3));
 else if(age>=30)overall=Math.max(45,overall-1);
 return{...p,age,overall};
 });
-const newRosters={...rosters,[myTeamId]:aged};
+}
+const newRosters={};
+NBA_TEAMS.forEach(t=>{
+const base=rosters[t.id]||REAL_ROSTERS[t.id]||[];
+const picksForTeam=t.id===myTeamId?result.draftPicks:(result.allTeamPicks&&result.allTeamPicks[t.id])||[];
+const faForTeam=t.id===myTeamId?signed:[];
+const raw=[
+...base,
+...picksForTeam.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall})),
+...faForTeam.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall}))
+];
+newRosters[t.id]=ageRoster(raw);
+// Realistisch roster-plafond: houd de beste 15 aan, de rest wordt vrijgelaten (net als een echte roster-cut).
+if(newRosters[t.id].length>15){
+newRosters[t.id]=[...newRosters[t.id]].sort((a,b)=>b.overall-a.overall).slice(0,15);
+}
+});
 setRosters(newRosters);
 setLeagueStandingsFull(result.leagueWins||null);
 setCareerHistory(newHistory);
@@ -11728,7 +11764,7 @@ const round=Math.floor(pickIndex/lottery.length)+1;
 const isMyTurn=currentTeamId===myTeamId;
 const available=draftClass.filter(p=>!drafted[p.id]).sort((a,b)=>b.overall-a.overall);
 return(<div>
-<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>NBA DRAFT · RONDE {round} · PICK {pickIndex+1}/{totalPicks}</div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>NBA DRAFT {2026+seasonNumber-1} · RONDE {round} · PICK {pickIndex+1}/{totalPicks}</div>
 <div style={{...card,textAlign:"center",background:isMyTurn?"linear-gradient(180deg,#2a0808,#1C1C1E)":INPUTBG}}>
 <div style={{color:GREY,fontSize:11,marginBottom:4}}>ON THE CLOCK</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:16}}>{NBA_TEAMS.find(t=>t.id===currentTeamId).name}</div>

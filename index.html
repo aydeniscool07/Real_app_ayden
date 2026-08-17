@@ -11351,10 +11351,19 @@ for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rand()*(i+1));[shuffled[
 const pool=shuffled.slice(0,Math.min(20,shuffled.length));
 const fa=pool.map((p,i)=>{
 const overall=Math.max(65,Math.min(92,p.overall+Math.floor(rand()*3)-1));
-return{id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask:Math.round((overall-65)*1.8*10)/10};
+// Kwadratische prijscurve: sterren worden onevenredig duur, rotatiespelers blijven behapbaar.
+const ask=Math.round(Math.pow(Math.max(0,overall-65),2)/12*10)/10;
+return{id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask};
+})
+// Concurrentie: de beste namen zijn niet gegarandeerd nog beschikbaar — andere teams azen er ook op.
+.filter(p=>{
+const poachChance=p.overall>=82?0.4:p.overall>=76?0.2:0.05;
+return rand()>=poachChance;
 });
 setFreeAgents(fa);
-setBudget(Math.max(5,SALARY_CAP-myTeam.cap+30));
+// Realistische cap-ruimte: alleen teams die echt onder de cap zitten hebben serieuze ruimte; de rest krijgt slechts
+// de kleine (belasting)uitzondering, net als in het echt.
+setBudget(myTeam.status==="Under cap"?Math.max(5,SALARY_CAP-myTeam.cap):5);
 setSigned([]);
 setPhase("fa");
 }
@@ -11543,17 +11552,27 @@ const theirValue=theirPlayers.reduce((s,p)=>s+p.overall,0)+(tradeGetPick?PICK_VA
 if(capMode==="strict"){
 const mySal=myPlayers.reduce((s,p)=>s+salaryOf(p),0);
 const theirSal=theirPlayers.reduce((s,p)=>s+salaryOf(p),0);
+// Apron-teams (over cap/in de tax/1e apron) mogen nauwelijks extra salaris terugnemen — net als de echte CBA-regels.
+const isApronTeam=myTeam.status!=="Under cap";
+if(isApronTeam){
+if(theirSal>mySal*1.05+0.3){
+setTradeMsg(`🚫 Je zit ${myTeam.status.toLowerCase()} — je mag nauwelijks extra salaris terugnemen: $${mySal.toFixed(1)}M uit ↔ $${theirSal.toFixed(1)}M in.`);
+setTimeout(()=>setTradeMsg(""),4500);
+return;
+}
+}else{
 const bigger=Math.max(mySal,theirSal,0.1),smaller=Math.min(mySal,theirSal);
-// Vereenvoudigde CBA-regel: uitgaand salaris mag max ~35% afwijken van inkomend salaris.
-if((bigger-smaller)/bigger>0.35){
-setTradeMsg(`🚫 Salarissen matchen niet onder de cap-regels: $${mySal.toFixed(1)}M ↔ $${theirSal.toFixed(1)}M (max ~35% verschil toegestaan).`);
+// Vereenvoudigde CBA-regel: uitgaand salaris mag max ~15% afwijken van inkomend salaris.
+if((bigger-smaller)/bigger>0.15){
+setTradeMsg(`🚫 Salarissen matchen niet onder de cap-regels: $${mySal.toFixed(1)}M ↔ $${theirSal.toFixed(1)}M (max ~15% verschil toegestaan).`);
 setTimeout(()=>setTradeMsg(""),4500);
 return;
 }
 }
-// Teams zijn scherper geworden: ze willen structureel méér waarde terug (~12%) en geven weinig speling.
-const tolerance=Math.floor(rand()*4);
-const requiredValue=theirValue*1.12-tolerance;
+}
+// Teams zijn scherp: ze willen structureel meer waarde terug (~18%) en geven weinig speling.
+const tolerance=Math.floor(rand()*3);
+const requiredValue=theirValue*1.18-tolerance;
 const accepted=myValue>=requiredValue;
 const giveNames=myPlayers.map(p=>p.name).join(", ")+(tradeGivePick?" + toekomstig 1e-rondepick":"");
 const getNames=theirPlayers.map(p=>p.name).join(", ")+(tradeGetPick?" + toekomstig 1e-rondepick":"");

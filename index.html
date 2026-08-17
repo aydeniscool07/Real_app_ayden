@@ -11079,6 +11079,14 @@ const [tradeGetList,setTradeGetList]=useState([]);
 const [tradeGivePick,setTradeGivePick]=useState(false);
 const [tradeGetPick,setTradeGetPick]=useState(false);
 const [tradeMsg,setTradeMsg]=useState("");
+const [counterOffer,setCounterOffer]=useState(null);
+const [seasonNumber,setSeasonNumber]=useState(1);
+const [careerHistory,setCareerHistory]=useState([]);
+const [missedPlayoffsStreak,setMissedPlayoffsStreak]=useState(0);
+const [seasonsSinceTitle,setSeasonsSinceTitle]=useState(0);
+const [leagueStandingsFull,setLeagueStandingsFull]=useState(null);
+const [gmName,setGmName]=useState("");
+const [leaderboard,setLeaderboard]=useState([]);
 const [tradeLog,setTradeLog]=useState([]);
 const [incomingOffers,setIncomingOffers]=useState([]);
 const [startingLineup,setStartingLineup]=useState({});
@@ -11087,6 +11095,29 @@ const [capMode,setCapMode]=useState("free"); // "free" = alleen waarde telt | "s
 const PICK_VALUE=64; // geschatte OVR-waarde van een toekomstig 1e-ronde pick, voor trade-balans
 
 const myTeam=NBA_TEAMS.find(t=>t.id===myTeamId);
+
+useEffect(()=>{
+let unsub;
+(async()=>{
+try{
+await waitForFirebase();
+unsub=window._onSnapshot(window._col(window._db,"gm_leaderboard"),s=>{
+const docs=s.docs.map(d=>d.data());
+docs.sort((a,b)=>(b.seasons-a.seasons)||(b.titles-a.titles));
+setLeaderboard(docs.slice(0,10));
+});
+}catch(e){/* leaderboard is optioneel, faalt stil */}
+})();
+return()=>{unsub&&unsub();};
+},[]);
+
+async function saveToLeaderboard(history,fireReason){
+const titles=history.filter(h=>h.champion).length;
+const playoffAppearances=history.filter(h=>h.seed).length;
+try{
+await fbSave("gm_leaderboard",{id:`gm_${Date.now()}_${Math.floor(Math.random()*10000)}`,name:(gmName||"Anonieme GM").slice(0,30),team:myTeam.name,seasons:history.length,titles,playoffAppearances,fireReason,timestamp:Date.now()});
+}catch(e){/* opslaan is best-effort */}
+}
 
 function seedRand(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
 
@@ -11109,10 +11140,16 @@ if(simGame(teamA.rating,teamB.rating,rand,homeBoost))winsA++;else winsB++;
 return winsA>winsB?{a:teamA,b:teamB,winner:teamA,loser:teamB,score:`${winsA}-${winsB}`}:{a:teamA,b:teamB,winner:teamB,loser:teamA,score:`${winsB}-${winsA}`};
 }
 
-function startLottery(){
+function startLottery(continuing){
+if(!continuing){
 setRosters(JSON.parse(JSON.stringify(REAL_ROSTERS)));
+}
+if(!coachId){
 setCoachId(COACHES.find(c=>c.team===myTeamId)?.id||null);
-const bottom14=[...NBA_TEAMS].sort((a,b)=>{const [aw]=a.record.split("-").map(Number);const [bw]=b.record.split("-").map(Number);return aw-bw;}).slice(0,14);
+}
+// Vanaf seizoen 2 gebruiken we de écht gesimuleerde stand van vorig seizoen voor de loting i.p.v. de statische data.
+const winsOf=t=>leagueStandingsFull&&leagueStandingsFull[t.id]!=null?leagueStandingsFull[t.id]:Number(t.record.split("-")[0]);
+const bottom14=[...NBA_TEAMS].sort((a,b)=>winsOf(a)-winsOf(b)).slice(0,14);
 const rand=seedRand(Date.now()%99999);
 const weighted=[];
 bottom14.forEach((t,i)=>{const odds=[140,140,140,125,105,90,75,60,45,30,20,15,10,5][i];for(let j=0;j<odds;j++)weighted.push(t.id);});
@@ -11121,9 +11158,9 @@ for(let i=0;i<4;i++){
 let winnerId;do{winnerId=weighted[Math.floor(rand()*weighted.length)];}while(order.includes(winnerId));
 order.push(winnerId);
 }
-const rest=pool.filter(t=>!order.includes(t.id)).sort((a,b)=>{const [aw]=a.record.split("-").map(Number);const [bw]=b.record.split("-").map(Number);return aw-bw;}).map(t=>t.id);
+const rest=pool.filter(t=>!order.includes(t.id)).sort((a,b)=>winsOf(a)-winsOf(b)).map(t=>t.id);
 const finalOrder=[...order,...rest];
-const others=NBA_TEAMS.filter(t=>!finalOrder.includes(t.id)).sort((a,b)=>{const [aw]=a.record.split("-").map(Number);const [bw]=b.record.split("-").map(Number);return aw-bw;}).map(t=>t.id);
+const others=NBA_TEAMS.filter(t=>!finalOrder.includes(t.id)).sort((a,b)=>winsOf(a)-winsOf(b)).map(t=>t.id);
 setLottery([...finalOrder,...others]);
 setPhase("lottery-reveal");
 }
@@ -11429,6 +11466,7 @@ championTeam:champion,
 mvp,roy,finalsMvp:champion.id===myTeamId?finalsMvp:null,
 coach,
 lineup:startingLineup,
+leagueWins:Object.fromEntries(league.map(t=>[t.id,t.wins])),
 });
 setPhase("result");
 }
@@ -11490,9 +11528,10 @@ setTimeout(()=>setTradeMsg(""),4500);
 return;
 }
 }
-// AI accepteert als het aanbod ongeveer gelijkwaardig is (of in hun voordeel), met een beetje speling.
-const tolerance=4+Math.floor(rand()*5);
-const accepted=myValue>=theirValue-tolerance;
+// Teams zijn scherper geworden: ze willen structureel méér waarde terug (~12%) en geven weinig speling.
+const tolerance=Math.floor(rand()*4);
+const requiredValue=theirValue*1.12-tolerance;
+const accepted=myValue>=requiredValue;
 const giveNames=myPlayers.map(p=>p.name).join(", ")+(tradeGivePick?" + toekomstig 1e-rondepick":"");
 const getNames=theirPlayers.map(p=>p.name).join(", ")+(tradeGetPick?" + toekomstig 1e-rondepick":"");
 if(accepted){
@@ -11502,14 +11541,92 @@ newRosters[tradeTeamId]=rosters[tradeTeamId].filter(p=>!tradeGetList.includes(p.
 setRosters(newRosters);
 setTradeLog([...tradeLog,{out:giveNames,in:getNames,team:tradeTeamId}]);
 setTradeMsg(`✅ Deal geaccepteerd: ${giveNames} ▸ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} voor ${getNames}`);
+setCounterOffer(null);
 }else{
-setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen meer waarde terug voor ${getNames}.`);
+// Probeer een tegenbod: vraag er de goedkoopste beschikbare speler(s) bij totdat de waarde wél klopt.
+const remaining=[...rosters[myTeamId]].filter(p=>!tradeGiveList.includes(p.name)).sort((a,b)=>a.overall-b.overall);
+let addValue=0;const sweeteners=[];
+for(const p of remaining){
+if(myValue+addValue>=requiredValue)break;
+sweeteners.push(p);addValue+=p.overall;
+}
+if(myValue+addValue>=requiredValue&&sweeteners.length>0&&sweeteners.length<=2){
+setCounterOffer({teamId:tradeTeamId,give:[...tradeGiveList,...sweeteners.map(p=>p.name)],get:[...tradeGetList],givePick:tradeGivePick,getPick:tradeGetPick,extra:sweeteners.map(p=>p.name)});
+setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af, maar doet een tegenvoorstel — zie hieronder.`);
+}else{
+setCounterOffer(null);
+setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen aanzienlijk meer waarde terug voor ${getNames}.`);
+}
 }
 setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);
-setTimeout(()=>setTradeMsg(""),4500);
+setTimeout(()=>setTradeMsg(""),5500);
 }
 
-function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);setTradeMsg("");setTradeLog([]);setIncomingOffers([]);setStartingLineup({});setCoachId(null);}
+function acceptCounter(){
+if(!counterOffer)return;
+const myPlayers=rosters[myTeamId].filter(p=>counterOffer.give.includes(p.name));
+const theirPlayers=rosters[counterOffer.teamId].filter(p=>counterOffer.get.includes(p.name));
+const newRosters={...rosters};
+newRosters[myTeamId]=rosters[myTeamId].filter(p=>!counterOffer.give.includes(p.name)).concat(theirPlayers);
+newRosters[counterOffer.teamId]=rosters[counterOffer.teamId].filter(p=>!counterOffer.get.includes(p.name)).concat(myPlayers);
+setRosters(newRosters);
+setTradeLog([...tradeLog,{out:counterOffer.give.join(", "),in:counterOffer.get.join(", "),team:counterOffer.teamId}]);
+setTradeMsg(`✅ Tegenbod geaccepteerd: ${counterOffer.give.join(", ")} ▸ ${NBA_TEAMS.find(t=>t.id===counterOffer.teamId).name} voor ${counterOffer.get.join(", ")}`);
+setCounterOffer(null);
+setTimeout(()=>setTradeMsg(""),4500);
+}
+function declineCounter(){setCounterOffer(null);}
+
+function advanceSeason(){
+const missedPlayoffs=result.seed===null;
+const newMissedStreak=missedPlayoffs?missedPlayoffsStreak+1:0;
+const newSeasonsSinceTitle=result.champion?0:seasonsSinceTitle+1;
+const prevEntry=careerHistory.length>0?careerHistory[careerHistory.length-1]:null;
+const prevPrevEntry=careerHistory.length>1?careerHistory[careerHistory.length-2]:null;
+const ratingDeclined=prevEntry&&result.teamRating<prevEntry.teamRating-1;
+const priorDeclined=prevEntry&&prevPrevEntry&&prevEntry.teamRating<prevPrevEntry.teamRating-1;
+const newHistory=[...careerHistory,{season:seasonNumber,wins:result.wins,losses:result.losses,seed:result.seed,champion:result.champion,teamRating:result.teamRating}];
+
+let fireReason=null;
+if(newMissedStreak>=3)fireReason="drie seizoenen op rij de play-offs gemist";
+else if(seasonNumber>=6&&newSeasonsSinceTitle>=6)fireReason="al 6+ seizoenen geen titel gewonnen";
+else if(missedPlayoffs&&ratingDeclined&&priorDeclined)fireReason="roster-kwaliteit daalt al 2 jaar op rij door zwakke keuzes";
+
+if(fireReason){
+saveToLeaderboard(newHistory,fireReason);
+setCareerHistory(newHistory);
+setResult({...result,fireReason});
+setPhase("fired");
+return;
+}
+
+// Ga door: verwerk dit seizoens draftpicks en FA-signings permanent in het roster, en laat de kern een jaartje ouder worden.
+const rand=seedRand(Date.now()%33333);
+const newRosterRaw=[
+...(rosters[myTeamId]||[]),
+...result.draftPicks.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall})),
+...signed.map(p=>({name:p.name,pos:p.pos,age:p.age,overall:p.overall}))
+];
+const aged=newRosterRaw.map(p=>{
+const age=p.age+1;
+let overall=p.overall;
+if(age<=24)overall=Math.min(99,overall+Math.round(rand()*3));
+else if(age>=33)overall=Math.max(45,overall-1-Math.round(rand()*3));
+else if(age>=30)overall=Math.max(45,overall-1);
+return{...p,age,overall};
+});
+const newRosters={...rosters,[myTeamId]:aged};
+setRosters(newRosters);
+setLeagueStandingsFull(result.leagueWins||null);
+setCareerHistory(newHistory);
+setMissedPlayoffsStreak(newMissedStreak);
+setSeasonsSinceTitle(newSeasonsSinceTitle);
+setSeasonNumber(seasonNumber+1);
+setDrafted({});setDraftClass([]);setSigned([]);setTradeLog([]);setIncomingOffers([]);setStartingLineup({});setCounterOffer(null);setResult(null);
+startLottery(true);
+}
+
+function reset(){setPhase("select");setMyTeamId(null);setLottery(null);setPickIndex(0);setDraftClass([]);setDrafted({});setFreeAgents([]);setSigned([]);setResult(null);setRosters(null);setTradeTeamId(null);setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);setTradeMsg("");setTradeLog([]);setIncomingOffers([]);setStartingLineup({});setCoachId(null);setCounterOffer(null);setSeasonNumber(1);setCareerHistory([]);setMissedPlayoffsStreak(0);setSeasonsSinceTitle(0);setLeagueStandingsFull(null);}
 
 function myFinalRoster(){
 const core=(rosters&&rosters[myTeamId])||[];
@@ -11541,7 +11658,23 @@ const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
 
 if(phase==="select")return(<div>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>🧢 GENERAL MANAGER · KIES JE FRANCHISE</div>
-<div style={{color:WHITE,fontSize:12,marginBottom:14,textAlign:"center",opacity:0.7}}>Neem de leiding van een NBA franchise voor een volledig offseason. Lottery → Draft → Free Agency.</div>
+<div style={{color:WHITE,fontSize:12,marginBottom:14,textAlign:"center",opacity:0.7}}>Neem de leiding van een NBA franchise. Lottery → Draft → Trades → Free Agency → Coach. Blijf GM zolang je presteert — bij 3 seizoenen zonder play-offs, 6+ jaar zonder titel, of een dalend roster lig je eruit.</div>
+
+{leaderboard.length>0&&(<>
+<div style={{color:GREY,fontSize:11,margin:"6px 0"}}>🏆 TOP GM-CARRIÈRES</div>
+<div style={{...card,padding:0,overflow:"hidden"}}>
+{leaderboard.map((l,i)=>(<div key={l.id||i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 12px",borderBottom:i<leaderboard.length-1?`1px solid ${DIVIDER}`:"none"}}>
+<div style={{color:WHITE,fontSize:12}}>{i+1}. {l.name} <span style={{color:GREY}}>({l.team})</span></div>
+<div style={{color:GREY,fontSize:11}}>{l.seasons} seiz. · 🏆{l.titles}</div>
+</div>))}
+</div>
+</>)}
+
+<div style={{...card,padding:12}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:8}}>JOUW GM-NAAM</div>
+<input data-testid="gm-name-input" value={gmName} onChange={e=>setGmName(e.target.value)} placeholder="Voor op het scorebord..." style={{width:"100%",background:INPUTBG,color:WHITE,border:"none",borderRadius:8,padding:"8px 10px",fontSize:13}} maxLength={30}/>
+</div>
+
 <div style={{...card,padding:12}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:8}}>FREE AGENT MARKT</div>
 <div style={{display:"flex",gap:8}}>
@@ -11564,7 +11697,7 @@ if(phase==="select")return(<div>
 {myTeamId===t.id&&<div style={{color:RED,fontWeight:800}}>✓</div>}
 </div>))}
 </div>))}
-{myTeamId&&<button data-testid="gm-start-lottery" onClick={startLottery} style={{...btn,marginTop:16,position:"sticky",bottom:10}}>Start Draft Lottery ▸</button>}
+{myTeamId&&<button data-testid="gm-start-lottery" onClick={()=>startLottery(false)} style={{...btn,marginTop:16,position:"sticky",bottom:10}}>Start Draft Lottery ▸</button>}
 </div>);
 
 if(phase==="lottery-reveal"){
@@ -11687,6 +11820,16 @@ return(<div>
 <div style={{color:WHITE,fontSize:14,fontWeight:700}}>Jij geeft: {myValue} &nbsp;vs&nbsp; Jij krijgt: {theirValue}</div>
 </div>}
 {tradeMsg&&<div style={{...card,background:"#3a1a1a",color:"#ff9500",textAlign:"center",fontSize:12}}>{tradeMsg}</div>}
+{counterOffer&&(
+<div style={{...card,padding:12,border:`1px solid #ff9500`}}>
+<div style={{color:"#ff9500",fontWeight:800,fontSize:11,marginBottom:6}}>🔁 TEGENVOORSTEL VAN {NBA_TEAMS.find(t=>t.id===counterOffer.teamId).name.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:8}}>Jij geeft <span style={{color:WHITE,fontWeight:700}}>{counterOffer.give.join(", ")}</span>{counterOffer.givePick?" + toekomstig 1e-rondepick":""} voor <span style={{color:WHITE,fontWeight:700}}>{counterOffer.get.join(", ")}</span>{counterOffer.getPick?" + toekomstig 1e-rondepick":""}</div>
+<div style={{display:"flex",gap:8}}>
+<button data-testid="gm-accept-counter" onClick={acceptCounter} style={{flex:1,background:"#30d158",color:"#062910",border:"none",borderRadius:8,padding:"8px 0",fontWeight:800,fontSize:12,cursor:"pointer"}}>Accepteren</button>
+<button data-testid="gm-decline-counter" onClick={declineCounter} style={{flex:1,background:INPUTBG,color:WHITE,border:"none",borderRadius:8,padding:"8px 0",fontWeight:800,fontSize:12,cursor:"pointer"}}>Afwijzen</button>
+</div>
+</div>
+)}
 <button data-testid="gm-propose-trade" onClick={proposeTrade} disabled={!tradeTeamId||(tradeGiveList.length===0&&!tradeGivePick)||(tradeGetList.length===0&&!tradeGetPick)} style={{...btn,marginTop:10,opacity:(!tradeTeamId||(tradeGiveList.length===0&&!tradeGivePick)||(tradeGetList.length===0&&!tradeGetPick))?0.5:1}}>Doe het bod ▸</button>
 {tradeLog.length>0&&(<>
 <div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>VOLTOOIDE TRADES</div>
@@ -11772,13 +11915,14 @@ return(<div>
 if(phase==="result"){
 const confStandings=result.standings[result.myConf];
 return(<div>
-<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>SEIZOEN RESULTAAT · {myTeam.name}</div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>SEIZOEN {seasonNumber} RESULTAAT · {myTeam.name}</div>
 <div style={{...card,textAlign:"center",padding:24,background:result.champion?"linear-gradient(180deg,#8B6914,#1C1C1E)":"linear-gradient(180deg,#2a0808,#1C1C1E)"}}>
 {result.champion&&<div style={{fontSize:48,marginBottom:8}}>🏆</div>}
 <div style={{color:WHITE,fontSize:48,fontWeight:900}}>{result.wins}-{result.losses}</div>
 <div style={{color:GREY,fontSize:12,marginTop:4}}>{result.seed?`#${result.seed} seed · ${result.myConf==="E"?"Oost":"West"} · Team rating ${result.teamRating}`:"Buiten play-in"}</div>
 {result.champion&&<div style={{color:"#FFD700",fontWeight:800,fontSize:18,marginTop:10}}>NBA CHAMPIONS!</div>}
 </div>
+{missedPlayoffsStreak>0&&<div style={{...card,padding:8,textAlign:"center",background:"#3a1a1a"}}><div style={{color:"#ff9500",fontSize:11}}>⚠️ {missedPlayoffsStreak} seizoen{missedPlayoffsStreak>1?"en":""} op rij buiten de play-offs — bij 3 op rij lig je eruit als GM.</div></div>}
 
 {result.coach&&<div style={{...card,padding:10}}>
 <div style={{color:GREY,fontSize:11}}>COACH</div>
@@ -11820,7 +11964,31 @@ return(<div>
 <div style={{color:WHITE,fontSize:12,marginBottom:4}}><b>{result.draftPicks.length}</b> draft picks · <b>{result.signings.length}</b> FA signings</div>
 <div style={{color:GREY,fontSize:11}}>Avg pick OVR: {(result.draftPicks.reduce((s,p)=>s+p.overall,0)/Math.max(1,result.draftPicks.length)).toFixed(1)}</div>
 </div>
-<button data-testid="gm-restart" onClick={reset} style={{...btn,marginTop:14}}>Nieuwe run ▸</button>
+<button data-testid="gm-next-season" onClick={advanceSeason} style={{...btn,marginTop:14}}>Volgend seizoen ▸</button>
+<button data-testid="gm-stop-career" onClick={()=>{saveToLeaderboard([...careerHistory,{season:seasonNumber,wins:result.wins,losses:result.losses,seed:result.seed,champion:result.champion,teamRating:result.teamRating}],"zelf gestopt");reset();}} style={{...btn,marginTop:8,background:INPUTBG}}>Carrière beëindigen & opslaan</button>
+</div>);
+}
+
+if(phase==="fired"){
+const totalTitles=careerHistory.filter(h=>h.champion).length;
+const totalPlayoffs=careerHistory.filter(h=>h.seed).length;
+return(<div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>ONTSLAGEN</div>
+<div style={{...card,textAlign:"center",padding:24,background:"linear-gradient(180deg,#3a0808,#1C1C1E)"}}>
+<div style={{fontSize:44,marginBottom:8}}>🚪</div>
+<div style={{color:WHITE,fontSize:18,fontWeight:800}}>Je bent ontslagen bij de {myTeam.name}</div>
+<div style={{color:"#ff9500",fontSize:12,marginTop:8}}>Reden: {result.fireReason}</div>
+</div>
+<div style={{...card,padding:14}}>
+<div style={{color:GREY,fontSize:11,marginBottom:6}}>JOUW CARRIÈRE ALS GM</div>
+<div style={{color:WHITE,fontSize:13}}>🗓️ {careerHistory.length} seizoenen · 🏆 {totalTitles} titel{totalTitles!==1?"s":""} · 🎟️ {totalPlayoffs}x play-offs</div>
+</div>
+<div style={{color:GREY,fontSize:11,margin:"14px 0 6px"}}>SEIZOEN VOOR SEIZOEN</div>
+{careerHistory.map(h=>(<div key={h.season} style={{...card,padding:8,display:"flex",justifyContent:"space-between",fontSize:12}}>
+<div style={{color:GREY}}>Seizoen {h.season}</div>
+<div style={{color:WHITE}}>{h.wins}-{h.losses}{h.seed?` · #${h.seed} seed`:" · gemist"}{h.champion?" · 🏆":""}</div>
+</div>))}
+<button data-testid="gm-back-to-select" onClick={reset} style={{...btn,marginTop:14}}>Terug naar teamkeuze ▸</button>
 </div>);
 }
 

@@ -11357,7 +11357,7 @@ return{id:"fa"+i,name:p.name,pos:p.pos,age:p.age,overall,ask};
 })
 // Concurrentie: de beste namen zijn niet gegarandeerd nog beschikbaar — andere teams azen er ook op.
 .filter(p=>{
-const poachChance=p.overall>=82?0.4:p.overall>=76?0.2:0.05;
+const poachChance=p.overall>=85?0.55:p.overall>=82?0.4:p.overall>=76?0.2:0.05;
 return rand()>=poachChance;
 });
 setFreeAgents(fa);
@@ -11549,6 +11549,20 @@ const theirPlayers=rosters[tradeTeamId].filter(p=>tradeGetList.includes(p.name))
 if(myPlayers.length!==tradeGiveList.length||theirPlayers.length!==tradeGetList.length)return;
 const myValue=myPlayers.reduce((s,p)=>s+p.overall,0)+(tradeGivePick?PICK_VALUE:0);
 const theirValue=theirPlayers.reduce((s,p)=>s+p.overall,0)+(tradeGetPick?PICK_VALUE:0);
+// Franchise-spelers: het beste team-onderdeel laten teams niet zomaar gaan — hun hele identiteit draait om die speler.
+const theirRosterSorted=[...rosters[tradeTeamId]].sort((a,b)=>b.overall-a.overall);
+const theirFranchisePlayer=theirRosterSorted[0];
+const theirSecondStar=theirRosterSorted[1];
+const wantsFranchise=theirFranchisePlayer&&theirPlayers.some(p=>p.name===theirFranchisePlayer.name);
+const wantsSecondStar=theirSecondStar&&theirPlayers.some(p=>p.name===theirSecondStar.name);
+if(wantsFranchise&&rand()<0.35){
+setTradeMsg(`🚫 ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} weigert zelfs te praten over ${theirFranchisePlayer.name} — hun hele franchise draait om hem.`);
+setCounterOffer(null);
+setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);
+setTimeout(()=>setTradeMsg(""),4500);
+return;
+}
+const starPremium=wantsFranchise?1.65:wantsSecondStar?1.3:1;
 if(capMode==="strict"){
 const mySal=myPlayers.reduce((s,p)=>s+salaryOf(p),0);
 const theirSal=theirPlayers.reduce((s,p)=>s+salaryOf(p),0);
@@ -11570,9 +11584,9 @@ return;
 }
 }
 }
-// Teams zijn scherp: ze willen structureel meer waarde terug (~18%) en geven weinig speling.
+// Teams zijn scherp: ze willen structureel meer waarde terug (~18%), en nóg veel meer als het om hun uithangbord gaat.
 const tolerance=Math.floor(rand()*3);
-const requiredValue=theirValue*1.18-tolerance;
+const requiredValue=theirValue*1.18*starPremium-tolerance;
 const accepted=myValue>=requiredValue;
 const giveNames=myPlayers.map(p=>p.name).join(", ")+(tradeGivePick?" + toekomstig 1e-rondepick":"");
 const getNames=theirPlayers.map(p=>p.name).join(", ")+(tradeGetPick?" + toekomstig 1e-rondepick":"");
@@ -11586,18 +11600,21 @@ setTradeMsg(`✅ Deal geaccepteerd: ${giveNames} ▸ ${NBA_TEAMS.find(t=>t.id===
 setCounterOffer(null);
 }else{
 // Probeer een tegenbod: vraag er de goedkoopste beschikbare speler(s) bij totdat de waarde wél klopt.
+// Voor hun uithangbord-speler mag dat tegenbod iets groter zijn (blockbuster-achtig), anders blijft het bij 2 stuks.
+const maxSweeteners=wantsFranchise?3:2;
 const remaining=[...rosters[myTeamId]].filter(p=>!tradeGiveList.includes(p.name)).sort((a,b)=>a.overall-b.overall);
 let addValue=0;const sweeteners=[];
 for(const p of remaining){
 if(myValue+addValue>=requiredValue)break;
 sweeteners.push(p);addValue+=p.overall;
 }
-if(myValue+addValue>=requiredValue&&sweeteners.length>0&&sweeteners.length<=2){
+if(myValue+addValue>=requiredValue&&sweeteners.length>0&&sweeteners.length<=maxSweeteners){
 setCounterOffer({teamId:tradeTeamId,give:[...tradeGiveList,...sweeteners.map(p=>p.name)],get:[...tradeGetList],givePick:tradeGivePick,getPick:tradeGetPick,extra:sweeteners.map(p=>p.name)});
 setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af, maar doet een tegenvoorstel — zie hieronder.`);
 }else{
 setCounterOffer(null);
-setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ze willen aanzienlijk meer waarde terug voor ${getNames}.`);
+const reason=wantsFranchise?`hij is hun uithangbord — er is nauwelijks een prijs die ze overtuigt`:wantsSecondStar?`hun tweede ster laten ze niet zomaar gaan`:`ze willen aanzienlijk meer waarde terug`;
+setTradeMsg(`❌ ${NBA_TEAMS.find(t=>t.id===tradeTeamId).name} wijst het bod af — ${reason} voor ${getNames}.`);
 }
 }
 setTradeGiveList([]);setTradeGetList([]);setTradeGivePick(false);setTradeGetPick(false);

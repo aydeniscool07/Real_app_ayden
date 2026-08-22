@@ -2690,12 +2690,21 @@ return(
 }
 
 // ── Monthly Stats Tab
-function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPlayer}){
+function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
+const [rangeMode,setRangeMode]=useState("month"); // "month" | "season" | "alltime"
+const [selSeasonId,setSelSeasonId]=useState(seasons[0]?.id||null);
+const [manageSeasons,setManageSeasons]=useState(false);
+const [seasonForm,setSeasonForm]=useState({name:"",startDate:"",endDate:""});
 const [cardFor,setCardFor]=useState(null); // player object or null
 const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke speler-kaart is uitgeklapt
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
+
+// Zodra de seizoenen async binnenkomen (Firestore), en er nog niks geselecteerd is, pak het eerste seizoen.
+useEffect(()=>{
+if(!selSeasonId&&seasons.length>0)setSelSeasonId(seasons[0].id);
+},[seasons]);
 
 // Statistische helpers voor realistische kans-percentages (gebruikt in MVP Race + Eff Lab):
 // error function benadering (Abramowitz & Stegun 7.1.26), gebruikt om een normale verdeling te kunnen doorrekenen.
@@ -2730,7 +2739,17 @@ const s=new Set(games.map(g=>gameYearMonth(g)).filter(Boolean));
 return [...s].sort().reverse();
 },[games]);
 
-const monthGames=games.filter(g=>gameYearMonth(g)===selMonth);
+const [yr,mo]=selMonth.split("-");
+const activeSeason=seasons.find(s=>s.id===selSeasonId)||null;
+const monthGames=useMemo(()=>{
+if(rangeMode==="alltime")return games;
+if(rangeMode==="season"){
+if(!activeSeason)return[];
+return games.filter(g=>g.date&&g.date>=activeSeason.startDate&&g.date<=activeSeason.endDate);
+}
+return games.filter(g=>gameYearMonth(g)===selMonth);
+},[games,rangeMode,activeSeason,selMonth]);
+const monthLabel=rangeMode==="alltime"?"All-Time":rangeMode==="season"?(activeSeason?activeSeason.name:"Geen seizoen geselecteerd"):`${MONTHS[parseInt(mo)-1]} ${yr}`;
 
 // Stats per player this month
 const playerStats=useMemo(()=>{
@@ -2753,8 +2772,6 @@ const best=playerStats.slice().sort((a,b)=>avg(b.games,k)-avg(a.games,k))[0];
 return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 });
 
-const [yr,mo]=selMonth.split("-");
-const monthLabel=`${MONTHS[parseInt(mo)-1]} ${yr}`;
 
 // MVP per month (used for streaks + counts + past-months carousel)
 // Only completed months count as trophies
@@ -2816,7 +2833,14 @@ const openPlayer=pid=>{if(onOpenPlayer)onOpenPlayer(pid);};
 
 return(
 <div style={{padding:"16px 16px 80px"}}>
-{/* Month picker */}
+{/* Weergave: Maand / Seizoen / All-time */}
+<div style={{display:"flex",gap:6,marginBottom:12}}>
+{[{k:"month",lbl:"📅 Maand"},{k:"season",lbl:"🏆 Seizoen"},{k:"alltime",lbl:"♾️ All-Time"}].map(o=>(
+<button key={o.k} data-testid={`stats-range-${o.k}`} onClick={()=>setRangeMode(o.k)} style={{flex:1,padding:"9px 6px",borderRadius:12,border:"none",cursor:"pointer",background:rangeMode===o.k?RED:INPUTBG,color:rangeMode===o.k?WHITE:GREY,fontWeight:rangeMode===o.k?700:500,fontSize:12.5}}>{o.lbl}</button>
+))}
+</div>
+
+{rangeMode==="month"&&(
 <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:20,paddingBottom:4}}>
 {availMonths.length===0&&<div style={{color:GREY,fontSize:14}}>Nog geen games gelogd.</div>}
 {availMonths.map(m=>{
@@ -2829,8 +2853,55 @@ return(
 );
 })}
 </div>
+)}
+
+{rangeMode==="season"&&(
+<div style={{marginBottom:20}}>
+<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:isAdmin?8:0}}>
+{seasons.length===0&&<div style={{color:GREY,fontSize:14}}>Nog geen seizoenen ingesteld.</div>}
+{seasons.map(s=>(
+<button key={s.id} onClick={()=>setSelSeasonId(s.id)} style={{flexShrink:0,padding:"8px 14px",borderRadius:20,border:"none",cursor:"pointer",background:selSeasonId===s.id?RED:INPUTBG,color:selSeasonId===s.id?WHITE:GREY,fontWeight:selSeasonId===s.id?700:500,fontSize:13}}>
+{s.name}
+</button>
+))}
+{isAdmin&&<button data-testid="stats-manage-seasons" onClick={()=>setManageSeasons(!manageSeasons)} style={{flexShrink:0,padding:"8px 14px",borderRadius:20,border:`1px dashed ${GREY}`,cursor:"pointer",background:"transparent",color:GREY,fontSize:13}}>⚙️ Beheer</button>}
+</div>
+{isAdmin&&manageSeasons&&(
+<div style={{background:INPUTBG,borderRadius:12,padding:14,marginTop:4}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,marginBottom:8}}>NIEUW SEIZOEN</div>
+<input data-testid="season-name-input" placeholder="Naam (bv. Seizoen 2026-27)" value={seasonForm.name} onChange={e=>setSeasonForm({...seasonForm,name:e.target.value})} style={{width:"100%",background:"#111",color:WHITE,border:"none",borderRadius:8,padding:"8px 10px",fontSize:13,marginBottom:6}}/>
+<div style={{display:"flex",gap:6,marginBottom:8}}>
+<input data-testid="season-start-input" type="date" value={seasonForm.startDate} onChange={e=>setSeasonForm({...seasonForm,startDate:e.target.value})} style={{flex:1,background:"#111",color:WHITE,border:"none",borderRadius:8,padding:"8px 10px",fontSize:13}}/>
+<input data-testid="season-end-input" type="date" value={seasonForm.endDate} onChange={e=>setSeasonForm({...seasonForm,endDate:e.target.value})} style={{flex:1,background:"#111",color:WHITE,border:"none",borderRadius:8,padding:"8px 10px",fontSize:13}}/>
+</div>
+<button data-testid="season-add-btn" disabled={!seasonForm.name||!seasonForm.startDate||!seasonForm.endDate} onClick={()=>{
+const ns={id:`season_${Date.now()}`,name:seasonForm.name,startDate:seasonForm.startDate,endDate:seasonForm.endDate};
+const updated=[...seasons,ns];
+if(onSaveSeasons)onSaveSeasons(updated);
+setSelSeasonId(ns.id);
+setSeasonForm({name:"",startDate:"",endDate:""});
+}} style={{width:"100%",background:RED,color:WHITE,border:"none",borderRadius:8,padding:"9px 0",fontWeight:700,fontSize:13,cursor:"pointer",opacity:(!seasonForm.name||!seasonForm.startDate||!seasonForm.endDate)?0.5:1}}>Seizoen toevoegen</button>
+{seasons.length>0&&(
+<div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
+{seasons.map(s=>(
+<div key={s.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:12,padding:"6px 8px",background:"#111",borderRadius:8}}>
+<div style={{color:WHITE}}>{s.name} <span style={{color:GREY}}>({s.startDate} → {s.endDate})</span></div>
+<button data-testid={`season-delete-${s.id}`} onClick={()=>{
+const updated=seasons.filter(x=>x.id!==s.id);
+if(onSaveSeasons)onSaveSeasons(updated);
+if(selSeasonId===s.id)setSelSeasonId(updated[0]?.id||null);
+}} style={{background:"transparent",border:"none",color:"#ff6b6b",cursor:"pointer",fontSize:14}}>🗑️</button>
+</div>
+))}
+</div>
+)}
+</div>
+)}
+</div>
+)}
 
 {monthGames.length===0&&<div style={{textAlign:"center",padding:"40px 0",color:GREY}}><div style={{fontSize:36,marginBottom:8}}>📅</div><div>Geen games in {monthLabel}</div></div>}
+
 
 {monthGames.length>0&&(
 <>
@@ -2921,8 +2992,8 @@ return (
 </div>
 ))}
 
-          {/* MVP Race — what does it take? */}
-          {(() => {
+          {/* MVP Race — what does it take? (alleen zinvol in maand-weergave, seizoen/all-time hebben geen "resterende games deze maand") */}
+          {rangeMode==="month"&&(() => {
             // Stop once the MVP award has actually been handed out for this month —
             // not just because the calendar flipped to a new month.
             const mvpAlreadyGiven = manualAwards.some(a => a.month === selMonth && a.awardId === "mvp");
@@ -13366,7 +13437,7 @@ Nu updaten
 
 {/* Tabs — 5 tabs now */}
 <div style={{display:"flex",borderBottom:`1px solid ${DIVIDER}`}}>
-{[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Maand"},{id:"larp",label:"LARP"},{id:"players",label:"Players"}].map(({id,label})=>(
+{[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Stats"},{id:"larp",label:"LARP"},{id:"players",label:"Players"}].map(({id,label})=>(
 <button key={id} data-testid={`top-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
 ))}
 </div>
@@ -13390,8 +13461,8 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 </div>
 )}
 
-{/* MONTHLY TAB */}
-{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})}/>}
+{/* STATS TAB */}
+{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} onSaveFullMatch={saveGames} isAdmin={isAdmin}/>}
@@ -13517,7 +13588,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Maand"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"},{id:"nbapred",icon:"🎮",label:"Minigames"}].filter(({id})=>(id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false)&&(id!=="nbapred"||isAdmin||appSettings?.nbaPredictionsEnabled!==false)).map(({id,icon,label})=>(
+{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Stats"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"},{id:"nbapred",icon:"🎮",label:"Minigames"}].filter(({id})=>(id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false)&&(id!=="nbapred"||isAdmin||appSettings?.nbaPredictionsEnabled!==false)).map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>

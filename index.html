@@ -2695,6 +2695,33 @@ const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [cardFor,setCardFor]=useState(null); // player object or null
 
+// Statistische helpers voor realistische kans-percentages (gebruikt in MVP Race + Eff Lab):
+// error function benadering (Abramowitz & Stegun 7.1.26), gebruikt om een normale verdeling te kunnen doorrekenen.
+function erf(x){
+const sign=x<0?-1:1;x=Math.abs(x);
+const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+const t=1/(1+p*x);
+const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+return sign*y;
+}
+function normalCdf(x,mean,std){
+if(std<=0)return x>=mean?1:0;
+return 0.5*(1+erf((x-mean)/(std*Math.sqrt(2))));
+}
+// Kans (%) dat iemands gemiddelde eff over de resterende games een doelwaarde haalt of overtreft — gebaseerd op
+// hun eigen consistentie dit seizoen (σ), waarbij meer resterende games de bandbreedte vanzelf laat afnemen
+// (net als in het echt: hoe meer wedstrijden er nog te gaan zijn, hoe voorspelbaarder het gemiddelde wordt).
+function chanceToReach(ps,target,gamesLeft){
+if(gamesLeft<=0.05)return ps.eff>=target?95:5;
+const mean=ps.eff;
+const variance=ps.games.length>=2?ps.games.reduce((s,g)=>s+Math.pow(+calcFps(g)-mean,2),0)/ps.games.length:Math.pow(mean*0.35,2);
+const sd=Math.sqrt(variance)||mean*0.35||5;
+const stderr=sd/Math.sqrt(Math.max(gamesLeft,1));
+const p=1-normalCdf(target,mean,stderr);
+return Math.round(Math.max(1,Math.min(99,p*100)));
+}
+function probBadgeColor(pct){return pct>=55?"#27AE60":pct>=25?"#f5a524":"#ff6b6b";}
+
 // Build list of available months
 const availMonths=useMemo(()=>{
 const s=new Set(games.map(g=>gameYearMonth(g)).filter(Boolean));
@@ -3041,14 +3068,19 @@ return (
                       const psGamesLeft = Math.max(0, gamesLeftFor(ps.player.id));
 
                       if (i === 0) {
-                        // Leader: show how low they can drop and still win, plus what the
-                        // chaser would realistically need to overtake that worst case.
+                        // Leader: hou-de-troon-kans o.b.v. hun eigen consistentie, plus wat de achtervolger realistisch nodig heeft.
                         const safeGamesLeft = leaderGamesLeft > 0 ? leaderGamesLeft : 0.1;
                         const worstCaseEff = parseFloat(((leaderEffSum) / (leaderN + safeGamesLeft)).toFixed(1));
                         const challenger = playerStats[1];
                         const cEffSum = challenger.games.reduce((s,g)=>s+(+calcFps(g)),0);
                         const cN = challenger.games.length;
                         const cGamesLeft = Math.max(0.1, gamesLeftFor(challenger.player.id));
+                        // Doelwaarde die de leider gemiddeld moet vasthouden om de achtervolger (die op zijn/haar eigen tempo doorspeelt) voor te blijven.
+                        const challengerProjectedFinal = parseFloat(((cEffSum + cGamesLeft*challenger.eff) / (cN + cGamesLeft)).toFixed(1));
+                        const holdTargetRaw = (challengerProjectedFinal * (leaderN + leaderGamesLeft) - leaderEffSum) / leaderGamesLeft;
+                        const holdTarget = parseFloat(Math.max(0,holdTargetRaw).toFixed(1));
+                        const holdChance = challenger ? chanceToReach(ps, holdTarget, leaderGamesLeft) : 95;
+                        const dropBelowFloorChance = 100 - chanceToReach(ps, worstCaseEff, leaderGamesLeft);
                         const neededRaw = (worstCaseEff * (cN + cGamesLeft) - cEffSum) / cGamesLeft;
                         const neededEff = Math.max(0, parseFloat(neededRaw.toFixed(1)));
                         const paths = pathsFor(challenger, neededEff);
@@ -3062,18 +3094,18 @@ return (
                                 <div style={{fontWeight:800,fontSize:19,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name} <span style={{color:RED,fontSize:13,fontWeight:700}}>· leider</span></div>
                                 <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · ~{leaderGamesLeft} games over deze maand</div>
                               </div>
-                              <div style={{textAlign:"right",flexShrink:0}}>
-                                <div style={{color:"#f5a524",fontWeight:800,fontSize:19}}>in controle</div>
-                                <div style={{color:GREY,fontSize:11}}>blijft op {ps.eff}+ eff</div>
+                              <div style={{textAlign:"right",flexShrink:0}} data-testid="mvp-race-hold-chance">
+                                <div style={{color:probBadgeColor(holdChance),fontWeight:800,fontSize:22}}>{holdChance}%</div>
+                                <div style={{color:GREY,fontSize:11}}>kans troon te houden</div>
                               </div>
                             </div>
 
                             <InjuryChip summary={psInjury}/>
 
                             <div style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"14px 16px",fontSize:13,color:GREY,lineHeight:1.7,marginBottom:challenger?12:0}}>
-                              <span style={{color:WHITE,fontWeight:700}}>Het worst-case scenario:</span> stel dat {ps.player.name.split(" ")[0]} de rest van de maand <span style={{color:"#ff6b6b",fontWeight:700}}>helemaal koud</span> blijft over zijn/haar verwachte ~{leaderGamesLeft} games — dan zakt hij/zij terug naar zo'n <span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span>. Geen ramp, maar wel een opening.
+                              <span style={{color:WHITE,fontWeight:700}}>Absolute bodem:</span> zelfs in het onwaarschijnlijke scenario dat {ps.player.name.split(" ")[0]} de rest van de maand <span style={{color:"#ff6b6b",fontWeight:700}}>helemaal koud</span> blijft over de verwachte ~{leaderGamesLeft} games, zakt hij/zij naar zo'n <span style={{color:WHITE,fontWeight:700}}>{worstCaseEff} eff</span> — en op basis van hun eigen consistentie dit seizoen is de kans daarop maar zo'n <span style={{color:WHITE,fontWeight:700}}>{dropBelowFloorChance}%</span>.
                               {challenger && (
-                                <> En daar komt <span style={{color:WHITE,fontWeight:700}}>{challenger.player.name}</span> in beeld: met ~{cGamesLeft} eigen games op het programma heeft die gemiddeld <span style={{color:RED,fontWeight:700}}>{neededEff} eff per game</span> nodig om voorbij te gaan. Drie manieren om dat voor elkaar te krijgen:</>
+                                <> Realistischer: <span style={{color:WHITE,fontWeight:700}}>{challenger.player.name}</span> speelt gewoon door op zijn/haar eigen tempo ({challenger.eff} eff), en dan moet de leider gemiddeld <span style={{color:RED,fontWeight:700}}>{holdTarget} eff per game</span> vasthouden om niet ingehaald te worden. Ter vergelijking, zou de achtervolger in plaats daarvan moeten pieken, dan is <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff/game</span> nodig — dat kan op een paar manieren:</>
                               )}
                             </div>
 
@@ -3104,9 +3136,10 @@ return (
                       const neededEff = parseFloat(Math.max(0, neededRaw + 0.1).toFixed(1)); // +0.1 to actually beat, not just tie
 
                       const gap = parseFloat((neededEff - ps.eff).toFixed(1));
-                      const isRealistic = neededEff <= 20; // arbitrary "realistic" ceiling
-                      const isTooFar = neededEff > 30;
                       const cantCatchUp = psGamesLeft <= 0;
+                      const catchChance = cantCatchUp ? 0 : chanceToReach(ps, neededEff, psGamesLeft);
+                      const isRealistic = catchChance >= 55;
+                      const isTooFar = catchChance < 15;
                       const paths = pathsFor(ps, neededEff);
 
                       return (
@@ -3118,9 +3151,9 @@ return (
                               <div style={{fontWeight:800,fontSize:18,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
                               <div style={{color:GREY,fontSize:13.5}}>{ps.games.length}G · {ps.eff} eff nu · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG · ~{psGamesLeft} games over · {gap>0?`+${gap} eff nodig`:"al boven leider"}</div>
                             </div>
-                            <div style={{textAlign:"right",flexShrink:0}}>
-                              <div style={{color:cantCatchUp?"#ff6b6b":isTooFar?"#ff6b6b":isRealistic?"#27AE60":"#f5a524",fontWeight:800,fontSize:19}}>{cantCatchUp?"—":neededEff}</div>
-                              <div style={{color:GREY,fontSize:11}}>{cantCatchUp?"buiten beeld":"eff/game nodig om te jagen"}</div>
+                            <div style={{textAlign:"right",flexShrink:0}} data-testid={`mvp-race-catch-chance-${ps.player.id}`}>
+                              <div style={{color:cantCatchUp?"#ff6b6b":probBadgeColor(catchChance),fontWeight:800,fontSize:22}}>{cantCatchUp?"—":`${catchChance}%`}</div>
+                              <div style={{color:GREY,fontSize:11}}>{cantCatchUp?"buiten beeld":"kans om in te halen"}</div>
                             </div>
                           </div>
 
@@ -3130,9 +3163,9 @@ return (
                             {cantCatchUp ? (
                               <span>🛋️ Zit voorlopig op de bank — geen verwachte games meer deze maand om iets te forceren. Volgende maand staat de klok weer op nul.</span>
                             ) : isTooFar ? (
-                              <span>Zou gemiddeld <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff per game</span> moeten draaien over de resterende ~{psGamesLeft} games — en dat is, laten we eerlijk zijn, <span style={{color:"#ff6b6b"}}>buitenaards</span>. Schrijf hem/haar nog niet helemaal af, maar dit wordt een lange weg terug.</span>
+                              <span>Zou gemiddeld <span style={{color:"#ff6b6b",fontWeight:700}}>{neededEff} eff per game</span> moeten draaien over de resterende ~{psGamesLeft} games. Op basis van hun consistentie dit seizoen is dat maar zo'n <span style={{color:"#ff6b6b",fontWeight:700}}>{catchChance}% kans</span> — niet onmogelijk, maar wel een lange weg terug.</span>
                             ) : (
-                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff per game</span> nodig over de komende ~{psGamesLeft} eigen optredens om de koppositie over te nemen — ervan uitgaande dat de leider over zijn/haar ~{leaderGamesLeft} games op {leader.eff} eff blijft draaien. Hier zijn een paar manieren waarop dat kan gebeuren:</span>
+                              <span>Gemiddeld <span style={{color:WHITE,fontWeight:700}}>{neededEff} eff per game</span> nodig over de komende ~{psGamesLeft} eigen optredens om de koppositie over te nemen — ervan uitgaande dat de leider over zijn/haar ~{leaderGamesLeft} games op {leader.eff} eff blijft draaien. Op basis van hun eigen consistentie dit seizoen is dat zo'n <span style={{color:WHITE,fontWeight:700}}>{catchChance}% kans</span>. Hier zijn een paar manieren waarop dat kan gebeuren:</span>
                             )}
                           </div>
 
@@ -3482,6 +3515,60 @@ return(
 </div>
 );
 })}
+</div>
+
+{/* Vorm-indicator: laatste 3 games t.o.v. maandgemiddelde */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📶 VORM (laatste 3 games)</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+{playerStats.map(ps=>{
+if(ps.games.length<3)return null;
+const sorted=ps.games.slice().sort((a,b)=>a.date<b.date?-1:1);
+const last3=sorted.slice(-3);
+const last3Avg=parseFloat((last3.reduce((s,g)=>s+(+calcFps(g)),0)/last3.length).toFixed(1));
+const diff=parseFloat((last3Avg-ps.eff).toFixed(1));
+const hot=diff>=1.5,cold=diff<=-1.5;
+const arrow=hot?"↑":cold?"↓":"→";
+const color=hot?"#27AE60":cold?"#ff6b6b":"#f5a524";
+const label=hot?"OPGAANDE VORM":cold?"AFKOELEND":"STABIEL";
+return(
+<div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
+<Avatar player={ps.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>laatste 3: {last3Avg} eff vs {ps.eff} maandgem.</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color,fontWeight:800,fontSize:16}}>{arrow} {diff>0?"+":""}{diff}</div>
+<div style={{color,fontSize:9,fontWeight:700,letterSpacing:0.5}}>{label}</div>
+</div>
+</div>
+);
+})}
+{playerStats.every(ps=>ps.games.length<3)&&<div style={{color:GREY,fontSize:12}}>Nog niet genoeg games deze maand om vorm te bepalen (min. 3 nodig).</div>}
+</div>
+
+{/* Consistentie-ranglijst: van meest voorspelbaar tot meest wisselvallig */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>🎯 CONSISTENTIE-RANGLIJST</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Lagere σ (standaarddeviatie) = voorspelbaarder van game tot game. Hogere σ = grotere schommelingen.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+{(()=>{
+const withSd=playerStats.map(ps=>({ps,sd:stdDev(ps)})).filter(x=>x.sd!==null);
+if(!withSd.length)return<div style={{color:GREY,fontSize:12}}>Nog niet genoeg games deze maand (min. 2 per speler).</div>;
+const maxSd=Math.max(...withSd.map(x=>x.sd))||1;
+return withSd.sort((a,b)=>a.sd-b.sd).map(({ps,sd},i)=>(
+<div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+<div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#27AE60":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{i+1}</div>
+<Avatar player={ps.player} size={26}/>
+<div style={{flex:1,minWidth:0,color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+<div style={{color:i===0?"#27AE60":i===withSd.length-1?"#ff6b6b":GREY,fontWeight:800,fontSize:14}}>σ {sd}</div>
+</div>
+<div style={{height:6,background:"#222",borderRadius:3,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${Math.max(4,Math.round((sd/maxSd)*100))}%`,background:i===0?"#27AE60":i===withSd.length-1?"#ff6b6b":"#5B9BD5",borderRadius:3}}/>
+</div>
+</div>
+));
+})()}
 </div>
 
 {/* Multi-player eff over time */}

@@ -2694,6 +2694,8 @@ function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPla
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [cardFor,setCardFor]=useState(null); // player object or null
+const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke speler-kaart is uitgeklapt
+const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
 
 // Statistische helpers voor realistische kans-percentages (gebruikt in MVP Race + Eff Lab):
 // error function benadering (Abramowitz & Stegun 7.1.26), gebruikt om een normale verdeling te kunnen doorrekenen.
@@ -3381,14 +3383,16 @@ Formule: <span style={{color:WHITE,fontWeight:700}}>PTS×1.2 + REB×1.1 + AST×1
 </div>
 
 {/* Eff bar chart */}
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📊 EFF VERGELIJKING</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📊 EFF VERGELIJKING <span style={{fontWeight:400,opacity:0.7}}>· tik op een speler voor elke game</span></div>
 <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
 {playerStats.map((ps,i)=>{
 const tier=effTier(ps.eff);
 const pct=Math.round((ps.eff/maxEff)*100);
 const sd=stdDev(ps);
+const isOpen=expandedPlayerId===ps.player.id;
+const sortedGames=[...ps.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
 return(
-<div key={ps.player.id} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px"}}>
+<div key={ps.player.id} data-testid={`efflab-player-card-${ps.player.id}`} onClick={()=>setExpandedPlayerId(isOpen?null:ps.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
 <div style={{width:22,height:22,borderRadius:"50%",background:i===0?RED:"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0}}>{i+1}</div>
 <Avatar player={ps.player} size={32}/>
@@ -3401,6 +3405,7 @@ return(
 <div style={{color:WHITE,fontWeight:800,fontSize:18}}>{ps.eff}</div>
 <div style={{color:GREY,fontSize:10}}>eff</div>
 </div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
 </div>
 {/* Bar */}
 <div style={{height:8,background:"#222",borderRadius:4,overflow:"hidden"}}>
@@ -3422,6 +3427,53 @@ return(
 </div>
 <Sparkline ps={ps}/>
 </div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+<div style={{display:"grid",gridTemplateColumns:"1fr 40px 40px 40px 40px 40px 50px",gap:4,fontSize:9,color:GREY,fontWeight:700,padding:"0 4px"}}>
+<div>DATUM</div><div style={{textAlign:"center"}}>PTS</div><div style={{textAlign:"center"}}>REB</div><div style={{textAlign:"center"}}>AST</div><div style={{textAlign:"center"}}>STL</div><div style={{textAlign:"center"}}>BLK</div><div style={{textAlign:"right"}}>EFF</div>
+</div>
+{sortedGames.map((g,gi)=>{
+const geff=parseFloat(calcFps(g));
+const gTier=effTier(geff);
+return(
+<div key={gi} style={{display:"grid",gridTemplateColumns:"1fr 40px 40px 40px 40px 40px 50px",gap:4,fontSize:11,padding:"5px 4px",background:gi%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:6,alignItems:"center"}}>
+<div style={{color:WHITE}}>{g.date?.slice(5)||"—"}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.pts||0}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.reb||0}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.ast||0}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.stl||0}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.blk||0}</div>
+<div style={{textAlign:"right",color:gTier.color,fontWeight:800}}>{geff}</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+})}
+</div>
+
+{/* Multi-stat vergelijking */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📐 MULTI-STAT VERGELIJKING</div>
+<div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:24,background:INPUTBG,borderRadius:14,padding:"14px 16px"}}>
+{["pts","reb","ast","stl","blk"].map(k=>{
+const sw=statWeights.find(s=>s.key===k);
+const vals=playerStats.map(ps=>({ps,v:avg(ps.games,k)}));
+const maxV=Math.max(...vals.map(x=>x.v),0.1);
+const sorted=[...vals].sort((a,b)=>b.v-a.v);
+return(
+<div key={k}>
+<div style={{color:sw.color,fontWeight:800,fontSize:11,letterSpacing:0.5,marginBottom:6}}>{sw.emoji} {sw.label}</div>
+{sorted.map(({ps,v})=>(
+<div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+<div style={{width:64,flexShrink:0,color:WHITE,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name.split(" ")[0]}</div>
+<div style={{flex:1,height:14,background:"#1a1a1a",borderRadius:4,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${Math.max(3,Math.round((v/maxV)*100))}%`,background:sw.color,borderRadius:4,transition:"width .4s ease"}}/>
+</div>
+<div style={{width:32,flexShrink:0,textAlign:"right",color:GREY,fontSize:11,fontWeight:700}}>{v}</div>
+</div>
+))}
 </div>
 );
 })}
@@ -3570,6 +3622,89 @@ return withSd.sort((a,b)=>a.sd-b.sd).map(({ps,sd},i)=>(
 ));
 })()}
 </div>
+
+{/* Team sectie: duo's bepaald aan de hand van wie daadwerkelijk samenspeelde (matchId + kant), niet aan de teamnaam
+    — teamnamen wisselen elke wedstrijd, dus we kijken naar de deelnemers zelf. */}
+{(()=>{
+const matchTeamGroups={};
+monthGames.forEach(g=>{
+if(!g.matchId||!g.team||g.team==="chameleon")return;
+const key=g.matchId+"|"+g.team;
+if(!matchTeamGroups[key])matchTeamGroups[key]=[];
+matchTeamGroups[key].push(g);
+});
+const duoStats={};
+Object.values(matchTeamGroups).forEach(rows=>{
+if(rows.length<2)return;
+for(let i=0;i<rows.length;i++){
+for(let j=i+1;j<rows.length;j++){
+const a=rows[i],b=rows[j];
+if(a.playerId===b.playerId)continue;
+const key=[a.playerId,b.playerId].sort().join("|");
+if(!duoStats[key])duoStats[key]={aId:a.playerId,bId:b.playerId,games:0,wins:0,effSum:0,rows:[]};
+const d=duoStats[key];
+const myScore=parseFloat(a.team==="A"?a.teamAScore:a.teamBScore);
+const oppScore=parseFloat(a.team==="A"?a.teamBScore:a.teamAScore);
+const won=!isNaN(myScore)&&!isNaN(oppScore)&&myScore>oppScore;
+d.games++;
+if(won)d.wins++;
+d.effSum+=(parseFloat(calcFps(a))+parseFloat(calcFps(b)))/2;
+d.rows.push({date:a.date,aEff:parseFloat(calcFps(a)),bEff:parseFloat(calcFps(b)),won});
+}
+}
+});
+const duoList=Object.values(duoStats).map(d=>{
+const pa=players.find(p=>p.id===d.aId),pb=players.find(p=>p.id===d.bId);
+return{...d,pa,pb,winPct:Math.round((d.wins/d.games)*100),avgCombinedEff:parseFloat((d.effSum/d.games).toFixed(1))};
+}).filter(d=>d.pa&&d.pb).sort((a,b)=>b.winPct-a.winPct||b.avgCombinedEff-a.avgCombinedEff);
+
+if(!duoList.length)return null;
+return(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🤝 TEAM · BESTE DUO'S</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Gebaseerd op wie daadwerkelijk samen op dezelfde kant speelde deze maand — niet op teamnaam, die wisselt toch elke game.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+{duoList.map((d,i)=>{
+const duoKey=[d.aId,d.bId].sort().join("|");
+const isOpen=expandedDuoKey===duoKey;
+const wColor=d.winPct>=60?"#27AE60":d.winPct>=40?"#f5a524":"#ff6b6b";
+return(
+<div key={duoKey} data-testid={`efflab-duo-card-${duoKey}`} onClick={()=>setExpandedDuoKey(isOpen?null:duoKey)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#27AE60":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{i+1}</div>
+<div style={{display:"flex",marginRight:2}}>
+<Avatar player={d.pa} size={30}/>
+<div style={{marginLeft:-10}}><Avatar player={d.pb} size={30}/></div>
+</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.pa.name.split(" ")[0]} & {d.pb.name.split(" ")[0]}</div>
+<div style={{color:GREY,fontSize:10}}>{d.games}x samen · {d.wins}W-{d.games-d.wins}L</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:wColor,fontWeight:800,fontSize:16}}>{d.winPct}%</div>
+<div style={{color:GREY,fontSize:9}}>winrate samen</div>
+</div>
+<span style={{color:GREY,fontSize:12,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0,marginLeft:4}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,cursor:"default"}}>
+<div style={{color:GREY,fontSize:10,marginBottom:6}}>Gem. gecombineerde eff samen: <span style={{color:WHITE,fontWeight:700}}>{d.avgCombinedEff}</span></div>
+{d.rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((r,ri)=>(
+<div key={ri} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 2px",background:ri%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:5}}>
+<span style={{color:WHITE}}>{r.date?.slice(5)||"—"}</span>
+<span style={{color:GREY}}>{d.pa.name.split(" ")[0]} {r.aEff} · {d.pb.name.split(" ")[0]} {r.bEff}</span>
+<span style={{color:r.won?"#27AE60":"#ff6b6b",fontWeight:700}}>{r.won?"W":"L"}</span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</>
+);
+})()}
 
 {/* Multi-player eff over time */}
 {top3.length>=2&&(()=>{

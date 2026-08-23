@@ -2927,13 +2927,14 @@ if(selSeasonId===s.id)setSelSeasonId(updated[0]?.id||null);
 {mvp&&(() => {
 const titles=mvpCounts[mvp.player.id]||0;
 const stk=streakAt(selMonth,mvp.player.id);
+const mvpLabel=rangeMode==="alltime"?"🏆 MVP ALL-TIME":rangeMode==="season"?`🏆 MVP · ${monthLabel.toUpperCase()}`:"🏆 MVP VAN DE MAAND";
 return (
 <div data-testid="mvp-of-month-card" style={{background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",border:`1px solid ${RED}`,borderRadius:14,padding:"16px",marginBottom:20,position:"relative"}}>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:2}}>🏆 MVP VAN DE MAAND</div>
+<div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:2}}>{mvpLabel}</div>
 <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-{stk>=2&&<span style={{background:"#f5a52422",color:"#f5a524",border:"1px solid #f5a52455",borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🔥 {stk}-streak</span>}
-{titles>=2&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🏆 {titles}× MVP</span>}
+{rangeMode==="month"&&stk>=2&&<span style={{background:"#f5a52422",color:"#f5a524",border:"1px solid #f5a52455",borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🔥 {stk}-streak</span>}
+{rangeMode==="month"&&titles>=2&&<span style={{background:`${RED}22`,color:RED,border:`1px solid ${RED}55`,borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700,letterSpacing:0.5}}>🏆 {titles}× MVP</span>}
 </div>
 </div>
 <div onClick={()=>openPlayer(mvp.player.id)} style={{display:"flex",alignItems:"center",gap:14,cursor:"pointer"}}>
@@ -3694,8 +3695,9 @@ return withSd.sort((a,b)=>a.sd-b.sd).map(({ps,sd},i)=>(
 })()}
 </div>
 
-{/* Team sectie: duo's bepaald aan de hand van wie daadwerkelijk samenspeelde (matchId + kant), niet aan de teamnaam
-    — teamnamen wisselen elke wedstrijd, dus we kijken naar de deelnemers zelf. */}
+{/* Team sectie: teams bepaald aan de hand van wie daadwerkelijk samen op een kant speelde (matchId + kant),
+    niet aan de teamnaam — die wisselt toch elke wedstrijd. Een team kan 2, 3 of meer spelers zijn: bestond
+    een kant uit drie spelers, dan is dat drietal het team, niet drie losse duo's. */}
 {(()=>{
 const matchTeamGroups={};
 monthGames.forEach(g=>{
@@ -3704,69 +3706,127 @@ const key=g.matchId+"|"+g.team;
 if(!matchTeamGroups[key])matchTeamGroups[key]=[];
 matchTeamGroups[key].push(g);
 });
-const duoStats={};
+const teamStats={};
 Object.values(matchTeamGroups).forEach(rows=>{
-if(rows.length<2)return;
-for(let i=0;i<rows.length;i++){
-for(let j=i+1;j<rows.length;j++){
-const a=rows[i],b=rows[j];
-if(a.playerId===b.playerId)continue;
-const key=[a.playerId,b.playerId].sort().join("|");
-if(!duoStats[key])duoStats[key]={aId:a.playerId,bId:b.playerId,games:0,wins:0,effSum:0,rows:[]};
-const d=duoStats[key];
-const myScore=parseFloat(a.team==="A"?a.teamAScore:a.teamBScore);
-const oppScore=parseFloat(a.team==="A"?a.teamBScore:a.teamAScore);
+const memberIds=[...new Set(rows.map(r=>r.playerId))].sort();
+if(memberIds.length<2)return;
+const key=memberIds.join("|");
+if(!teamStats[key])teamStats[key]={memberIds,games:0,wins:0,effSum:0,rows:[]};
+const t=teamStats[key];
+const first=rows[0];
+const myScore=parseFloat(first.team==="A"?first.teamAScore:first.teamBScore);
+const oppScore=parseFloat(first.team==="A"?first.teamBScore:first.teamAScore);
 const won=!isNaN(myScore)&&!isNaN(oppScore)&&myScore>oppScore;
-d.games++;
-if(won)d.wins++;
-d.effSum+=(parseFloat(calcFps(a))+parseFloat(calcFps(b)))/2;
-d.rows.push({date:a.date,aEff:parseFloat(calcFps(a)),bEff:parseFloat(calcFps(b)),won});
-}
-}
+t.games++;
+if(won)t.wins++;
+const avgEffThisGame=rows.reduce((s,r)=>s+parseFloat(calcFps(r)),0)/rows.length;
+t.effSum+=avgEffThisGame;
+t.rows.push({date:first.date,won,perPlayer:memberIds.map(id=>{const r=rows.find(x=>x.playerId===id);return{playerId:id,eff:r?parseFloat(calcFps(r)):null};})});
 });
-const duoList=Object.values(duoStats).map(d=>{
-const pa=players.find(p=>p.id===d.aId),pb=players.find(p=>p.id===d.bId);
-return{...d,pa,pb,winPct:Math.round((d.wins/d.games)*100),avgCombinedEff:parseFloat((d.effSum/d.games).toFixed(1))};
-}).filter(d=>d.pa&&d.pb).sort((a,b)=>b.winPct-a.winPct||b.avgCombinedEff-a.avgCombinedEff);
+const teamList=Object.values(teamStats).map(t=>{
+const members=t.memberIds.map(id=>players.find(p=>p.id===id)).filter(Boolean);
+if(members.length!==t.memberIds.length)return null;
+return{...t,members,winPct:Math.round((t.wins/t.games)*100),avgCombinedEff:parseFloat((t.effSum/t.games).toFixed(1))};
+}).filter(Boolean).sort((a,b)=>b.winPct-a.winPct||b.avgCombinedEff-a.avgCombinedEff);
 
-if(!duoList.length)return null;
+if(!teamList.length)return null;
 return(
 <>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🤝 TEAM · BESTE DUO'S</div>
-<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Gebaseerd op wie daadwerkelijk samen op dezelfde kant speelde deze maand — niet op teamnaam, die wisselt toch elke game.</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🤝 TEAM · BESTE SAMENSTELLINGEN</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Gebaseerd op wie daadwerkelijk samen op dezelfde kant speelde — niet op teamnaam, die wisselt toch elke game. Stond je met z'n drieën op een kant, dan telt dat drietal als team, niet als losse duo's.</div>
 <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
-{duoList.map((d,i)=>{
-const duoKey=[d.aId,d.bId].sort().join("|");
-const isOpen=expandedDuoKey===duoKey;
-const wColor=d.winPct>=60?"#27AE60":d.winPct>=40?"#f5a524":"#ff6b6b";
+{teamList.map((t,i)=>{
+const teamKey=t.memberIds.join("|");
+const isOpen=expandedDuoKey===teamKey;
+const wColor=t.winPct>=60?"#27AE60":t.winPct>=40?"#f5a524":"#ff6b6b";
+const names=t.members.map(m=>m.name.split(" ")[0]).join(" & ");
 return(
-<div key={duoKey} data-testid={`efflab-duo-card-${duoKey}`} onClick={()=>setExpandedDuoKey(isOpen?null:duoKey)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent"}}>
+<div key={teamKey} data-testid={`efflab-team-card-${teamKey}`} onClick={()=>setExpandedDuoKey(isOpen?null:teamKey)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent"}}>
 <div style={{display:"flex",alignItems:"center",gap:10}}>
 <div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#27AE60":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{i+1}</div>
 <div style={{display:"flex",marginRight:2}}>
-<Avatar player={d.pa} size={30}/>
-<div style={{marginLeft:-10}}><Avatar player={d.pb} size={30}/></div>
+{t.members.map((m,mi)=>(<div key={m.id} style={{marginLeft:mi===0?0:-10}}><Avatar player={m} size={30}/></div>))}
 </div>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.pa.name.split(" ")[0]} & {d.pb.name.split(" ")[0]}</div>
-<div style={{color:GREY,fontSize:10}}>{d.games}x samen · {d.wins}W-{d.games-d.wins}L</div>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{names} <span style={{color:GREY,fontWeight:400,fontSize:10}}>({t.members.length}-man)</span></div>
+<div style={{color:GREY,fontSize:10}}>{t.games}x samen · {t.wins}W-{t.games-t.wins}L</div>
 </div>
 <div style={{textAlign:"right",flexShrink:0}}>
-<div style={{color:wColor,fontWeight:800,fontSize:16}}>{d.winPct}%</div>
+<div style={{color:wColor,fontWeight:800,fontSize:16}}>{t.winPct}%</div>
 <div style={{color:GREY,fontSize:9}}>winrate samen</div>
 </div>
 <span style={{color:GREY,fontSize:12,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0,marginLeft:4}}>▾</span>
 </div>
 {isOpen&&(
 <div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,cursor:"default"}}>
-<div style={{color:GREY,fontSize:10,marginBottom:6}}>Gem. gecombineerde eff samen: <span style={{color:WHITE,fontWeight:700}}>{d.avgCombinedEff}</span></div>
-{d.rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((r,ri)=>(
-<div key={ri} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 2px",background:ri%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:5}}>
-<span style={{color:WHITE}}>{r.date?.slice(5)||"—"}</span>
-<span style={{color:GREY}}>{d.pa.name.split(" ")[0]} {r.aEff} · {d.pb.name.split(" ")[0]} {r.bEff}</span>
-<span style={{color:r.won?"#27AE60":"#ff6b6b",fontWeight:700}}>{r.won?"W":"L"}</span>
+<div style={{color:GREY,fontSize:10,marginBottom:6}}>Gem. gecombineerde eff samen: <span style={{color:WHITE,fontWeight:700}}>{t.avgCombinedEff}</span></div>
+{t.rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((r,ri)=>(
+<div key={ri} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11,padding:"4px 2px",background:ri%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:5,gap:6}}>
+<span style={{color:WHITE,flexShrink:0}}>{r.date?.slice(5)||"—"}</span>
+<span style={{color:GREY,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.perPlayer.map(pp=>{const m=t.members.find(x=>x.id===pp.playerId);return `${m?.name.split(" ")[0]||"?"} ${pp.eff??"—"}`;}).join(" · ")}</span>
+<span style={{color:r.won?"#27AE60":"#ff6b6b",fontWeight:700,flexShrink:0}}>{r.won?"W":"L"}</span>
 </div>
 ))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</>
+);
+})()}
+
+{/* Kameleon-sectie: spelers die als neutrale wildcard meespeelden (los van Team A/B), apart bekeken —
+    dat is een ander soort rol dan een vast teamverband, dus verdient een eigen los overzicht. */}
+{(()=>{
+const chameleonGames=monthGames.filter(g=>g.team==="chameleon");
+if(!chameleonGames.length)return null;
+const chameleonStats=players.map(p=>{
+const pg=chameleonGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+return{player:p,games:pg,ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1))};
+}).filter(Boolean).sort((a,b)=>b.eff-a.eff);
+const maxCEff=Math.max(...chameleonStats.map(x=>x.eff),0.1);
+return(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🦎 KAMELEON</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Spelers die als neutrale wildcard meespeelden, los van een vast team — {chameleonGames.length} kameleon-optreden{chameleonGames.length!==1?"s":""} in {monthLabel.toLowerCase()}.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+{chameleonStats.map((ps,i)=>{
+const isOpen=expandedPlayerId===`cham_${ps.player.id}`;
+const pct=Math.round((ps.eff/maxCEff)*100);
+const sortedGames=[...ps.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+return(
+<div key={ps.player.id} data-testid={`efflab-chameleon-card-${ps.player.id}`} onClick={()=>setExpandedPlayerId(isOpen?null:`cham_${ps.player.id}`)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid #8e5cff55`:"1px solid transparent"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#8e5cff":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{i+1}</div>
+<Avatar player={ps.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:13,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>{ps.games.length}x kameleon · {ps.ppg} PPG · {ps.rpg} RPG · {ps.apg} APG</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:"#8e5cff",fontWeight:800,fontSize:16}}>{ps.eff}</div>
+<div style={{color:GREY,fontSize:9}}>eff</div>
+</div>
+<span style={{color:GREY,fontSize:12,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0,marginLeft:4}}>▾</span>
+</div>
+<div style={{height:6,background:"#222",borderRadius:3,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${Math.max(4,pct)}%`,background:"linear-gradient(90deg,#8e5cff,#c39bff)",borderRadius:3}}/>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,cursor:"default"}}>
+{sortedGames.map((g,gi)=>{
+const geff=parseFloat(calcFps(g));
+return(
+<div key={gi} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 2px",background:gi%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:5}}>
+<span style={{color:WHITE}}>{g.date?.slice(5)||"—"}</span>
+<span style={{color:GREY}}>{g.pts||0}p · {g.reb||0}r · {g.ast||0}a</span>
+<span style={{color:"#8e5cff",fontWeight:700}}>{geff}</span>
+</div>
+);
+})}
 </div>
 )}
 </div>

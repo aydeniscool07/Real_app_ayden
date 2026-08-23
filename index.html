@@ -1758,11 +1758,44 @@ const bScore=parseFloat(p.b.team==="A"?p.b.teamAScore:p.b.teamBScore);
 if(isNaN(aScore)||isNaN(bScore)||(!aScore&&!bScore)){ties++;return;}
 if(aScore>bScore)aWins++;else if(bScore>aScore)bWins++;else ties++;
 });
+const aEff=parseFloat((aGs.reduce((s,g)=>s+(+calcFps(g)),0)/aGs.length).toFixed(1));
+const bEff=parseFloat((bGs.reduce((s,g)=>s+(+calcFps(g)),0)/bGs.length).toFixed(1));
+
+// Als teamgenoot: zelfde matchId + zelfde kant (A/B, geen kameleon).
+let teamGames=0,teamWins=0;
+Object.keys(byMatchA).forEach(mid=>{
+const bRows=byMatchB[mid];
+if(!bRows)return;
+byMatchA[mid].forEach(ga=>{
+if(!ga.team||ga.team==="chameleon")return;
+bRows.forEach(gb=>{
+if(gb.team!==ga.team)return; // moet dezelfde kant zijn
+teamGames++;
+const myScore=parseFloat(ga.team==="A"?ga.teamAScore:ga.teamBScore);
+const oppScore=parseFloat(ga.team==="A"?ga.teamBScore:ga.teamAScore);
+if(!isNaN(myScore)&&!isNaN(oppScore)&&myScore>oppScore)teamWins++;
+});
+});
+});
+
+// Kryptoniet: presteert iemand duidelijk slechter tegen deze specifieke tegenstander dan normaal?
+const aCareerGames=allGames.filter(g=>g.playerId===playerA.id&&g.team!=="chameleon");
+const bCareerGames=allGames.filter(g=>g.playerId===playerB.id&&g.team!=="chameleon");
+const aCareerEff=aCareerGames.length?parseFloat((aCareerGames.reduce((s,g)=>s+(+calcFps(g)),0)/aCareerGames.length).toFixed(1)):null;
+const bCareerEff=bCareerGames.length?parseFloat((bCareerGames.reduce((s,g)=>s+(+calcFps(g)),0)/bCareerGames.length).toFixed(1)):null;
+let kryptonite=null;
+if(pairs.length>=3){
+if(aCareerEff&&aEff<=aCareerEff*0.8)kryptonite={loser:playerA,winner:playerB,dropPct:Math.round((1-aEff/aCareerEff)*100)};
+else if(bCareerEff&&bEff<=bCareerEff*0.8)kryptonite={loser:playerB,winner:playerA,dropPct:Math.round((1-bEff/bCareerEff)*100)};
+}
+
 return{
 meetings:pairs.length,pairs:pairs.sort((x,y)=>y.date.localeCompare(x.date)),
 aWins,bWins,ties,
-a:{ppg:avg(aGs,"pts"),rpg:avg(aGs,"reb"),apg:avg(aGs,"ast"),eff:parseFloat((aGs.reduce((s,g)=>s+(+calcFps(g)),0)/aGs.length).toFixed(1))},
-b:{ppg:avg(bGs,"pts"),rpg:avg(bGs,"reb"),apg:avg(bGs,"ast"),eff:parseFloat((bGs.reduce((s,g)=>s+(+calcFps(g)),0)/bGs.length).toFixed(1))}
+a:{ppg:avg(aGs,"pts"),rpg:avg(aGs,"reb"),apg:avg(aGs,"ast"),eff:aEff},
+b:{ppg:avg(bGs,"pts"),rpg:avg(bGs,"reb"),apg:avg(bGs,"ast"),eff:bEff},
+teammates:teamGames>0?{games:teamGames,wins:teamWins,winPct:Math.round((teamWins/teamGames)*100)}:null,
+kryptonite
 };
 }
 
@@ -2179,6 +2212,22 @@ return(
 <div style={{flex:1,color:h2h.b[k]>h2h.a[k]?"#27AE60":WHITE,fontWeight:h2h.b[k]>h2h.a[k]?800:600,fontSize:14}}>{h2h.b[k]}</div>
 </div>
 ))}
+</div>
+{h2h.kryptonite&&(
+<div data-testid="kryptonite-callout" style={{marginTop:12,background:"linear-gradient(135deg,#2a0808,#1a0a0a)",border:"1px solid #ff6b6b55",borderRadius:10,padding:"10px 12px"}}>
+<div style={{color:"#ff6b6b",fontSize:10,fontWeight:800,letterSpacing:1}}>☠️ KRYPTONIET</div>
+<div style={{color:WHITE,fontSize:12,marginTop:2}}>{h2h.kryptonite.loser.name.split(" ")[0]} presteert tegen {h2h.kryptonite.winner.name.split(" ")[0]} zo'n <b>{h2h.kryptonite.dropPct}%</b> slechter dan normaal.</div>
+</div>
+)}
+</div>
+)}
+{h2h?.teammates&&(
+<div data-testid="teammate-record" style={{background:INPUTBG,borderRadius:12,padding:"14px",marginTop:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>🤝 ALS TEAMGENOTEN</div>
+<div style={{display:"flex",justifyContent:"space-around",textAlign:"center"}}>
+<div><div style={{color:WHITE,fontWeight:800,fontSize:20}}>{h2h.teammates.games}</div><div style={{color:GREY,fontSize:10}}>samen gespeeld</div></div>
+<div><div style={{color:h2h.teammates.winPct>=50?"#27AE60":"#ff6b6b",fontWeight:800,fontSize:20}}>{h2h.teammates.winPct}%</div><div style={{color:GREY,fontSize:10}}>winrate samen</div></div>
+<div><div style={{color:WHITE,fontWeight:800,fontSize:20}}>{h2h.teammates.wins}-{h2h.teammates.games-h2h.teammates.wins}</div><div style={{color:GREY,fontSize:10}}>W-L</div></div>
 </div>
 </div>
 )}
@@ -3391,6 +3440,32 @@ if(!total)return contributions.map(sw=>({...sw,pct:0}));
 return contributions.map(sw=>({...sw,pct:parseFloat(((statContrib(ps,sw)/total)*100).toFixed(1))}));
 }
 
+// Speler-archetype: op basis van welke stat-categorie (PTS/REB/AST/DEF) domineert in hun DNA.
+const ARCHETYPES={
+pts:{label:"Scorer",emoji:"🎯",color:"#E8312A",desc:"De cijfers komen vooral uit het scoren."},
+reb:{label:"Rebounder",emoji:"🛡️",color:"#5B9BD5",desc:"Domineert de boards."},
+ast:{label:"Playmaker",emoji:"🎩",color:"#27AE60",desc:"Zet vooral anderen op scherp."},
+def:{label:"Two-Way Defender",emoji:"🔒",color:"#9B59B6",desc:"Maakt het verschil aan de verdedigende kant."}
+};
+function archetypeFor(ps){
+const d=dna(ps);
+const pts=d.find(x=>x.key==="pts")?.pct||0;
+const reb=d.find(x=>x.key==="reb")?.pct||0;
+const ast=d.find(x=>x.key==="ast")?.pct||0;
+const stl=d.find(x=>x.key==="stl")?.pct||0;
+const blk=d.find(x=>x.key==="blk")?.pct||0;
+const shares={pts,reb,ast,def:stl+blk};
+const sorted=Object.entries(shares).sort((a,b)=>b[1]-a[1]);
+const [topKey,topPct]=sorted[0];
+const [secondKey,secondPct]=sorted[1];
+if(topPct<32)return{label:"Alleskunner",emoji:"⚖️",color:"#f5a524",desc:"Draagt overal een beetje aan bij, geen duidelijke zwakte.",hybrid:false};
+const base=ARCHETYPES[topKey];
+if(secondPct>=27){
+return{...base,label:`${base.label}-${ARCHETYPES[secondKey].label}`,hybrid:true};
+}
+return{...base,hybrid:false};
+}
+
 // Mini sparkline SVG for a player's eff over the month
 function Sparkline({ps}){
 if(ps.games.length<2)return<span style={{color:GREY,fontSize:11}}>—</span>;
@@ -3526,6 +3601,65 @@ return(
 })}
 </div>
 
+{/* Elo Rating: teamgebaseerde Elo, chronologisch doorgerekend binnen de huidige periode. */}
+{(()=>{
+const BASE=1500,K=32;
+const byMatch={};
+monthGames.forEach(g=>{
+if(!g.matchId||!g.team||g.team==="chameleon")return;
+if(!byMatch[g.matchId])byMatch[g.matchId]={A:[],B:[],date:g.date,teamAScore:g.teamAScore,teamBScore:g.teamBScore};
+byMatch[g.matchId][g.team].push(g.playerId);
+});
+const matches=Object.values(byMatch).filter(m=>m.A.length>0&&m.B.length>0).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+if(matches.length<2)return null;
+const ratings={},gamesPlayed={};
+function getR(pid){if(ratings[pid]==null)ratings[pid]=BASE;return ratings[pid];}
+matches.forEach(m=>{
+const ra=m.A.reduce((s,pid)=>s+getR(pid),0)/m.A.length;
+const rb=m.B.reduce((s,pid)=>s+getR(pid),0)/m.B.length;
+const scoreA=parseFloat(m.teamAScore),scoreB=parseFloat(m.teamBScore);
+let actualA=0.5;
+if(!isNaN(scoreA)&&!isNaN(scoreB)&&(scoreA||scoreB))actualA=scoreA>scoreB?1:scoreA<scoreB?0:0.5;
+const expectedA=1/(1+Math.pow(10,(rb-ra)/400));
+const deltaA=K*(actualA-expectedA);
+m.A.forEach(pid=>{ratings[pid]=getR(pid)+deltaA;gamesPlayed[pid]=(gamesPlayed[pid]||0)+1;});
+m.B.forEach(pid=>{ratings[pid]=getR(pid)-deltaA;gamesPlayed[pid]=(gamesPlayed[pid]||0)+1;});
+});
+const eloList=players.map(p=>({player:p,rating:Math.round(ratings[p.id]??BASE),games:gamesPlayed[p.id]||0})).filter(x=>x.games>0).sort((a,b)=>b.rating-a.rating);
+if(!eloList.length)return null;
+const maxR=Math.max(...eloList.map(x=>x.rating),BASE+1);
+const minR=Math.min(...eloList.map(x=>x.rating),BASE-1);
+const span=maxR-minR||1;
+return(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🥇 ELO RATING</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Houdt rekening met de sterkte van je tegenstanders (winnen van een sterk team weegt zwaarder) — begint op 1500, chronologisch doorgerekend binnen {monthLabel.toLowerCase()}.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>
+{eloList.map((e,i)=>{
+const pct=Math.round(((e.rating-minR)/span)*100);
+const diff=e.rating-BASE;
+return(
+<div key={e.player.id} data-testid={`elo-row-${e.player.id}`} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+<div style={{width:20,height:20,borderRadius:"50%",background:i===0?"#f5a524":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{i+1}</div>
+<Avatar player={e.player} size={28}/>
+<div style={{flex:1,minWidth:0,color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.player.name}</div>
+<div style={{textAlign:"right"}}>
+<div style={{color:i===0?"#f5a524":WHITE,fontWeight:800,fontSize:15}}>{e.rating}</div>
+<div style={{color:diff>=0?"#27AE60":"#ff6b6b",fontSize:10,fontWeight:700}}>{diff>=0?"+":""}{diff}</div>
+</div>
+</div>
+<div style={{height:6,background:"#222",borderRadius:3,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${Math.max(4,pct)}%`,background:i===0?"#f5a524":"#5B9BD5",borderRadius:3}}/>
+</div>
+</div>
+);
+})}
+</div>
+</>
+);
+})()}
+
 {/* Multi-stat vergelijking */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📐 MULTI-STAT VERGELIJKING</div>
 <div style={{display:"flex",flexDirection:"column",gap:14,marginBottom:24,background:INPUTBG,borderRadius:14,padding:"14px 16px"}}>
@@ -3569,6 +3703,23 @@ return(
 <span style={{color:GREY,fontSize:9}}>{s.label} {s.pct}%</span>
 </div>
 ))}
+</div>
+</div>
+);
+})}
+</div>
+
+{/* Archetypes: badge per speler o.b.v. welke stat-categorie hun DNA domineert */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>🏷️ ARCHETYPES</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:24}}>
+{playerStats.map(ps=>{
+const arch=archetypeFor(ps);
+return(
+<div key={ps.player.id} data-testid={`archetype-${ps.player.id}`} style={{background:`${arch.color}18`,border:`1px solid ${arch.color}55`,borderRadius:12,padding:"10px 12px",display:"flex",alignItems:"center",gap:8,flexBasis:"calc(50% - 4px)",minWidth:150}}>
+<Avatar player={ps.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ps.player.name.split(" ")[0]}</div>
+<div style={{color:arch.color,fontWeight:800,fontSize:11}}>{arch.emoji} {arch.label}</div>
 </div>
 </div>
 );
@@ -6384,6 +6535,7 @@ value={form[k]||""} onChange={e=>setF(k,e.target.value)}/>
 // ── Log Game Modal
 function LogGameModal({players,onSave,onClose}){
 const [step,setStep]=useState("setup");
+const [inputMode,setInputMode]=useState("live"); // "live" = tap-counters voor iedereen tegelijk | "classic" = per-speler intypen
 const [gameDate,setGameDate]=useState(new Date().toISOString().slice(0,10));
 const [location,setLocation]=useState("");
 const [tAN,setTAN]=useState("Team A"),[tBN,setTBN]=useState("Team B");
@@ -6402,6 +6554,7 @@ function togC(pid){if(teamA.includes(pid)||teamB.includes(pid))return;setChams(t
 const all=[...teamA,...teamB,...chams];
 function toStats(){if(!all.length)return;const init={};all.forEach(pid=>{if(!statForms[pid])init[pid]={};});setStatForms(f=>({...f,...init}));setActiveP(all[0]);setStep("stats");}
 function setStat(pid,k,v){setStatForms(f=>({...f,[pid]:{...(f[pid]||{}),[k]:v}}));}
+function bump(pid,k,delta){setStatForms(f=>{const cur=parseFloat((f[pid]||{})[k])||0;const next=Math.max(0,cur+delta);return{...f,[pid]:{...(f[pid]||{}),[k]:next}};});}
 
 async function saveAll(){
 setSaving(true);
@@ -6478,7 +6631,57 @@ return(
 )}
 {step==="stats"&&(
 <>
-<div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>Stats invullen</div>
+<div style={{fontWeight:700,fontSize:20,marginBottom:10,textAlign:"center"}}>Stats invullen</div>
+<div style={{display:"flex",gap:6,marginBottom:14}}>
+<button data-testid="input-mode-live" onClick={()=>setInputMode("live")} style={{flex:1,padding:"9px 6px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="live"?RED:INPUTBG,color:inputMode==="live"?WHITE:GREY,fontWeight:inputMode==="live"?700:500,fontSize:12.5}}>⚡ Live (tikken)</button>
+<button data-testid="input-mode-classic" onClick={()=>setInputMode("classic")} style={{flex:1,padding:"9px 6px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="classic"?RED:INPUTBG,color:inputMode==="classic"?WHITE:GREY,fontWeight:inputMode==="classic"?700:500,fontSize:12.5}}>📝 Klassiek (typen)</button>
+</div>
+
+{inputMode==="live"&&(
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{all.map(pid=>{
+const p=players.find(x=>x.id===pid);const sf=statForms[pid]||{};
+const team=teamA.includes(pid)?tAN:teamB.includes(pid)?tBN:"🦎";
+return(
+<div key={pid} data-testid={`live-stat-row-${pid}`} style={{background:"#111",borderRadius:12,padding:"10px 12px"}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+<Avatar player={p} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name}</div>
+<div style={{color:RED,fontSize:10}}>{team}</div>
+</div>
+</div>
+{/* PTS: grote tap-knoppen voor +1/+2/+3, met een losse -1 om te corrigeren */}
+<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+<div style={{width:44,color:GREY,fontSize:11,fontWeight:700}}>PTS</div>
+<button onClick={()=>bump(pid,"pts",-1)} style={{width:30,height:30,borderRadius:8,border:"none",background:DIVIDER,color:GREY,fontWeight:800,fontSize:15,cursor:"pointer"}}>−</button>
+<div style={{width:32,textAlign:"center",fontWeight:800,fontSize:16,color:WHITE}}>{sf.pts||0}</div>
+{[1,2,3].map(n=>(
+<button key={n} onClick={()=>bump(pid,"pts",n)} style={{flex:1,height:34,borderRadius:8,border:"none",background:RED,color:WHITE,fontWeight:800,fontSize:13,cursor:"pointer"}}>+{n}</button>
+))}
+</div>
+{/* Overige stats: compacte steppers */}
+<div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+{["reb","ast","stl","blk","to"].map(k=>(
+<div key={k} style={{textAlign:"center"}}>
+<div style={{color:GREY,fontSize:9,fontWeight:700,marginBottom:2}}>{STAT_LABEL[k]}</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:3}}>
+<button onClick={()=>bump(pid,k,-1)} style={{width:22,height:22,borderRadius:6,border:"none",background:DIVIDER,color:GREY,fontWeight:800,fontSize:12,cursor:"pointer"}}>−</button>
+<div style={{minWidth:16,fontWeight:700,fontSize:13,color:WHITE}}>{sf[k]||0}</div>
+<button onClick={()=>bump(pid,k,1)} style={{width:22,height:22,borderRadius:6,border:"none",background:k==="to"?"#5a2020":"#1e4a2a",color:k==="to"?"#ff6b6b":"#27AE60",fontWeight:800,fontSize:12,cursor:"pointer"}}>+</button>
+</div>
+</div>
+))}
+</div>
+</div>
+);
+})}
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginTop:2}}>Tip: tik live tijdens het spelen mee — schakel naar Klassiek voor geavanceerde stats (FG%, MIN, +/-, etc.)</div>
+</div>
+)}
+
+{inputMode==="classic"&&(
+<>
 <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
 {all.map(pid=>{
 const p=players.find(x=>x.id===pid);const ia=activeP===pid;
@@ -6509,11 +6712,16 @@ return(
 </div>
 ))}
 </div>
-<div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar (optioneel)</div>
-<textarea placeholder="bijv. domineerde onder de basket" value={sf.commentaryHint||""} onChange={e=>setStat(activeP,"commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
 </div>
 );
 })()}
+</>
+)}
+
+{/* Coach commentaar geldt voor de actieve speler in klassieke modus, of de eerste speler in live-modus (optioneel bijschrift) */}
+<div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar (optioneel)</div>
+<textarea placeholder="bijv. domineerde onder de basket" value={(statForms[activeP||all[0]]||{}).commentaryHint||""} onChange={e=>setStat(activeP||all[0],"commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
+
 {commStatus&&<div style={{color:RED,fontSize:12,textAlign:"center",marginTop:10}}>{commStatus}</div>}
 <div style={{display:"flex",gap:10,marginTop:14}}>
 <button onClick={()=>setStep("setup")} style={BG2}>← Terug</button>

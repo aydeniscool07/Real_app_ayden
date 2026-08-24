@@ -150,8 +150,8 @@ window.__showBootFallback = showFallback;
 const {useState,useEffect,useRef,useMemo}=React;
 
 const RED="#E8312A",WHITE="#fff",GREY="#8E8E93",DARKGREY="#3A3A3C",BG="#000",DIVIDER="#1C1C1E",INPUTBG="#1C1C1E";
-const STAT_KEYS=["pts","reb","ast","stl","blk","to","fg","threept","min","pf","oreb","dreb","ts","plusminus"];
-const STAT_LABEL={pts:"PTS",reb:"REB",ast:"AST",stl:"STL",blk:"BLK",to:"TO",fg:"FG%",threept:"3FG",min:"MIN",pf:"PF",oreb:"OREB",dreb:"DREB",ts:"TS%",plusminus:"+/-"};
+const STAT_KEYS=["pts","reb","ast","stl","blk","to","fga","fg","fta","ft","threept","min","pf","oreb","dreb","ts","plusminus"];
+const STAT_LABEL={pts:"PTS",reb:"REB",ast:"AST",stl:"STL",blk:"BLK",to:"TO",fga:"FGA",fg:"FG%",fta:"FTA",ft:"FT%",threept:"3FG",min:"MIN",pf:"PF",oreb:"OREB",dreb:"DREB",ts:"TS%",plusminus:"+/-"};
 const STAT_SMALL={pts:"pts",reb:"reb",ast:"ast",stl:"stl",blk:"blk",to:"to",fg:"% fg",threept:"3pm",min:"min",pf:"pf",oreb:"oreb",dreb:"dreb",ts:"ts%",plusminus:"+/-"};
 const POSITIONS=["PG","SG","SF","PF","C","—"];
 const SORT_OPTIONS=["Beste","Slechtste","Datum (nieuwst)","Datum (oudst)","PTS","AST","REB"];
@@ -6536,6 +6536,7 @@ value={form[k]||""} onChange={e=>setF(k,e.target.value)}/>
 function LogGameModal({players,onSave,onClose}){
 const [step,setStep]=useState("setup");
 const [inputMode,setInputMode]=useState("table"); // "table" = achteraf snel invullen | "live" = tap-counters tijdens het spelen | "classic" = per-speler intypen
+const [tableSubStep,setTableSubStep]=useState("basic"); // binnen tabel-modus: "basic" (kern-stats) → "advanced" (FG%/MIN/etc.)
 const [gameDate,setGameDate]=useState(new Date().toISOString().slice(0,10));
 const [location,setLocation]=useState("");
 const [tAN,setTAN]=useState("Team A"),[tBN,setTBN]=useState("Team B");
@@ -6553,9 +6554,29 @@ function togB(pid){if(teamA.includes(pid)||chams.includes(pid))return;setTeamB(t
 function togC(pid){if(teamA.includes(pid)||teamB.includes(pid))return;setChams(t=>t.includes(pid)?t.filter(x=>x!==pid):[...t,pid]);}
 const all=[...teamA,...teamB,...chams];
 function toStats(){if(!all.length)return;const init={};all.forEach(pid=>{if(!statForms[pid])init[pid]={};});setStatForms(f=>({...f,...init}));setActiveP(all[0]);setStep("stats");}
-function setStat(pid,k,v){setStatForms(f=>({...f,[pid]:{...(f[pid]||{}),[k]:v}}));}
-function bump(pid,k,delta){setStatForms(f=>{const cur=parseFloat((f[pid]||{})[k])||0;const next=Math.max(0,cur+delta);return{...f,[pid]:{...(f[pid]||{}),[k]:next}};});}
-// Achteraf weet je zelden het exacte FG%/TS% nog — vraag gewoon hoe die persoon schoot en verzin er een realistisch percentage bij.
+// FGA moet altijd kloppen met de punten: elk punt telt als 1 gemaakt schot (simpel gehouden, geen 2/3-onderscheid).
+// Zodra punten of FG% wijzigen, wordt FGA opnieuw afgeleid — welke van de twee je ook het eerst invult.
+function deriveFga(pts,fgPct){const p=parseFloat(pts)||0;const fg=parseFloat(fgPct)||0;if(!fg)return p;return Math.max(p,Math.round(p/(fg/100)));}
+function setStat(pid,k,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+const next={...cur,[k]:v};
+if(k==="pts"&&cur.fg)next.fga=deriveFga(v,cur.fg);
+return{...f,[pid]:next};
+});
+}
+function bump(pid,k,delta){
+setStatForms(f=>{
+const cur=f[pid]||{};
+const curVal=parseFloat(cur[k])||0;
+const nextVal=Math.max(0,curVal+delta);
+const next={...cur,[k]:nextVal};
+if(k==="pts"&&cur.fg)next.fga=deriveFga(nextVal,cur.fg);
+return{...f,[pid]:next};
+});
+}
+// Achteraf weet je zelden het exacte FG%/TS% nog — vraag gewoon hoe die persoon schoot en verzin er een realistisch
+// percentage bij. FGA wordt NIET los geraden, maar afgeleid van de al ingevulde punten (elk punt = 1 gemaakt schot).
 function rollShootingNight(pid,tier){
 const ranges={
 fire:{fg:[60,75],ts:[65,80]},
@@ -6566,7 +6587,32 @@ bad:{fg:[20,38],ts:[25,45]}
 const r=ranges[tier];
 const fg=Math.round((r.fg[0]+Math.random()*(r.fg[1]-r.fg[0]))*10)/10;
 const ts=Math.round((r.ts[0]+Math.random()*(r.ts[1]-r.ts[0]))*10)/10;
-setStatForms(f=>({...f,[pid]:{...(f[pid]||{}),fg,ts,shootingTier:tier}}));
+setStatForms(f=>{
+const cur=f[pid]||{};
+const fga=deriveFga(cur.pts,fg);
+return{...f,[pid]:{...cur,fg,ts,fga,shootingTier:tier}};
+});
+}
+// Vrije worpen werken op precies dezelfde manier, maar dan los van het veldschot-percentage: jij vult in hoeveel
+// vrije worpen iemand GEMAAKT heeft (die tellen sowieso al mee in de punten), en de kwaliteitsknop verzint het FT%
+// en leidt daar het aantal pogingen (FTA) uit af.
+function setFtm(pid,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+const next={...cur,ftm:v};
+if(cur.ft)next.fta=deriveFga(v,cur.ft);
+return{...f,[pid]:next};
+});
+}
+function rollFtNight(pid,tier){
+const ranges={fire:[85,100],good:[72,85],mid:[55,72],bad:[30,55]};
+const r=ranges[tier];
+const ft=Math.round((r[0]+Math.random()*(r[1]-r[0]))*10)/10;
+setStatForms(f=>{
+const cur=f[pid]||{};
+const fta=deriveFga(cur.ftm,ft);
+return{...f,[pid]:{...cur,ft,fta,ftTier:tier}};
+});
 }
 
 async function saveAll(){
@@ -6614,14 +6660,32 @@ return(
 {step==="setup"&&(
 <>
 <div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>Log Game</div>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>HOE WIL JE INVULLEN?</div>
+<div style={{display:"flex",gap:6,marginBottom:14}}>
+<button data-testid="input-mode-live" onClick={()=>setInputMode("live")} style={{flex:1,padding:"12px 6px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="live"?RED:INPUTBG,color:inputMode==="live"?WHITE:GREY,fontWeight:inputMode==="live"?700:500,fontSize:12.5,textAlign:"left"}}>
+<div>⚡ Live</div><div style={{fontSize:10,opacity:0.8,fontWeight:400,marginTop:2}}>tik mee tijdens het spelen</div>
+</button>
+<button data-testid="input-mode-classic" onClick={()=>setInputMode("classic")} style={{flex:1,padding:"12px 6px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="classic"?RED:INPUTBG,color:inputMode==="classic"?WHITE:GREY,fontWeight:inputMode==="classic"?700:500,fontSize:12.5,textAlign:"left"}}>
+<div>📝 Per speler</div><div style={{fontSize:10,opacity:0.8,fontWeight:400,marginTop:2}}>je kent de eindstand al</div>
+</button>
+</div>
 <input type="date" style={{...IS,marginBottom:12}} value={gameDate} onChange={e=>setGameDate(e.target.value)}/>
 <input placeholder="📍 Locatie (optioneel, bijv. Sporthal Noord)" style={{...IS,marginBottom:12}} value={location} onChange={e=>setLocation(e.target.value)}/>
 <textarea placeholder="📺 Coach commentaar over de wedstrijd (optioneel) — AI maakt er een ESPN-stijl recap van" value={matchHint} onChange={e=>setMatchHint(e.target.value)} rows={2} style={{...IS,marginBottom:12,resize:"vertical",fontFamily:"inherit"}}/>
+{inputMode==="classic"?(
 <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
 <div><input placeholder="Team A naam" style={{...IS,marginBottom:6}} value={tAN} onChange={e=>setTAN(e.target.value)}/><input type="text" inputMode="decimal" placeholder="0.0" style={IS} value={tAS} onChange={e=>setTAS(e.target.value)}/></div>
 <div style={{color:GREY,fontSize:20,fontWeight:700,textAlign:"center",paddingTop:6}}>–</div>
 <div><input placeholder="Team B naam" style={{...IS,marginBottom:6}} value={tBN} onChange={e=>setTBN(e.target.value)}/><input type="text" inputMode="decimal" placeholder="0.0" style={IS} value={tBS} onChange={e=>setTBS(e.target.value)}/></div>
 </div>
+):(
+<div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
+<div><input placeholder="Team A naam" style={IS} value={tAN} onChange={e=>setTAN(e.target.value)}/></div>
+<div style={{color:GREY,fontSize:20,fontWeight:700,textAlign:"center"}}>–</div>
+<div><input placeholder="Team B naam" style={IS} value={tBN} onChange={e=>setTBN(e.target.value)}/></div>
+</div>
+)}
+{inputMode==="live"&&<div style={{color:GREY,fontSize:11,marginTop:-8,marginBottom:14}}>De eindstand vul je straks in, nadat je klaar bent met live invullen — die weet je nu toch nog niet.</div>}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SPELERS TOEWIJZEN</div>
 {players.map(p=>{
 const inA=teamA.includes(p.id),inB=teamB.includes(p.id),inC=chams.includes(p.id);
@@ -6644,53 +6708,8 @@ return(
 )}
 {step==="stats"&&(
 <>
-<div style={{fontWeight:700,fontSize:20,marginBottom:10,textAlign:"center"}}>Stats invullen</div>
-<div style={{display:"flex",gap:6,marginBottom:14}}>
-<button data-testid="input-mode-table" onClick={()=>setInputMode("table")} style={{flex:1,padding:"9px 4px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="table"?RED:INPUTBG,color:inputMode==="table"?WHITE:GREY,fontWeight:inputMode==="table"?700:500,fontSize:11.5}}>📊 Tabel (achteraf)</button>
-<button data-testid="input-mode-live" onClick={()=>setInputMode("live")} style={{flex:1,padding:"9px 4px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="live"?RED:INPUTBG,color:inputMode==="live"?WHITE:GREY,fontWeight:inputMode==="live"?700:500,fontSize:11.5}}>⚡ Live (tikken)</button>
-<button data-testid="input-mode-classic" onClick={()=>setInputMode("classic")} style={{flex:1,padding:"9px 4px",borderRadius:10,border:"none",cursor:"pointer",background:inputMode==="classic"?RED:INPUTBG,color:inputMode==="classic"?WHITE:GREY,fontWeight:inputMode==="classic"?700:500,fontSize:11.5}}>📝 Per speler</button>
-</div>
+<div style={{fontWeight:700,fontSize:20,marginBottom:14,textAlign:"center"}}>{inputMode==="live"?"⚡ Live invullen":"📝 Stats invullen"}</div>
 
-{inputMode==="table"&&(
-<div style={{overflowX:"auto",marginBottom:10}}>
-<div style={{color:GREY,fontSize:11,marginBottom:8}}>Vul de eindstand in — één rij per speler, tab/spring snel door de velden.</div>
-<table style={{borderCollapse:"collapse",width:"100%",minWidth:480}}>
-<thead>
-<tr>
-<th style={{textAlign:"left",padding:"4px 6px",color:GREY,fontSize:10,fontWeight:700,position:"sticky",left:0,background:"#000"}}>SPELER</th>
-{["PTS","REB","AST","STL","BLK","TO"].map(h=>(
-<th key={h} style={{padding:"4px 4px",color:GREY,fontSize:10,fontWeight:700,textAlign:"center",width:44}}>{h}</th>
-))}
-</tr>
-</thead>
-<tbody>
-{all.map(pid=>{
-const p=players.find(x=>x.id===pid);const sf=statForms[pid]||{};
-const team=teamA.includes(pid)?tAN.slice(0,3):teamB.includes(pid)?tBN.slice(0,3):"🦎";
-return(
-<tr key={pid}>
-<td style={{padding:"4px 6px",position:"sticky",left:0,background:"#000",borderBottom:`1px solid ${DIVIDER}`}}>
-<div style={{display:"flex",alignItems:"center",gap:6}}>
-<Avatar player={p} size={22}/>
-<div>
-<div style={{color:WHITE,fontWeight:600,fontSize:12,whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</div>
-<div style={{color:RED,fontSize:9}}>{team}</div>
-</div>
-</div>
-</td>
-{["pts","reb","ast","stl","blk","to"].map(k=>(
-<td key={k} style={{padding:"3px",borderBottom:`1px solid ${DIVIDER}`}}>
-<input data-testid={`table-stat-${pid}-${k}`} type="number" min="0" inputMode="numeric" value={sf[k]||""} onChange={e=>setStat(pid,k,e.target.value)} style={{width:40,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"6px 2px",fontSize:13}}/>
-</td>
-))}
-</tr>
-);
-})}
-</tbody>
-</table>
-<div style={{color:GREY,fontSize:11,marginTop:8}}>Geavanceerde stats (FG%, MIN, +/-) kun je via "Per speler" toevoegen indien nodig.</div>
-</div>
-)}
 
 {inputMode==="live"&&(
 <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -6812,11 +6831,38 @@ return(
 <button key={tier} data-testid={`shot-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollShootingNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.shootingTier===tier?`1px solid ${RED}`:"1px solid transparent",background:sf.shootingTier===tier?`${RED}22`:INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
 ))}
 </div>
-{sf.fg!=null&&<div style={{flexShrink:0,textAlign:"right",fontSize:10,color:GREY,minWidth:70}}>FG {sf.fg}%<br/>TS {sf.ts}%</div>}
+{sf.fg!=null&&<div style={{flexShrink:0,textAlign:"right",fontSize:10,color:GREY,minWidth:78}}>FG {sf.fg}% · {sf.fga||0} pog.<br/>TS {sf.ts}%</div>}
 </div>
 );
 })}
 </div>
+</div>
+
+{/* Vrije worpen: zelfde principe als hierboven, maar los van FG% — jij vult in hoeveel er GEMAAKT zijn, de kwaliteitsknop verzint het FT% en leidt daar het aantal pogingen uit af. */}
+<div style={{marginTop:14}}>
+<div style={{color:GREY,fontSize:11,marginBottom:6}}>🎯 Vrije worpen (FT%) — hetzelfde principe</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{all.map(pid=>{
+const p=players.find(x=>x.id===pid);const sf=statForms[pid]||{};
+const tiers=[["fire","🔥","Enorm goed"],["good","✅","Goed"],["mid","😐","Middelmatig"],["bad","❌","Slecht"]];
+return(
+<div key={pid} style={{display:"flex",alignItems:"center",gap:6,background:"#111",borderRadius:10,padding:"6px 8px"}}>
+<div style={{width:64,flexShrink:0,display:"flex",alignItems:"center",gap:5}}>
+<Avatar player={p} size={20}/>
+<span style={{fontSize:11,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</span>
+</div>
+<input data-testid={`ftm-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="FTM" value={sf.ftm||""} onChange={e=>setFtm(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
+<div style={{display:"flex",gap:4,flex:1}}>
+{tiers.map(([tier,emoji,lbl])=>(
+<button key={tier} data-testid={`ft-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollFtNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.ftTier===tier?`1px solid ${RED}`:"1px solid transparent",background:sf.ftTier===tier?`${RED}22`:INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
+))}
+</div>
+{sf.ft!=null&&<div style={{flexShrink:0,textAlign:"right",fontSize:10,color:GREY,minWidth:70}}>FT {sf.ft}%<br/>{sf.fta||0} pog.</div>}
+</div>
+);
+})}
+</div>
+<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul eerst "FTM" (gemaakte vrije worpen) in, dan een kwaliteitsknop — die tellen al mee in de punten hierboven.</div>
 </div>
 
 {/* Coach commentaar geldt voor de actieve speler in klassieke modus, of de eerste speler in live-modus (optioneel bijschrift) */}

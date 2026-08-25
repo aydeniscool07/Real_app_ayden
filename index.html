@@ -873,7 +873,7 @@ return Math.max(0,p*1.2+r*1.1+a*1.5+s*2+b*2-t*1.5+(fg>40?(fg-40)*0.1:0)).toFixed
 }
 // ── ESPN-style AI commentary helpers
 async function callGroqAI(prompt,maxTokens=400,temperature=0.85){
-const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:maxTokens,temperature,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"openai/gpt-oss-120b",max_tokens:maxTokens,temperature,messages:[{role:"user",content:prompt}]})});
 const rawText=await res.text();
 if(!res.ok)throw new Error("API fout "+res.status+": "+rawText.slice(0,200));
 const data=JSON.parse(rawText);
@@ -1932,7 +1932,7 @@ Pick the single best NBA player comparison and give a fun, specific, confident a
 Respond ONLY with valid JSON (no markdown, no backticks) in this exact shape:
 {"nbaPlayer":"Full Name","era":"e.g. 2016–present","nickname":"e.g. The Slim Reaper","matchPct":87,"reason":"2-3 sentence explanation of WHY they match — specific stats, playstyle, tendencies","keyStats":["stat insight 1","stat insight 2","stat insight 3"],"verdict":"One punchy sentence, like a headline"}`;
 try{
-const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:1000,temperature:0.8,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"openai/gpt-oss-120b",max_tokens:1000,temperature:0.8,messages:[{role:"user",content:prompt}]})});
 const rawText=await res.text();
 if(!res.ok){setErr("API fout "+res.status+": "+rawText.slice(0,200));setLoading(false);return;}
 const data=JSON.parse(rawText);
@@ -7665,7 +7665,7 @@ Team "${teamBName}": ${namesB.join("; ")}
 Geef een scherpe, specifieke voorspelling. Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
 {"winner":"naam van het winnende team","confidence":72,"summary":"1-2 zinnen kernoordeel","breakdown":["punt 1 over een specifiek statistisch voordeel","punt 2","punt 3"],"scoreGuess":"bijv. 10-7"}`;
 try{
-const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:800,temperature:0.8,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"openai/gpt-oss-120b",max_tokens:800,temperature:0.8,messages:[{role:"user",content:prompt}]})});
 const rawText=await res.text();
 if(!res.ok){setAiErr("API fout "+res.status+": "+rawText.slice(0,200));setAiLoading(false);return;}
 const data=JSON.parse(rawText);
@@ -7694,7 +7694,7 @@ ${namesA.join("; ")}
 Antwoord ALLEEN met geldige JSON (geen markdown):
 {"type":"team","nbaMatch":"bijv. Golden State Warriors","era":"jaren","matchPct":85,"reason":"2-3 zinnen waarom dit team lijkt op het NBA-team","verdict":"één pakkende zin"}`;
 try{
-const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:700,temperature:0.8,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"openai/gpt-oss-120b",max_tokens:700,temperature:0.8,messages:[{role:"user",content:prompt}]})});
 const rawText=await res.text();
 if(!res.ok){setNbaErr("API fout "+res.status+": "+rawText.slice(0,200));setNbaLoading(false);return;}
 const data=JSON.parse(rawText);
@@ -8532,7 +8532,7 @@ ${facts.map((f,i)=>`${i+1}. ${f}`).join("\n")}
 Maak hier 5 leuke meerkeuzevragen (multiple choice) van in het Nederlands, gebaseerd UITSLUITEND op deze feiten. Verzin voor elke vraag 3 plausibele maar foutieve antwoorden (bijvoorbeeld andere spelernamen of net andere getallen) naast het juiste antwoord. Varieer de positie van het juiste antwoord.
 Respond ONLY with valid JSON (no markdown, no backticks) in this exact shape:
 [{"question":"...","options":["a","b","c","d"],"correctIndex":0,"explanation":"korte leuke uitleg waarom dit klopt"}]`;
-const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:1200,temperature:0.9,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+"gsk_"+"CoiOnlawclSXvMYso6efWGdyb3FYeAlDClLXoX8wjeuiGp6nex7l"},body:JSON.stringify({model:"openai/gpt-oss-120b",max_tokens:1200,temperature:0.9,messages:[{role:"user",content:prompt}]})});
 const rawText=await res.text();
 if(!res.ok)throw new Error("API fout "+res.status+": "+rawText.slice(0,200));
 const data=JSON.parse(rawText);

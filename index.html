@@ -2749,6 +2749,7 @@ const [seasonForm,setSeasonForm]=useState({name:"",startDate:"",endDate:""});
 const [cardFor,setCardFor]=useState(null); // player object or null
 const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke speler-kaart is uitgeklapt
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
+const [expandedClutchId,setExpandedClutchId]=useState(null); // Clutch Lab: welke speler-kaart is uitgeklapt
 
 // Zodra de seizoenen async binnenkomen (Firestore), en er nog niks geselecteerd is, pak het eerste seizoen.
 useEffect(()=>{
@@ -2835,9 +2836,9 @@ const ppgByPid={},effByPid={};
 playerStats.forEach(ps=>{ppgByPid[ps.player.id]=ps.ppg;effByPid[ps.player.id]=ps.eff;});
 const byMatch={};
 monthGames.forEach(g=>{const key=g.matchId||g.id;(byMatch[key]=byMatch[key]||[]).push(g);});
-const counts={};
-const bump=pid=>{counts[pid]=(counts[pid]||0)+1;};
-Object.values(byMatch).forEach(matchGames=>{
+const counts={},reasonsByPid={};
+Object.entries(byMatch).forEach(([key,matchGames])=>{
+const date=matchGames[0]?.date;
 // Criterium 1: neemt het over van de mvp
 const starGame=matchGames.find(g=>g.playerId===mvp.player.id);
 const starShowedUp=starGame&&(+calcFps(starGame))>=mvp.eff;
@@ -2845,7 +2846,8 @@ if(!starShowedUp){
 const others=matchGames.filter(g=>g.playerId!==mvp.player.id);
 if(others.length){
 const best=others.reduce((a,b)=>(+calcFps(b)>+calcFps(a)?b:a));
-bump(best.playerId);
+counts[best.playerId]=(counts[best.playerId]||0)+1;
+(reasonsByPid[best.playerId]=reasonsByPid[best.playerId]||[]).push({type:"takeover",date,detail:`${mvp.player.name} ${starGame?`bleef onder zijn eff-gem. (${calcFps(starGame)} vs ${mvp.eff})`:"speelde niet mee"} — beste eff van de match (${calcFps(best)})`});
 }
 }
 // Criterium 2 & 3 per speler binnen deze match
@@ -2853,28 +2855,36 @@ matchGames.forEach(g=>{
 if(!g.team||g.team==="chameleon")return;
 const teammates=matchGames.filter(o=>o.team===g.team&&o.playerId!==g.playerId);
 const opponents=matchGames.filter(o=>o.team&&o.team!=="chameleon"&&o.team!==g.team);
-const carried=teammates.some(t=>{
+const underperformer=teammates.find(t=>{
 const tAvg=ppgByPid[t.playerId];
 if(tAvg==null||!(t.pts<tAvg))return false;
 return t.pts>0&&g.pts>=t.pts*1.8;
 });
-if(carried){bump(g.playerId);return;}
+if(underperformer){
+const tp=players.find(p=>p.id===underperformer.playerId);
+counts[g.playerId]=(counts[g.playerId]||0)+1;
+(reasonsByPid[g.playerId]=reasonsByPid[g.playerId]||[]).push({type:"carry",date,detail:`${g.pts} pts vs ${underperformer.pts} pts van ${tp?.name||"teamgenoot"} (gem. ${ppgByPid[underperformer.playerId]})`});
+return;
+}
 const myRank=rankByPid[g.playerId],myEffAvg=effByPid[g.playerId];
 if(myRank!=null&&myEffAvg>0){
-const beatsHigherRanked=opponents.some(o=>{
+const higherOpp=opponents.find(o=>{
 const oRank=rankByPid[o.playerId];
 return oRank!=null&&oRank<myRank;
 });
-if(beatsHigherRanked&&(+calcFps(g))>=myEffAvg*1.5)bump(g.playerId);
+if(higherOpp&&(+calcFps(g))>=myEffAvg*1.5){
+const op=players.find(p=>p.id===higherOpp.playerId);
+counts[g.playerId]=(counts[g.playerId]||0)+1;
+(reasonsByPid[g.playerId]=reasonsByPid[g.playerId]||[]).push({type:"slayer",date,detail:`${calcFps(g)} eff (gem. ${myEffAvg}) tegen hoger geplaatste ${op?.name||"tegenstander"}`});
+}
 }
 });
 });
 const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
 if(!entries.length)return null;
-const [pid,count]=entries[0];
-const player=players.find(p=>p.id===pid);
-if(!player)return null;
-return{player,count};
+const board=entries.map(([pid,count])=>({player:players.find(p=>p.id===pid),count,reasons:(reasonsByPid[pid]||[]).sort((a,b)=>(b.date||"").localeCompare(a.date||""))})).filter(x=>x.player);
+if(!board.length)return null;
+return{player:board[0].player,count:board[0].count,board};
 },[monthGames,mvp,players,playerStats]);
 
 
@@ -3669,6 +3679,57 @@ return(
 );
 })}
 </div>
+
+{/* Clutch Lab */}
+{clutchLeader&&clutchLeader.board&&clutchLeader.board.length>0&&(
+<div style={{marginTop:8,marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🕐 CLUTCH LAB — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>
+Een "clutch appearance" telt per match als één van deze drie waar is: <span style={{color:WHITE,fontWeight:700}}>Takeover</span> (beste eff terwijl {mvp.player.name} zijn gem. niet haalde of niet speelde), <span style={{color:WHITE,fontWeight:700}}>Carry</span> (80%+ meer punten dan een onderpresterende teamgenoot), of <span style={{color:WHITE,fontWeight:700}}>Giant Slayer</span> (50%+ boven eigen eff-gem. tegen een hoger geplaatste tegenstander).
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{clutchLeader.board.map((cb,i)=>{
+const isOpen=expandedClutchId===cb.player.id;
+const typeInfo={takeover:{label:"Takeover",color:"#E8312A",emoji:"🔥"},carry:{label:"Carry",color:"#f5a524",emoji:"💪"},slayer:{label:"Giant Slayer",color:"#9B59B6",emoji:"⚔️"}};
+return(
+<div key={cb.player.id} onClick={()=>setExpandedClutchId(isOpen?null:cb.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{width:22,height:22,borderRadius:"50%",background:i===0?RED:"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0}}>{i+1}</div>
+<Avatar player={cb.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cb.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{cb.reasons.length} clutch moment{cb.reasons.length===1?"":"en"}</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:RED,fontWeight:800,fontSize:18}}>{cb.count}×</div>
+</div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:8,cursor:"default"}}>
+{cb.reasons.map((r,ri)=>{
+const ti=typeInfo[r.type]||{label:r.type,color:GREY,emoji:"•"};
+return(
+<div key={ri} style={{display:"flex",gap:8,alignItems:"flex-start",background:"rgba(255,255,255,0.02)",borderRadius:8,padding:"8px 10px"}}>
+<span style={{fontSize:13,flexShrink:0}}>{ti.emoji}</span>
+<div style={{flex:1,minWidth:0}}>
+<div style={{display:"flex",gap:8,alignItems:"center",marginBottom:2}}>
+<span style={{color:ti.color,fontWeight:800,fontSize:10,letterSpacing:0.5}}>{ti.label.toUpperCase()}</span>
+<span style={{color:GREY,fontSize:10}}>{r.date?.slice(5)||""}</span>
+</div>
+<div style={{color:GREY,fontSize:11,lineHeight:1.4}}>{r.detail}</div>
+</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</div>
+)}
 
 {/* Elo Rating: teamgebaseerde Elo, chronologisch doorgerekend binnen de huidige periode. */}
 {(()=>{

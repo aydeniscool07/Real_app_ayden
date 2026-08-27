@@ -2821,22 +2821,53 @@ const best=playerStats.slice().sort((a,b)=>avg(b.games,k)-avg(a.games,k))[0];
 return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 });
 
-// "Clutch" = wie neemt het over op dagen dat de normale uitblinker (mvp van deze periode) het laat afweten?
-// Per speeldag: als de mvp niet speelde, of onder zijn eigen gemiddelde eff bleef, telt de beste eff van
-// die dag (van een andere speler) als een "clutch appearance" voor die speler.
+// "Clutch" telt een "clutch appearance" per match als één van de volgende waar is:
+// 1) Neemt het over — de mvp van deze periode speelde niet, of bleef onder zijn eigen gemiddelde eff, en
+//    deze speler had de beste eff van de match.
+// 2) Carry job — deze speler scoort 80%+ meer punten dan een teamgenoot die zelf onder zijn eigen
+//    gemiddelde punten bleef die match (compenseert een onderpresterende teamgenoot).
+// 3) Giant slayer — deze speler speelt tegen een tegenstander die dit seizoen/deze periode hoger staat
+//    dan hijzelf, en haalt daarbij minstens 50% boven zijn eigen gemiddelde eff.
 const clutchLeader=useMemo(()=>{
 if(!mvp)return null;
-const byDate={};
-monthGames.forEach(g=>{(byDate[g.date]=byDate[g.date]||[]).push(g);});
+const rankByPid={};playerStats.forEach((ps,i)=>{rankByPid[ps.player.id]=i;}); // lager = hoger geplaatst
+const ppgByPid={},effByPid={};
+playerStats.forEach(ps=>{ppgByPid[ps.player.id]=ps.ppg;effByPid[ps.player.id]=ps.eff;});
+const byMatch={};
+monthGames.forEach(g=>{const key=g.matchId||g.id;(byMatch[key]=byMatch[key]||[]).push(g);});
 const counts={};
-Object.values(byDate).forEach(dayGames=>{
-const starGame=dayGames.find(g=>g.playerId===mvp.player.id);
+const bump=pid=>{counts[pid]=(counts[pid]||0)+1;};
+Object.values(byMatch).forEach(matchGames=>{
+// Criterium 1: neemt het over van de mvp
+const starGame=matchGames.find(g=>g.playerId===mvp.player.id);
 const starShowedUp=starGame&&(+calcFps(starGame))>=mvp.eff;
-if(starShowedUp)return;
-const others=dayGames.filter(g=>g.playerId!==mvp.player.id);
-if(!others.length)return;
+if(!starShowedUp){
+const others=matchGames.filter(g=>g.playerId!==mvp.player.id);
+if(others.length){
 const best=others.reduce((a,b)=>(+calcFps(b)>+calcFps(a)?b:a));
-counts[best.playerId]=(counts[best.playerId]||0)+1;
+bump(best.playerId);
+}
+}
+// Criterium 2 & 3 per speler binnen deze match
+matchGames.forEach(g=>{
+if(!g.team||g.team==="chameleon")return;
+const teammates=matchGames.filter(o=>o.team===g.team&&o.playerId!==g.playerId);
+const opponents=matchGames.filter(o=>o.team&&o.team!=="chameleon"&&o.team!==g.team);
+const carried=teammates.some(t=>{
+const tAvg=ppgByPid[t.playerId];
+if(tAvg==null||!(t.pts<tAvg))return false;
+return t.pts>0&&g.pts>=t.pts*1.8;
+});
+if(carried){bump(g.playerId);return;}
+const myRank=rankByPid[g.playerId],myEffAvg=effByPid[g.playerId];
+if(myRank!=null&&myEffAvg>0){
+const beatsHigherRanked=opponents.some(o=>{
+const oRank=rankByPid[o.playerId];
+return oRank!=null&&oRank<myRank;
+});
+if(beatsHigherRanked&&(+calcFps(g))>=myEffAvg*1.5)bump(g.playerId);
+}
+});
 });
 const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
 if(!entries.length)return null;
@@ -2844,7 +2875,7 @@ const [pid,count]=entries[0];
 const player=players.find(p=>p.id===pid);
 if(!player)return null;
 return{player,count};
-},[monthGames,mvp,players]);
+},[monthGames,mvp,players,playerStats]);
 
 
 // MVP per month (used for streaks + counts + past-months carousel)
@@ -3041,7 +3072,7 @@ return (
 </div>
 ))}
 {clutchLeader&&(
-<div title={`Springt in wanneer ${mvp.player.name} zijn gemiddelde eff (${mvp.eff}) niet haalt of niet speelde`} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,border:`1px solid ${RED}55`}}>
+<div title={`Telt op als: (1) ${mvp.player.name} zijn gemiddelde eff (${mvp.eff}) niet haalt of niet speelt, (2) 80%+ meer punten dan een onderpresterende teamgenoot, of (3) 50%+ boven eigen gemiddelde eff tegen een hoger geplaatste tegenstander`} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,border:`1px solid ${RED}55`}}>
 <Avatar player={clutchLeader.player} size={36}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{color:RED,fontSize:11,fontWeight:700}}>🕐 CLUTCH</div>
@@ -3052,7 +3083,7 @@ return (
 )}
 </div>
 {clutchLeader&&(
-<div style={{color:GREY,fontSize:11,marginTop:-14,marginBottom:20,fontStyle:"italic"}}>🕐 Clutch = neemt het over wanneer {mvp.player.name} zijn eff-gemiddelde niet haalt of niet speelde</div>
+<div style={{color:GREY,fontSize:11,marginTop:-14,marginBottom:20,fontStyle:"italic"}}>🕐 Clutch = neemt het over van {mvp.player.name}, carryt een onderpresterende teamgenoot (80%+ meer punten), of speelt enorm goed (50%+ boven eigen eff-gemiddelde) tegen een hoger geplaatste tegenstander</div>
 )}
 
 {/* Full leaderboard this month */}

@@ -2821,6 +2821,31 @@ const best=playerStats.slice().sort((a,b)=>avg(b.games,k)-avg(a.games,k))[0];
 return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 });
 
+// "Clutch" = wie neemt het over op dagen dat de normale uitblinker (mvp van deze periode) het laat afweten?
+// Per speeldag: als de mvp niet speelde, of onder zijn eigen gemiddelde eff bleef, telt de beste eff van
+// die dag (van een andere speler) als een "clutch appearance" voor die speler.
+const clutchLeader=useMemo(()=>{
+if(!mvp)return null;
+const byDate={};
+monthGames.forEach(g=>{(byDate[g.date]=byDate[g.date]||[]).push(g);});
+const counts={};
+Object.values(byDate).forEach(dayGames=>{
+const starGame=dayGames.find(g=>g.playerId===mvp.player.id);
+const starShowedUp=starGame&&(+calcFps(starGame))>=mvp.eff;
+if(starShowedUp)return;
+const others=dayGames.filter(g=>g.playerId!==mvp.player.id);
+if(!others.length)return;
+const best=others.reduce((a,b)=>(+calcFps(b)>+calcFps(a)?b:a));
+counts[best.playerId]=(counts[best.playerId]||0)+1;
+});
+const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+if(!entries.length)return null;
+const [pid,count]=entries[0];
+const player=players.find(p=>p.id===pid);
+if(!player)return null;
+return{player,count};
+},[monthGames,mvp,players]);
+
 
 // MVP per month (used for streaks + counts + past-months carousel)
 // Only completed months count as trophies
@@ -3015,7 +3040,20 @@ return (
 </div>
 </div>
 ))}
+{clutchLeader&&(
+<div title={`Springt in wanneer ${mvp.player.name} zijn gemiddelde eff (${mvp.eff}) niet haalt of niet speelde`} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,border:`1px solid ${RED}55`}}>
+<Avatar player={clutchLeader.player} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>🕐 CLUTCH</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:20}}>{clutchLeader.count}×</div>
+<div style={{color:GREY,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{clutchLeader.player.name}</div>
 </div>
+</div>
+)}
+</div>
+{clutchLeader&&(
+<div style={{color:GREY,fontSize:11,marginTop:-14,marginBottom:20,fontStyle:"italic"}}>🕐 Clutch = neemt het over wanneer {mvp.player.name} zijn eff-gemiddelde niet haalt of niet speelde</div>
+)}
 
 {/* Full leaderboard this month */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>

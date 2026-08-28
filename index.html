@@ -251,6 +251,47 @@ return pick(templates);
 }
 
 function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+
+// ── All-time single-game record detection: gebruikt om LBAcentel automatisch te laten posten
+const RECORD_STAT_WORDS={pts:"punten",reb:"rebounds",ast:"assists",stl:"steals",blk:"blocks",eff:"efficiency"};
+function findBrokenRecords(matchGames,allGames,players){
+const keys=["pts","reb","ast","stl","blk"];
+const matchIds=new Set(matchGames.map(g=>g.id));
+const priorGames=allGames.filter(g=>g.playerId&&!matchIds.has(g.id));
+const broken=[];
+keys.forEach(key=>{
+const priorMax=priorGames.reduce((m,g)=>Math.max(m,+g[key]||0),0);
+matchGames.forEach(g=>{
+const val=+g[key]||0;
+if(val>priorMax&&val>0){
+const p=players.find(x=>x.id===g.playerId);
+if(p)broken.push({key,val,player:p});
+}
+});
+});
+const priorEffMax=priorGames.reduce((m,g)=>Math.max(m,+calcFps(g)||0),0);
+matchGames.forEach(g=>{
+const val=+calcFps(g)||0;
+if(val>priorEffMax&&val>0){
+const p=players.find(x=>x.id===g.playerId);
+if(p)broken.push({key:"eff",val,player:p});
+}
+});
+return broken;
+}
+function generateLBAcentelRecordPost(broken){
+const r=broken[0];
+const n=r.player.name;
+const label=RECORD_STAT_WORDS[r.key]||r.key;
+const templates=[
+`BREAKING: ${n} verbreekt zojuist het all-time record ${label} met ${r.val}. De archieven worden herschreven.\n\n(Via ${lbaSource()})`,
+`RECORD ALERT: ${n} noteert ${r.val} ${label} — nieuw all-time record. Vorige recordhouders bellen hun advocaat.\n\n(Via ${lbaSource()})`,
+`${n.toUpperCase()} ZET ZOJUIST EEN NIEUW ALL-TIME RECORD NEER: ${r.val} ${label.toUpperCase()} 😭😭😭`,
+`SOURCES: het all-time record ${label} staat sinds vanavond op naam van ${n} (${r.val}). Niemand had dit zien aankomen.\n\n(Via ${lbaSource()})`,
+`${n} met ${r.val} ${label} — een nieuw hoofdstuk in de recordboeken. De vorige recordhouder is niet bereikbaar voor commentaar.`
+];
+return pick(templates);
+}
 // Small stable string hash (djb2-ish), used to build deterministic short ids
 // from variable-length signatures like an injury-report fingerprint.
 function hashStr(str){
@@ -1819,6 +1860,35 @@ return{p1,p2,meetings:count};
 }).filter(r=>r.p1&&r.p2).sort((a,b)=>b.meetings-a.meetings);
 }
 
+// ── Head-to-head records: wie domineert wie, over alle matches heen
+function computeH2HRecords(allGames,allPlayers,minMeetings=2){
+const byMatch={};
+allGames.forEach(g=>{if(!g.matchId||g.team==="chameleon")return;(byMatch[g.matchId]=byMatch[g.matchId]||[]).push(g);});
+const pairs={};
+Object.values(byMatch).forEach(gs=>{
+for(let i=0;i<gs.length;i++)for(let j=i+1;j<gs.length;j++){
+const a=gs[i],b=gs[j];
+if(a.playerId===b.playerId||a.team===b.team)continue;
+const aScore=parseFloat(a.team==="A"?a.teamAScore:a.teamBScore);
+const bScore=parseFloat(a.team==="A"?a.teamBScore:a.teamAScore);
+if(isNaN(aScore)||isNaN(bScore)||(!aScore&&!bScore))continue;
+const key=[a.playerId,b.playerId].sort().join("|");
+const [id1,id2]=key.split("|");
+const p=pairs[key]||(pairs[key]={id1,id2,w1:0,w2:0,d:0});
+if(aScore>bScore){if(a.playerId===id1)p.w1++;else p.w2++;}
+else if(aScore<bScore){if(a.playerId===id1)p.w2++;else p.w1++;}
+else p.d++;
+}
+});
+return Object.values(pairs).map(p=>{
+const p1=allPlayers.find(x=>x.id===p.id1),p2=allPlayers.find(x=>x.id===p.id2);
+const total=p.w1+p.w2+p.d;
+const dominant=p.w1>p.w2?p1:(p.w2>p.w1?p2:null);
+const underdog=dominant?(dominant===p1?p2:p1):null;
+return{p1,p2,w1:p.w1,w2:p.w2,d:p.d,total,dominant,underdog,diff:Math.abs(p.w1-p.w2)};
+}).filter(r=>r.p1&&r.p2&&r.total>=minMeetings&&r.dominant).sort((a,b)=>b.diff-a.diff||b.total-a.total);
+}
+
 // ── Carrière mijlpalen: ronde getallen voor cumulatieve stats
 const MILESTONE_THRESHOLDS={pts:[50,100,250,500,1000,2500,5000],reb:[50,100,250,500,1000],ast:[25,50,100,250,500],stl:[10,25,50,100],blk:[10,25,50,100]};
 const MILESTONE_LABELS={pts:"punten",reb:"rebounds",ast:"assists",stl:"steals",blk:"blocks"};
@@ -2046,13 +2116,19 @@ t.games.push(g);
 const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,cham:t.cham,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
 if(!rows.length)return null;
 const top=key=>rows.slice().sort((a,b)=>b[key]-a[key])[0];
+const topTwo=key=>rows.slice().sort((a,b)=>b[key]-a[key]);
+const withGap=(key,r,decimals=1)=>{
+const ranked=topTwo(key);
+const runnerUp=ranked[1];
+return runnerUp?{gap:+(r[key]-runnerUp[key]).toFixed(decimals),runnerUpId:runnerUp.pid}:{gap:null,runnerUpId:null};
+};
 switch(awardId){
-case"mvp":{const r=top("eff");return{ids:[r.pid],reason:`${r.eff.toFixed(1)} eff gem.`};}
-case"scoring":{const r=top("ppg");return{ids:[r.pid],reason:`${r.ppg.toFixed(1)} pts gem.`};}
-case"rebounds":{const r=top("rpg");return{ids:[r.pid],reason:`${r.rpg.toFixed(1)} reb gem.`};}
-case"assists":{const r=top("apg");return{ids:[r.pid],reason:`${r.apg.toFixed(1)} ast gem.`};}
-case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`};}
-case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`};}
+case"mvp":{const r=top("eff");return{ids:[r.pid],reason:`${r.eff.toFixed(1)} eff gem.`,...withGap("eff",r)};}
+case"scoring":{const r=top("ppg");return{ids:[r.pid],reason:`${r.ppg.toFixed(1)} pts gem.`,...withGap("ppg",r)};}
+case"rebounds":{const r=top("rpg");return{ids:[r.pid],reason:`${r.rpg.toFixed(1)} reb gem.`,...withGap("rpg",r)};}
+case"assists":{const r=top("apg");return{ids:[r.pid],reason:`${r.apg.toFixed(1)} ast gem.`,...withGap("apg",r)};}
+case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`,...withGap("dpg",r)};}
+case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`,...withGap("cham",r,0)};}
 case"alllba1":{
 const ranked=rows.map(r=>{const wl=getWinLoss(r.games);const tot=wl.w+wl.l+wl.d;return{pid:r.pid,pct:tot?wl.w/tot:0,tot,w:wl.w,l:wl.l};}).filter(r=>r.tot>=2).sort((a,b)=>b.pct-a.pct||b.w-a.w);
 return ranked.length?{ids:ranked.slice(0,2).map(r=>r.pid),reason:`Beste win% ${periodLbl||"deze periode"} (${ranked.slice(0,2).map(r=>`${r.w}-${r.l}`).join(", ")})`}:null;
@@ -2072,7 +2148,7 @@ const pv=prevByPid[r.pid];
 if(!pv||!pv.gp)return null;
 return{pid:r.pid,delta:r.eff-pv.effSum/pv.gp};
 }).filter(Boolean).sort((a,b)=>b.delta-a.delta);
-return deltas.length?{ids:[deltas[0].pid],reason:`${deltas[0].delta>=0?"+":""}${deltas[0].delta.toFixed(1)} eff t.o.v. vorige periode`}:null;
+return deltas.length?{ids:[deltas[0].pid],reason:`${deltas[0].delta>=0?"+":""}${deltas[0].delta.toFixed(1)} eff t.o.v. vorige periode`,gap:deltas.length>1?+(deltas[0].delta-deltas[1].delta).toFixed(1):null,runnerUpId:deltas[1]?.pid||null}:null;
 }
 case"clutch":{
 const mvpRow=top("eff");
@@ -2088,7 +2164,7 @@ if(others.length){const best=others.reduce((a,b)=>(+calcFps(b)>+calcFps(a)?b:a))
 }
 });
 const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-return entries.length?{ids:[entries[0][0]],reason:`${entries[0][1]}× clutch moment ${periodLbl||"deze periode"}`}:null;
+return entries.length?{ids:[entries[0][0]],reason:`${entries[0][1]}× clutch moment ${periodLbl||"deze periode"}`,gap:entries.length>1?entries[0][1]-entries[1][1]:null,runnerUpId:entries[1]?.[0]||null}:null;
 }
 default:return null;
 }
@@ -2257,6 +2333,12 @@ return(
 </button>
 </div>
 <div style={{color:GREY,fontSize:11,marginTop:6}}>{suggestion.reason} — jij beslist uiteindelijk wie 'm krijgt.</div>
+{suggestion.gap!=null&&suggestion.runnerUpId&&(()=>{
+const ru=players.find(p=>p.id===suggestion.runnerUpId);
+return ru?(
+<div style={{color:GREY,fontSize:11,marginTop:2}}>Voorsprong van <span style={{color:WHITE,fontWeight:700}}>{Math.abs(suggestion.gap)}</span> op {ru.name}</div>
+):null;
+})()}
 </div>
 )}
 
@@ -3041,6 +3123,21 @@ return{pts:mk("pts"),reb:mk("reb"),ast:mk("ast"),stl:mk("stl"),blk:mk("blk")};
 const gameRecords=useMemo(()=>{
 const mk=key=>games.filter(g=>g.playerId).map(g=>({player:players.find(p=>p.id===g.playerId),val:key==="eff"?parseFloat(calcFps(g)):(+g[key]||0),date:g.date})).filter(x=>x.player&&x.val>0).sort((a,b)=>b.val-a.val).slice(0,10);
 return{pts:mk("pts"),reb:mk("reb"),ast:mk("ast"),stl:mk("stl"),blk:mk("blk"),eff:mk("eff")};
+},[games,players]);
+
+// Rivaliteiten voor Records: grootste dominantie in head-to-head (min. 3 ontmoetingen)
+const h2hRecords=useMemo(()=>computeH2HRecords(games,players,3).slice(0,8),[games,players]);
+
+// Cursed records — het tegenovergestelde van een record, in dezelfde LBAcentel-deadpan toon
+const cursedRecords=useMemo(()=>{
+const withMinutes=games.filter(g=>g.playerId&&g.team!=="chameleon");
+const worstEff=withMinutes.map(g=>({player:players.find(p=>p.id===g.playerId),val:parseFloat(calcFps(g)),date:g.date})).filter(x=>x.player).sort((a,b)=>a.val-b.val).slice(0,10);
+const mostTO=withMinutes.map(g=>({player:players.find(p=>p.id===g.playerId),val:+g.to||0,date:g.date})).filter(x=>x.player&&x.val>0).sort((a,b)=>b.val-a.val).slice(0,10);
+const scorelessOutings=withMinutes.filter(g=>(+g.pts||0)===0&&((+g.reb||0)+(+g.ast||0)+(+g.stl||0)+(+g.blk||0))===0);
+const blanks={};
+scorelessOutings.forEach(g=>{blanks[g.playerId]=(blanks[g.playerId]||0)+1;});
+const goose=Object.entries(blanks).map(([pid,count])=>({player:players.find(p=>p.id===pid),val:count})).filter(x=>x.player).sort((a,b)=>b.val-a.val).slice(0,10);
+return{worstEff,mostTO,goose};
 },[games,players]);
 
 
@@ -3958,6 +4055,78 @@ return(
 <span style={{color:bi===0?RED:GREY,width:16,fontWeight:bi===0?800:400}}>{bi+1}</span>
 <span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.player.name}</span>
 <span style={{color:GREY}}>{b.val} <span style={{opacity:0.6}}>· {b.date?.slice(5)||""}</span></span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:10}}>⚔️ RIVALITEITEN — GROOTSTE DOMINANTIE</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+{h2hRecords.length===0&&<div style={{color:GREY,fontSize:12}}>Nog geen rivaliteiten met genoeg ontmoetingen (min. 3× tegen elkaar gespeeld).</div>}
+{h2hRecords.map((r,i)=>{
+const rk=`h2h_${r.p1.id}_${r.p2.id}`;
+const isOpen=expandedRecord===rk;
+return(
+<div key={rk} onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={r.dominant} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>DOMINEERT {r.underdog.name.toUpperCase()}</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.dominant.name}</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{r.dominant===r.p1?`${r.w1}-${r.w2}`:`${r.w2}-${r.w1}`}</div>
+<div style={{color:GREY,fontSize:10}}>{r.total} ontmoetingen</div>
+</div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,cursor:"default"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={r.p1} size={26}/>
+<span style={{color:WHITE,fontSize:12,flex:1}}>{r.p1.name}</span>
+<span style={{color:GREY,fontSize:12}}>{r.w1}-{r.w2}{r.d?`-${r.d}d`:""}</span>
+<span style={{color:WHITE,fontSize:12,flex:1,textAlign:"right"}}>{r.p2.name}</span>
+<Avatar player={r.p2} size={26}/>
+</div>
+</div>
+)}
+</div>
+);
+})}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>💀 CURSED RECORDS</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>De andere kant van de recordboeken.</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{[{key:"worstEff",lbl:"LAAGSTE EFF — 1 GAME",data:cursedRecords.worstEff},{key:"mostTO",lbl:"MEESTE TURNOVERS — 1 GAME",data:cursedRecords.mostTO},{key:"goose",lbl:"MEESTE GOOSE EGGS (0 IN ALLES)",data:cursedRecords.goose}].map(({key,lbl,data})=>{
+if(!data||!data.length)return null;
+const top=data[0];
+const rk=`cursed_${key}`;
+const isOpen=expandedRecord===rk;
+return(
+<div key={rk} onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?"1px solid #66666655":"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={top.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#999",fontSize:11,fontWeight:700}}>{lbl}</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{top.player.name}</div>
+{top.date&&<div style={{color:GREY,fontSize:10}}>{top.date.slice(5)}</div>}
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18,flexShrink:0}}>{top.val}</div>
+<span style={{color:GREY,fontSize:14,marginLeft:4,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+{data.map((b,bi)=>(
+<div key={bi} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+<span style={{color:GREY,width:16}}>{bi+1}</span>
+<span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.player.name}</span>
+<span style={{color:GREY}}>{b.val} {b.date?<span style={{opacity:0.6}}>· {b.date.slice(5)}</span>:null}</span>
 </div>
 ))}
 </div>
@@ -13841,7 +14010,37 @@ createdAt:new Date().toISOString()
 });
 },[games,players,larpPosts,loading]);
 
-// ── LBAcentel: idle posts (unprompted fake news throughout the day)
+// ── LBAcentel: posts when an all-time single-game record falls
+const lbacentelRecordRanRef=useRef(new Set());
+useEffect(()=>{
+if(loading||!games.length||!players.length)return;
+const eligible=games.filter(g=>{
+if(g.team==="chameleon")return false;
+const createdAfterLaunch=g.createdAt&&new Date(g.createdAt).getTime()>BOT_LAUNCH_EPOCH;
+const playedOnBackfill=g.date&&g.date>=BOT_BACKFILL_DATE;
+return createdAfterLaunch||playedOnBackfill;
+});
+const byMatch={};
+eligible.forEach(g=>{const mid=g.matchId||g.id;(byMatch[mid]=byMatch[mid]||[]).push(g);});
+Object.entries(byMatch).forEach(([mid,entries])=>{
+const postId=`auto-lbacentel-record-${mid}`;
+if(larpPosts.find(p=>p.id===postId))return;
+if(lbacentelRecordRanRef.current.has(mid))return;
+lbacentelRecordRanRef.current.add(mid);
+const broken=findBrokenRecords(entries,games,players);
+if(!broken.length)return;
+setTimeout(()=>{
+fbSave("larp_posts",{
+id:postId,
+tempName:LBACENTEL.handle,
+botId:LBACENTEL.id,
+text:generateLBAcentelRecordPost(broken),
+gif:null,performanceId:null,likes:rollLikes(true),pinned:false,isBot:true,
+createdAt:new Date().toISOString()
+}).catch(e=>console.error("LBAcentel record post error:",e));
+},1500+Math.random()*4000);
+});
+},[games,players,larpPosts,loading]);
 useEffect(()=>{
 if(loading)return;
 function tryLBAcentelIdle(){

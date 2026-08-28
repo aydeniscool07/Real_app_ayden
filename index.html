@@ -3140,6 +3140,138 @@ const goose=Object.entries(blanks).map(([pid,count])=>({player:players.find(p=>p
 return{worstEff,mostTO,goose};
 },[games,players]);
 
+// Vorige periode (voor Award Race MIP, Power Rankings-trend en Periode Vergelijking)
+const prevPeriodGames=useMemo(()=>{
+if(rangeMode==="season"){
+if(!activeSeason)return[];
+const sorted=seasons.slice().sort((a,b)=>a.startDate.localeCompare(b.startDate));
+const idx=sorted.findIndex(s=>s.id===activeSeason.id);
+const prev=idx>0?sorted[idx-1]:null;
+if(!prev)return[];
+return games.filter(g=>g.date&&g.playerId&&g.date>=prev.startDate&&g.date<=prev.endDate);
+}
+if(rangeMode==="alltime")return [];
+const [py,pmo]=selMonth.split("-").map(Number);
+const prevD=new Date(py,pmo-2,1);
+const prevMonth=`${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,"0")}`;
+return games.filter(g=>g.date&&g.playerId&&g.date.slice(0,7)===prevMonth);
+},[rangeMode,activeSeason,selMonth,seasons,games]);
+const prevPeriodLbl=useMemo(()=>{
+if(rangeMode==="season"){
+const sorted=seasons.slice().sort((a,b)=>a.startDate.localeCompare(b.startDate));
+const idx=sorted.findIndex(s=>s.id===activeSeason?.id);
+return idx>0?sorted[idx-1].name:"";
+}
+if(rangeMode==="alltime")return "";
+const [py,pmo]=selMonth.split("-").map(Number);
+const prevD=new Date(py,pmo-2,1);
+return `${MONTHS[prevD.getMonth()]} ${prevD.getFullYear()}`;
+},[rangeMode,activeSeason,selMonth,seasons]);
+
+// Award Race Panel: live, read-only preview per award (zelfde logica als het admin award-modal)
+const awardRace=useMemo(()=>{
+if(!monthGames.length)return [];
+return AWARD_TYPES.map(at=>{
+const sug=computeAwardSuggestion(at.id,monthGames,prevPeriodGames,players,monthLabel);
+if(!sug)return null;
+const leadPlayers=sug.ids.map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+if(!leadPlayers.length)return null;
+return{at,sug,leadPlayers};
+}).filter(Boolean);
+},[monthGames,prevPeriodGames,players,monthLabel]);
+
+// Milestone Watch: carrière-mijlpalen (over de volledige geschiedenis) die er bijna aankomen
+const milestoneWatch=useMemo(()=>{
+const totalsByPid={};
+games.forEach(g=>{
+if(!g.playerId)return;
+const t=totalsByPid[g.playerId]||(totalsByPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0});
+t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;
+});
+const watch=[];
+Object.entries(totalsByPid).forEach(([pid,t])=>{
+const p=players.find(x=>x.id===pid);
+if(!p)return;
+Object.entries(MILESTONE_THRESHOLDS).forEach(([key,thresholds])=>{
+const cur=t[key]||0;
+const next=thresholds.find(th=>th>cur);
+if(next==null)return;
+const dist=next-cur;
+if(dist<=Math.max(10,next*0.15))watch.push({player:p,key,cur,next,dist});
+});
+});
+return watch.sort((a,b)=>a.dist-b.dist).slice(0,8);
+},[games,players]);
+
+// Power Rankings: samengesteld cijfer (eff + win%) met rank-verandering t.o.v. vorige periode
+const powerRankings=useMemo(()=>{
+function scoreFor(periodGames){
+return players.map(p=>{
+const pg=periodGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const eff=pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length;
+const wl=getWinLoss(pg);
+const tot=wl.w+wl.l+wl.d;
+const winPct=tot?wl.w/tot:0.5;
+const power=eff*0.6+winPct*40*0.4;
+return{player:p,power:parseFloat(power.toFixed(1)),eff:parseFloat(eff.toFixed(1)),winPct:Math.round(winPct*100),gp:pg.length};
+}).filter(Boolean).sort((a,b)=>b.power-a.power);
+}
+const cur=scoreFor(monthGames);
+const prev=rangeMode==="alltime"?[]:scoreFor(prevPeriodGames);
+const prevRank={};
+prev.forEach((r,i)=>{prevRank[r.player.id]=i+1;});
+return cur.map((r,i)=>({...r,rank:i+1,prevRank:prevRank[r.player.id]||null}));
+},[monthGames,prevPeriodGames,players,rangeMode]);
+
+// Standings: W-L-D tabel voor de huidige periode
+const standings=useMemo(()=>{
+return players.map(p=>{
+const pg=monthGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return null;
+const wl=getWinLoss(pg);
+const tot=wl.w+wl.l+wl.d;
+return{player:p,...wl,tot,pct:tot?Math.round((wl.w/tot)*100):0};
+}).filter(Boolean).sort((a,b)=>b.pct-a.pct||b.w-a.w);
+},[monthGames,players]);
+
+// Periode vergelijking: delta per speler t.o.v. de vorige periode
+const periodComparison=useMemo(()=>{
+if(!prevPeriodGames.length)return [];
+function statsFor(periodGames){
+const m={};
+players.forEach(p=>{
+const pg=periodGames.filter(g=>g.playerId===p.id);
+if(!pg.length)return;
+m[p.id]={ppg:avg(pg,"pts"),rpg:avg(pg,"reb"),apg:avg(pg,"ast"),eff:parseFloat((pg.reduce((s,g)=>s+(+calcFps(g)),0)/pg.length).toFixed(1))};
+});
+return m;
+}
+const cur=statsFor(monthGames),prev=statsFor(prevPeriodGames);
+return players.map(p=>{
+const c=cur[p.id],pr=prev[p.id];
+if(!c||!pr)return null;
+return{player:p,cur:c,prev:pr,delta:parseFloat((c.eff-pr.eff).toFixed(1))};
+}).filter(Boolean).sort((a,b)=>b.delta-a.delta);
+},[monthGames,prevPeriodGames,players]);
+
+// Volledige sorteerbare stat-tabel
+const [statTableSort,setStatTableSort]=useState({key:"eff",dir:"desc"});
+const statTableRows=useMemo(()=>{
+return playerStats.map(ps=>{
+const wl=getWinLoss(ps.games);
+const tot=wl.w+wl.l+wl.d;
+return{player:ps.player,gp:ps.games.length,ppg:ps.ppg,rpg:ps.rpg,apg:ps.apg,spg:avg(ps.games,"stl"),bpg:avg(ps.games,"blk"),eff:ps.eff,winPct:tot?Math.round((wl.w/tot)*100):0};
+});
+},[playerStats]);
+const sortedStatTable=useMemo(()=>{
+const{key,dir}=statTableSort;
+return statTableRows.slice().sort((a,b)=>dir==="desc"?b[key]-a[key]:a[key]-b[key]);
+},[statTableRows,statTableSort]);
+function toggleStatSort(key){
+setStatTableSort(s=>s.key===key?{key,dir:s.dir==="desc"?"asc":"desc"}:{key,dir:"desc"});
+}
+
 
 // MVP per month (used for streaks + counts + past-months carousel)
 // Only completed months count as trophies
@@ -3347,6 +3479,52 @@ return (
 </div>
 {clutchLeader&&(
 <div style={{color:GREY,fontSize:11,marginTop:-14,marginBottom:20,fontStyle:"italic"}}>🕐 Clutch = neemt het over van {mvp.player.name}, carryt een onderpresterende teamgenoot (80%+ meer punten), of speelt enorm goed (50%+ boven eigen eff-gemiddelde) tegen een hoger geplaatste tegenstander</div>
+)}
+
+{/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
+{awardRace.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 AWARD RACE — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Live stand als de awards nu uitgereikt zouden worden. Puur een preview — de admin beslist nog steeds wie 'm daadwerkelijk krijgt.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{awardRace.map(({at,sug,leadPlayers})=>{
+const Icon=at.Icon;
+const runnerUp=sug.runnerUpId?players.find(p=>p.id===sug.runnerUpId):null;
+return(
+<div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Icon size={24} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
+<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+{leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
+</div>
+<div style={{color:GREY,fontSize:10}}>{sug.reason}{sug.gap!=null&&runnerUp?` · voor op ${runnerUp.name} (${Math.abs(sug.gap)})`:""}</div>
+</div>
+</div>
+);
+})}
+</div>
+</div>
+)}
+
+{/* Milestone Watch — carrière-mijlpalen die binnenkort vallen, over de hele geschiedenis (niet periode-gebonden) */}
+{milestoneWatch.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 MILESTONE WATCH</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Carrière-mijlpalen die er binnenkort aankomen.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{milestoneWatch.map((m,i)=>(
+<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={m.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{m.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{m.cur} → {m.next} {MILESTONE_LABELS[m.key]}</div>
+</div>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:15,flexShrink:0}}>nog {m.dist}</div>
+</div>
+))}
+</div>
+</div>
 )}
 
 {/* Full leaderboard this month */}
@@ -4137,6 +4315,54 @@ return(
 </div>
 </div>
 
+{/* Power Rankings: samengesteld cijfer + rank-verandering t.o.v. vorige periode */}
+{powerRankings.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>📊 POWER RANKINGS</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Combineert eff-gemiddelde en win% tot één cijfer{prevPeriodLbl?` — pijltje t.o.v. ${prevPeriodLbl}`:""}.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{powerRankings.map(r=>{
+const moved=r.prevRank!=null?r.prevRank-r.rank:null;
+return(
+<div key={r.player.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<div style={{width:20,height:20,borderRadius:"50%",background:r.rank===1?"#f5a524":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:10,flexShrink:0}}>{r.rank}</div>
+<Avatar player={r.player} size={28}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>{r.eff} eff · {r.winPct}% win</div>
+</div>
+{moved!=null&&moved!==0&&(
+<div style={{color:moved>0?"#27AE60":"#ff6b6b",fontWeight:700,fontSize:12,flexShrink:0}}>{moved>0?"▲":"▼"}{Math.abs(moved)}</div>
+)}
+{moved===0&&<div style={{color:GREY,fontSize:12,flexShrink:0}}>–</div>}
+<div style={{color:"#f5a524",fontWeight:800,fontSize:16,flexShrink:0,width:36,textAlign:"right"}}>{r.power}</div>
+</div>
+);
+})}
+</div>
+</div>
+)}
+
+{/* Standings: W-L-D tabel */}
+{standings.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📋 STANDINGS — {monthLabel.toUpperCase()}</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+<div style={{display:"flex",alignItems:"center",gap:10,padding:"0 4px",color:GREY,fontSize:10,fontWeight:700}}>
+<div style={{width:20}}/><div style={{flex:1}}>SPELER</div><div style={{width:60,textAlign:"right"}}>W-L-D</div><div style={{width:44,textAlign:"right"}}>WIN%</div>
+</div>
+{standings.map((s,i)=>(
+<div key={s.player.id} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 10px"}}>
+<div style={{width:20,color:GREY,fontSize:11,fontWeight:700}}>{i+1}</div>
+<div style={{flex:1,display:"flex",alignItems:"center",gap:8,minWidth:0}}><Avatar player={s.player} size={22}/><span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.player.name}</span></div>
+<div style={{width:60,textAlign:"right",color:GREY,fontSize:12}}>{s.w}-{s.l}{s.d?`-${s.d}`:""}</div>
+<div style={{width:44,textAlign:"right",color:s.pct>=60?"#27AE60":s.pct>=40?"#f5a524":"#ff6b6b",fontWeight:700,fontSize:12}}>{s.pct}%</div>
+</div>
+))}
+</div>
+</div>
+)}
+
 {/* Elo Rating: teamgebaseerde Elo, chronologisch doorgerekend binnen de huidige periode. */}
 {(()=>{
 const BASE=1500,K=32;
@@ -4195,6 +4421,54 @@ return(
 </>
 );
 })()}
+
+{/* Periode vergelijking: delta t.o.v. vorige periode */}
+{periodComparison.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>📈 PERIODE VERGELIJKING</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Eff-verandering t.o.v. {prevPeriodLbl||"vorige periode"}.</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{periodComparison.map(pc=>(
+<div key={pc.player.id} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 12px"}}>
+<Avatar player={pc.player} size={26}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pc.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>{pc.prev.eff} → {pc.cur.eff} eff</div>
+</div>
+<div style={{color:pc.delta>=0?"#27AE60":"#ff6b6b",fontWeight:800,fontSize:14,flexShrink:0}}>{pc.delta>=0?"+":""}{pc.delta}</div>
+</div>
+))}
+</div>
+</div>
+)}
+
+{/* Volledige sorteerbare stat-tabel */}
+{sortedStatTable.length>0&&(
+<div style={{marginBottom:24,overflowX:"auto"}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📋 VOLLEDIGE STAT TABEL</div>
+<div style={{minWidth:480}}>
+<div style={{display:"flex",alignItems:"center",gap:6,padding:"0 4px 6px",color:GREY,fontSize:10,fontWeight:700}}>
+<div style={{width:110}}>SPELER</div>
+{[["gp","GP"],["ppg","PPG"],["rpg","RPG"],["apg","APG"],["spg","SPG"],["bpg","BPG"],["eff","EFF"],["winPct","WIN%"]].map(([k,lbl])=>(
+<div key={k} onClick={()=>toggleStatSort(k)} style={{width:48,textAlign:"right",cursor:"pointer",color:statTableSort.key===k?RED:GREY}}>{lbl}{statTableSort.key===k?(statTableSort.dir==="desc"?" ▾":" ▴"):""}</div>
+))}
+</div>
+{sortedStatTable.map(r=>(
+<div key={r.player.id} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 4px",borderBottom:`1px solid ${DIVIDER}`}}>
+<div style={{width:110,display:"flex",alignItems:"center",gap:6,minWidth:0}}><Avatar player={r.player} size={20}/><span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.player.name}</span></div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.gp}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.ppg}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.rpg}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.apg}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.spg}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.bpg}</div>
+<div style={{width:48,textAlign:"right",color:WHITE,fontWeight:700,fontSize:12}}>{r.eff}</div>
+<div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.winPct}%</div>
+</div>
+))}
+</div>
+</div>
+)}
 
 {/* Multi-stat vergelijking */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📐 MULTI-STAT VERGELIJKING</div>
@@ -4447,6 +4721,24 @@ return(
 {isOpen&&(
 <div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,cursor:"default"}}>
 <div style={{color:GREY,fontSize:10,marginBottom:6}}>Gem. gecombineerde eff samen: <span style={{color:WHITE,fontWeight:700}}>{t.avgCombinedEff}</span></div>
+{(()=>{
+const chron=t.rows.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+if(chron.length<4)return null;
+const mid=Math.ceil(chron.length/2);
+const firstHalf=chron.slice(0,mid),secondHalf=chron.slice(mid);
+const pct=arr=>Math.round((arr.filter(r=>r.won).length/arr.length)*100);
+const p1=pct(firstHalf),p2=pct(secondHalf);
+const trend=p2-p1;
+return(
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"6px 10px"}}>
+<span style={{color:GREY,fontSize:10}}>Chemie-trend:</span>
+<span style={{color:WHITE,fontSize:11,fontWeight:700}}>{p1}%</span>
+<span style={{color:GREY,fontSize:10}}>→</span>
+<span style={{color:WHITE,fontSize:11,fontWeight:700}}>{p2}%</span>
+{trend!==0&&<span style={{color:trend>0?"#27AE60":"#ff6b6b",fontSize:11,fontWeight:700}}>{trend>0?"▲":"▼"}{Math.abs(trend)}</span>}
+</div>
+);
+})()}
 {t.rows.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map((r,ri)=>(
 <div key={ri} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11,padding:"4px 2px",background:ri%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:5,gap:6}}>
 <span style={{color:WHITE,flexShrink:0}}>{r.date?.slice(5)||"—"}</span>

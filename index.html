@@ -2032,11 +2032,75 @@ return(
 }
 
 // ── Admin: Give Awards Modal
-function AwardGiveModal({players,manualAwards,onSave,onDelete,onClose}){
+// Berekent per award-type wie de stats van deze periode (maand of seizoen) als winnaar aanwijzen (admin beslist alsnog zelf)
+function computeAwardSuggestion(awardId,periodGames,prevPeriodGames,players,periodLbl){
+if(!periodGames.length)return null;
+const byPid={};
+periodGames.forEach(g=>{
+if(!g.playerId)return;
+const t=byPid[g.playerId]||(byPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,gp:0,effSum:0,cham:0,games:[]});
+t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;t.gp+=1;t.effSum+=+calcFps(g)||0;
+if(g.team==="chameleon")t.cham+=1;
+t.games.push(g);
+});
+const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,cham:t.cham,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
+if(!rows.length)return null;
+const top=key=>rows.slice().sort((a,b)=>b[key]-a[key])[0];
+switch(awardId){
+case"mvp":{const r=top("eff");return{ids:[r.pid],reason:`${r.eff.toFixed(1)} eff gem.`};}
+case"scoring":{const r=top("ppg");return{ids:[r.pid],reason:`${r.ppg.toFixed(1)} pts gem.`};}
+case"rebounds":{const r=top("rpg");return{ids:[r.pid],reason:`${r.rpg.toFixed(1)} reb gem.`};}
+case"assists":{const r=top("apg");return{ids:[r.pid],reason:`${r.apg.toFixed(1)} ast gem.`};}
+case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`};}
+case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`};}
+case"alllba1":{
+const ranked=rows.map(r=>{const wl=getWinLoss(r.games);const tot=wl.w+wl.l+wl.d;return{pid:r.pid,pct:tot?wl.w/tot:0,tot,w:wl.w,l:wl.l};}).filter(r=>r.tot>=2).sort((a,b)=>b.pct-a.pct||b.w-a.w);
+return ranked.length?{ids:ranked.slice(0,2).map(r=>r.pid),reason:`Beste win% ${periodLbl||"deze periode"} (${ranked.slice(0,2).map(r=>`${r.w}-${r.l}`).join(", ")})`}:null;
+}
+case"alllba2":{
+const ranked=rows.map(r=>{const wl=getWinLoss(r.games);const tot=wl.w+wl.l+wl.d;return{pid:r.pid,pct:tot?wl.w/tot:0,tot,w:wl.w,l:wl.l};}).filter(r=>r.tot>=2).sort((a,b)=>b.pct-a.pct||b.w-a.w);
+return ranked.length>2?{ids:ranked.slice(2,4).map(r=>r.pid),reason:`3e & 4e beste win% ${periodLbl||"deze periode"} (${ranked.slice(2,4).map(r=>`${r.w}-${r.l}`).join(", ")})`}:null;
+}
+case"mip":{
+const prevByPid={};
+(prevPeriodGames||[]).filter(g=>g.playerId).forEach(g=>{
+const t=prevByPid[g.playerId]||(prevByPid[g.playerId]={effSum:0,gp:0});
+t.effSum+=+calcFps(g)||0;t.gp+=1;
+});
+const deltas=rows.map(r=>{
+const pv=prevByPid[r.pid];
+if(!pv||!pv.gp)return null;
+return{pid:r.pid,delta:r.eff-pv.effSum/pv.gp};
+}).filter(Boolean).sort((a,b)=>b.delta-a.delta);
+return deltas.length?{ids:[deltas[0].pid],reason:`${deltas[0].delta>=0?"+":""}${deltas[0].delta.toFixed(1)} eff t.o.v. vorige periode`}:null;
+}
+case"clutch":{
+const mvpRow=top("eff");
+const byMatch={};
+periodGames.forEach(g=>{const key=g.matchId||g.id;(byMatch[key]=byMatch[key]||[]).push(g);});
+const counts={};
+Object.values(byMatch).forEach(mg=>{
+const starGame=mg.find(g=>g.playerId===mvpRow.pid);
+const starOk=starGame&&(+calcFps(starGame))>=mvpRow.eff;
+if(!starOk){
+const others=mg.filter(g=>g.playerId!==mvpRow.pid);
+if(others.length){const best=others.reduce((a,b)=>(+calcFps(b)>+calcFps(a)?b:a));counts[best.playerId]=(counts[best.playerId]||0)+1;}
+}
+});
+const entries=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+return entries.length?{ids:[entries[0][0]],reason:`${entries[0][1]}× clutch moment ${periodLbl||"deze periode"}`}:null;
+}
+default:return null;
+}
+}
+
+function AwardGiveModal({players,games=[],manualAwards,seasons=[],onSave,onDelete,onClose}){
 const {IS,BR,BG2}=styles();
 const d=new Date();
 const defaultMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const [scope,setScope]=useState("month"); // "month" | "season"
 const [selMonth,setSelMonth]=useState(defaultMonth);
+const [selSeasonId,setSelSeasonId]=useState(seasons[0]?.id||null);
 const [selAward,setSelAward]=useState(AWARD_TYPES[0].id);
 const [selPlayers,setSelPlayers]=useState([]);
 const [saving,setSaving]=useState(false);
@@ -2045,13 +2109,44 @@ const Icon=at.Icon;
 
 // Build month label
 function monthLbl(m){const [y,mo]=m.split("-");return `${MONTHS[parseInt(mo)-1]} ${y}`;}
+const activeSeason=seasons.find(s=>s.id===selSeasonId)||null;
+const periodKey=scope==="season"?(activeSeason?`szn_${activeSeason.id}`:null):selMonth;
+const periodLbl=scope==="season"?(activeSeason?.name||""):monthLbl(selMonth);
 
-// Load existing selection when month/award changes
+const periodGames=useMemo(()=>{
+if(scope==="season"){
+if(!activeSeason)return [];
+return games.filter(g=>g.date&&g.playerId&&g.date>=activeSeason.startDate&&g.date<=activeSeason.endDate);
+}
+return games.filter(g=>g.date&&g.playerId&&g.date.slice(0,7)===selMonth);
+},[scope,activeSeason,selMonth,games]);
+
+const prevPeriodGames=useMemo(()=>{
+if(scope==="season"){
+if(!activeSeason)return [];
+const sorted=seasons.slice().sort((a,b)=>a.startDate.localeCompare(b.startDate));
+const idx=sorted.findIndex(s=>s.id===activeSeason.id);
+const prev=idx>0?sorted[idx-1]:null;
+if(!prev)return [];
+return games.filter(g=>g.date&&g.playerId&&g.date>=prev.startDate&&g.date<=prev.endDate);
+}
+const [y,mo]=selMonth.split("-").map(Number);
+const prevD=new Date(y,mo-2,1);
+const prevMonth=`${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,"0")}`;
+return games.filter(g=>g.date&&g.playerId&&g.date.slice(0,7)===prevMonth);
+},[scope,activeSeason,selMonth,seasons,games]);
+
+const suggestion=useMemo(()=>computeAwardSuggestion(selAward,periodGames,prevPeriodGames,players,periodLbl),[selAward,periodGames,prevPeriodGames,players,periodLbl]);
+const suggestedPlayers=(suggestion?.ids||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
+const suggestionAlreadyPicked=suggestion&&suggestion.ids.length===selPlayers.length&&suggestion.ids.every(id=>selPlayers.includes(id));
+
+// Load existing selection when periode/award changes
 useEffect(()=>{
-const ex=manualAwards.find(a=>a.month===selMonth&&a.awardId===selAward);
+if(!periodKey){setSelPlayers([]);return;}
+const ex=manualAwards.find(a=>a.month===periodKey&&a.awardId===selAward);
 if(ex)setSelPlayers(Array.isArray(ex.playerIds)?ex.playerIds:ex.playerId?[ex.playerId]:[]);
 else setSelPlayers([]);
-},[selMonth,selAward,manualAwards]);
+},[periodKey,selAward,manualAwards]);
 
 function togglePlayer(pid){
 if(at.multi){
@@ -2062,15 +2157,15 @@ setSelPlayers(prev=>prev.includes(pid)?[]:[pid]);
 }
 
 async function handleSave(){
-if(!selPlayers.length)return;
+if(!selPlayers.length||!periodKey)return;
 setSaving(true);
-const lbl=monthLbl(selMonth);
-const id=`award_${selMonth}_${selAward}`;
-await onSave({id,month:selMonth,awardId:selAward,playerIds:selPlayers,lbl});
+const id=`award_${periodKey}_${selAward}`;
+await onSave({id,month:periodKey,awardId:selAward,playerIds:selPlayers,lbl:periodLbl});
 setSaving(false);
 }
 async function handleDelete(){
-const id=`award_${selMonth}_${selAward}`;
+if(!periodKey)return;
+const id=`award_${periodKey}_${selAward}`;
 setSaving(true);
 await onDelete(id);
 setSelPlayers([]);
@@ -2094,12 +2189,34 @@ return(
 <div style={{fontWeight:800,fontSize:18,color:WHITE}}>Award uitreiken</div>
 </div>
 
-{/* Month picker */}
+{/* Scope toggle: Maand of Seizoen */}
+<div style={{display:"flex",gap:8,marginBottom:14}}>
+{[{k:"month",lbl:"📅 Maand"},{k:"season",lbl:"🏆 Seizoen"}].map(o=>(
+<button key={o.k} onClick={()=>setScope(o.k)} style={{flex:1,padding:"9px 6px",borderRadius:12,border:"none",cursor:"pointer",background:scope===o.k?RED:INPUTBG,color:scope===o.k?WHITE:GREY,fontWeight:scope===o.k?700:500,fontSize:12.5}}>{o.lbl}</button>
+))}
+</div>
+
+{/* Maand/Seizoen picker */}
 <div style={{marginBottom:14}}>
+{scope==="month"?(
+<>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:6}}>MAAND</div>
 <select value={selMonth} onChange={e=>setSelMonth(e.target.value)} style={IS}>
 {monthOpts.map(o=><option key={o.key} value={o.key}>{o.lbl}</option>)}
 </select>
+</>
+):(
+<>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:6}}>SEIZOEN</div>
+{seasons.length===0?(
+<div style={{color:GREY,fontSize:13,background:INPUTBG,borderRadius:10,padding:"10px 12px"}}>Nog geen seizoenen ingesteld — maak er een aan bij "🏆 Seizoen" in de Stats tab.</div>
+):(
+<select value={selSeasonId||""} onChange={e=>setSelSeasonId(e.target.value)} style={IS}>
+{seasons.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+</select>
+)}
+</>
+)}
 </div>
 
 {/* Award picker */}
@@ -2122,6 +2239,27 @@ return(
 </div>
 </div>
 
+{/* Stats-suggestie — admin beslist alsnog zelf */}
+{suggestion&&suggestedPlayers.length>0&&(
+<div style={{marginBottom:16,background:`${at.color}14`,border:`1px solid ${at.color}44`,borderRadius:12,padding:"12px 14px"}}>
+<div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8}}>📊 VOLGENS DE STATS ZOU DIT MOETEN ZIJN</div>
+<div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+<div style={{display:"flex",gap:8,flex:1,minWidth:0}}>
+{suggestedPlayers.map(sp=>(
+<div key={sp.id} style={{display:"flex",alignItems:"center",gap:6}}>
+<Avatar player={sp} size={26}/>
+<span style={{color:WHITE,fontWeight:700,fontSize:13}}>{sp.name}</span>
+</div>
+))}
+</div>
+<button onClick={()=>setSelPlayers(suggestion.ids)} disabled={suggestionAlreadyPicked} style={{background:suggestionAlreadyPicked?"transparent":`${at.color}33`,border:`1px solid ${at.color}`,color:at.color,borderRadius:8,padding:"6px 10px",fontSize:11,fontWeight:700,cursor:suggestionAlreadyPicked?"default":"pointer",opacity:suggestionAlreadyPicked?0.6:1,flexShrink:0}}>
+{suggestionAlreadyPicked?"✓ Gekozen":"Gebruik suggestie"}
+</button>
+</div>
+<div style={{color:GREY,fontSize:11,marginTop:6}}>{suggestion.reason} — jij beslist uiteindelijk wie 'm krijgt.</div>
+</div>
+)}
+
 {/* Player picker */}
 <div style={{marginBottom:20}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8}}>
@@ -2140,10 +2278,10 @@ return(
 </div>
 
 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-<button onClick={handleSave} disabled={saving||!selPlayers.length} style={{...BR,opacity:(!selPlayers.length||saving)?0.5:1}}>
+<button onClick={handleSave} disabled={saving||!selPlayers.length||!periodKey} style={{...BR,opacity:(!selPlayers.length||saving||!periodKey)?0.5:1}}>
 {saving?"Opslaan...":"Award uitreiken ✓"}
 </button>
-{manualAwards.some(a=>a.month===selMonth&&a.awardId===selAward)&&(
+{periodKey&&manualAwards.some(a=>a.month===periodKey&&a.awardId===selAward)&&(
 <button onClick={handleDelete} disabled={saving} style={{...BG2,color:"#ff6b6b"}}>Award intrekken</button>
 )}
 <button onClick={onClose} style={{background:"transparent",border:"none",color:GREY,fontSize:14,cursor:"pointer",padding:"8px 0"}}>Annuleer</button>
@@ -2239,7 +2377,7 @@ return(
 );
 }
 
-function HallOfFameModal({players,allGames,manualAwards,isAdmin,onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
+function HallOfFameModal({players,allGames,manualAwards,isAdmin,seasons=[],onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,players),[allGames,players]);
 const [showGiveAward,setShowGiveAward]=useState(false);
 
@@ -2266,7 +2404,7 @@ return byType;
 
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:360}}>
-{showGiveAward&&<AwardGiveModal players={players} manualAwards={manualAwards} onSave={async(a)=>{await onSaveAward(a);}} onDelete={async(id)=>{await onDeleteAward(id);}} onClose={()=>setShowGiveAward(false)}/>}
+{showGiveAward&&<AwardGiveModal players={players} games={allGames} manualAwards={manualAwards} seasons={seasons} onSave={async(a)=>{await onSaveAward(a);}} onDelete={async(id)=>{await onDeleteAward(id);}} onClose={()=>setShowGiveAward(false)}/>}
 <div onClick={e=>e.stopPropagation()} className="fade-in" data-testid="hall-of-fame-modal" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
@@ -14243,7 +14381,7 @@ return (
 {/* Modals */}
 {showLineupEditor&&<LineupEditor players={players} games={games} onClose={()=>setShowLineupEditor(false)}/>}
 {showPlaybook&&<PlaybookModal onClose={()=>setShowPlaybook(false)}/>}
-{showHallOfFame&&<HallOfFameModal players={players} allGames={games} manualAwards={manualAwards} isAdmin={isAdmin} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}} onSaveAward={saveAward} onDeleteAward={deleteAward}/>}
+{showHallOfFame&&<HallOfFameModal players={players} allGames={games} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}} onSaveAward={saveAward} onDeleteAward={deleteAward}/>}
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}

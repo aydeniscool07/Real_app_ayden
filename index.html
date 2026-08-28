@@ -2750,6 +2750,7 @@ const [cardFor,setCardFor]=useState(null); // player object or null
 const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke speler-kaart is uitgeklapt
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
 const [expandedClutchId,setExpandedClutchId]=useState(null); // Clutch Lab: welke speler-kaart is uitgeklapt
+const [expandedRecord,setExpandedRecord]=useState(null); // Records: welk record-kaartje is uitgeklapt
 
 // Zodra de seizoenen async binnenkomen (Firestore), en er nog niks geselecteerd is, pak het eerste seizoen.
 useEffect(()=>{
@@ -2886,6 +2887,23 @@ const board=entries.map(([pid,count])=>({player:players.find(p=>p.id===pid),coun
 if(!board.length)return null;
 return{player:board[0].player,count:board[0].count,board};
 },[monthGames,mvp,players,playerStats]);
+
+// Records: career totals + single-game records over de VOLLEDIGE geschiedenis (alle games, ongeacht periode-filter)
+const careerBoard=useMemo(()=>{
+const totals={};
+games.forEach(g=>{
+if(!g.playerId)return;
+const t=totals[g.playerId]||(totals[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,gp:0});
+t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;t.gp+=1;
+});
+const mk=key=>Object.entries(totals).map(([pid,t])=>({player:players.find(p=>p.id===pid),val:t[key],gp:t.gp})).filter(x=>x.player&&x.val>0).sort((a,b)=>b.val-a.val);
+return{pts:mk("pts"),reb:mk("reb"),ast:mk("ast"),stl:mk("stl"),blk:mk("blk")};
+},[games,players]);
+
+const gameRecords=useMemo(()=>{
+const mk=key=>games.filter(g=>g.playerId).map(g=>({player:players.find(p=>p.id===g.playerId),val:key==="eff"?parseFloat(calcFps(g)):(+g[key]||0),date:g.date})).filter(x=>x.player&&x.val>0).sort((a,b)=>b.val-a.val).slice(0,10);
+return{pts:mk("pts"),reb:mk("reb"),ast:mk("ast"),stl:mk("stl"),blk:mk("blk"),eff:mk("eff")};
+},[games,players]);
 
 
 // MVP per month (used for streaks + counts + past-months carousel)
@@ -3730,6 +3748,87 @@ return(
 </div>
 </div>
 )}
+
+{/* Records */}
+<div style={{marginTop:8,marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏆 RECORDS — ALL-TIME</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>Career totals en single-game records over de volledige geschiedenis, ongeacht welke periode je nu bekijkt.</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:10}}>CAREER LEADERS</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+{["pts","reb","ast","stl","blk"].map(key=>{
+const board=careerBoard[key];
+if(!board||!board.length)return null;
+const top=board[0];
+const rk=`career_${key}`;
+const isOpen=expandedRecord===rk;
+return(
+<div key={rk} onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={top.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>{STAT_LABEL[key]} — CAREER</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{top.player.name}</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:18}}>{top.val}</div>
+<div style={{color:GREY,fontSize:10}}>{top.gp}G</div>
+</div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+{board.slice(0,10).map((b,bi)=>(
+<div key={bi} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+<span style={{color:bi===0?RED:GREY,width:16,fontWeight:bi===0?800:400}}>{bi+1}</span>
+<span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.player.name}</span>
+<span style={{color:GREY}}>{b.val} <span style={{opacity:0.6}}>({b.gp}G)</span></span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:10}}>SINGLE-GAME RECORDS</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{["pts","reb","ast","stl","blk","eff"].map(key=>{
+const board=gameRecords[key];
+if(!board||!board.length)return null;
+const top=board[0];
+const rk=`game_${key}`;
+const isOpen=expandedRecord===rk;
+const lbl=key==="eff"?"EFF":STAT_LABEL[key];
+return(
+<div key={rk} onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={top.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>MEESTE {lbl} — 1 GAME</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{top.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>{top.date?.slice(5)||""}</div>
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18,flexShrink:0}}>{top.val}</div>
+<span style={{color:GREY,fontSize:14,marginLeft:4,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+{board.map((b,bi)=>(
+<div key={bi} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+<span style={{color:bi===0?RED:GREY,width:16,fontWeight:bi===0?800:400}}>{bi+1}</span>
+<span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.player.name}</span>
+<span style={{color:GREY}}>{b.val} <span style={{opacity:0.6}}>· {b.date?.slice(5)||""}</span></span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</div>
 
 {/* Elo Rating: teamgebaseerde Elo, chronologisch doorgerekend binnen de huidige periode. */}
 {(()=>{

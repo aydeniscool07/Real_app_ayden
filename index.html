@@ -2971,6 +2971,8 @@ const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke s
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
 const [expandedClutchId,setExpandedClutchId]=useState(null); // Clutch Lab: welke speler-kaart is uitgeklapt
 const [expandedRecord,setExpandedRecord]=useState(null); // Records: welk record-kaartje is uitgeklapt
+const [statsSearch,setStatsSearch]=useState(""); // Speler-zoekfilter voor de grote lijsten
+const searchMatch=name=>!statsSearch.trim()||name.toLowerCase().includes(statsSearch.trim().toLowerCase());
 
 // Zodra de seizoenen async binnenkomen (Firestore), en er nog niks geselecteerd is, pak het eerste seizoen.
 useEffect(()=>{
@@ -3138,6 +3140,44 @@ const blanks={};
 scorelessOutings.forEach(g=>{blanks[g.playerId]=(blanks[g.playerId]||0)+1;});
 const goose=Object.entries(blanks).map(([pid,count])=>({player:players.find(p=>p.id===pid),val:count})).filter(x=>x.player).sort((a,b)=>b.val-a.val).slice(0,10);
 return{worstEff,mostTO,goose};
+},[games,players]);
+
+// Wedstrijd records: grootste blowout & nipste wedstrijd, o.b.v. team-eindscores per match
+const matchRecords=useMemo(()=>{
+const byMatch={};
+games.forEach(g=>{
+if(!g.matchId||g.team==="chameleon")return;
+const m=byMatch[g.matchId]||(byMatch[g.matchId]={date:g.date,teamAScore:g.teamAScore,teamBScore:g.teamBScore,teamA:[],teamB:[]});
+if(g.team==="A"&&!m.teamA.includes(g.playerId))m.teamA.push(g.playerId);
+if(g.team==="B"&&!m.teamB.includes(g.playerId))m.teamB.push(g.playerId);
+});
+const matches=Object.values(byMatch).map(m=>{
+const a=parseFloat(m.teamAScore),b=parseFloat(m.teamBScore);
+if(isNaN(a)||isNaN(b)||(!a&&!b))return null;
+return{date:m.date,scoreA:a,scoreB:b,diff:Math.abs(a-b),teamA:m.teamA.map(pid=>players.find(p=>p.id===pid)).filter(Boolean),teamB:m.teamB.map(pid=>players.find(p=>p.id===pid)).filter(Boolean)};
+}).filter(x=>x&&(x.teamA.length||x.teamB.length));
+return{
+blowouts:matches.slice().sort((a,b)=>b.diff-a.diff).slice(0,10),
+closest:matches.slice().sort((a,b)=>a.diff-b.diff).slice(0,10)
+};
+},[games,players]);
+
+// Iron Man streak: langste reeks aaneengesloten speeldagen zonder een enkele te missen
+const ironManBoard=useMemo(()=>{
+const matchdays=[...new Set(games.filter(g=>g.date).map(g=>g.date))].sort();
+if(!matchdays.length)return [];
+return players.map(p=>{
+const playedSet=new Set(games.filter(g=>g.playerId===p.id).map(g=>g.date));
+let curStreak=0,curStart=null,bestStreak=0,bestStart=null,bestEnd=null;
+matchdays.forEach(d=>{
+if(playedSet.has(d)){
+if(curStreak===0)curStart=d;
+curStreak++;
+if(curStreak>bestStreak){bestStreak=curStreak;bestStart=curStart;bestEnd=d;}
+}else{curStreak=0;curStart=null;}
+});
+return bestStreak>0?{player:p,streak:bestStreak,start:bestStart,end:bestEnd}:null;
+}).filter(Boolean).sort((a,b)=>b.streak-a.streak).slice(0,10);
 },[games,players]);
 
 // Vorige periode (voor Award Race MIP, Power Rankings-trend en Periode Vergelijking)
@@ -3340,6 +3380,14 @@ return(
 ))}
 </div>
 
+{/* Speler-zoekfilter — werkt op Ranglijst, Eff Lab, Clutch Lab, Power Rankings, Standings en de Stat Tabel */}
+<div style={{position:"relative",marginBottom:16}}>
+<input value={statsSearch} onChange={e=>setStatsSearch(e.target.value)} placeholder="🔍 Zoek een speler…" style={{...IS,paddingRight:statsSearch?36:12}}/>
+{statsSearch&&(
+<button onClick={()=>setStatsSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:GREY,fontSize:16,cursor:"pointer",padding:4}}>✕</button>
+)}
+</div>
+
 {rangeMode==="month"&&(
 <div style={{display:"flex",gap:8,overflowX:"auto",marginBottom:20,paddingBottom:4}}>
 {availMonths.length===0&&<div style={{color:GREY,fontSize:14}}>Nog geen games gelogd.</div>}
@@ -3529,7 +3577,7 @@ return(
 
 {/* Full leaderboard this month */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>
-{playerStats.map((ps,i)=>(
+{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>(
 <div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
 <div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
 <div title={`Games-bonus in de MVP-race: ${Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)}/${GAMES_BONUS_CAP_GAMES} games — meer games spelen helpt echt mee in de ranking`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:40,flexShrink:0}}>
@@ -4042,7 +4090,7 @@ Formule: <span style={{color:WHITE,fontWeight:700}}>PTS×1.2 + REB×1.1 + AST×1
 {/* Eff bar chart */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:12}}>📊 EFF VERGELIJKING <span style={{fontWeight:400,opacity:0.7}}>· tik op een speler voor elke game</span></div>
 <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
-{playerStats.map((ps,i)=>{
+{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>{
 const tier=effTier(ps.eff);
 const pct=Math.round((ps.eff/maxEff)*100);
 const sd=stdDev(ps);
@@ -4119,7 +4167,7 @@ return(
 Een "clutch appearance" telt per match als één van deze drie waar is: <span style={{color:WHITE,fontWeight:700}}>Takeover</span> (beste eff terwijl {mvp.player.name} zijn gem. niet haalde of niet speelde), <span style={{color:WHITE,fontWeight:700}}>Carry</span> (80%+ meer punten dan een onderpresterende teamgenoot), of <span style={{color:WHITE,fontWeight:700}}>Giant Slayer</span> (50%+ boven eigen eff-gem. tegen een hoger geplaatste tegenstander).
 </div>
 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-{clutchLeader.board.map((cb,i)=>{
+{clutchLeader.board.filter(cb=>searchMatch(cb.player.name)).map((cb,i)=>{
 const isOpen=expandedClutchId===cb.player.id;
 const typeInfo={takeover:{label:"Takeover",color:"#E8312A",emoji:"🔥"},carry:{label:"Carry",color:"#f5a524",emoji:"💪"},slayer:{label:"Giant Slayer",color:"#9B59B6",emoji:"⚔️"}};
 return(
@@ -4242,6 +4290,81 @@ return(
 })}
 </div>
 
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:10}}>⚡ WEDSTRIJD RECORDS</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+{[{key:"blowouts",lbl:"GROOTSTE BLOWOUT",data:matchRecords.blowouts},{key:"closest",lbl:"NIPSTE WEDSTRIJD",data:matchRecords.closest}].map(({key,lbl,data})=>{
+if(!data||!data.length)return null;
+const top=data[0];
+const rk=`match_${key}`;
+const isOpen=expandedRecord===rk;
+return(
+<div key={rk} onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{display:"flex",marginRight:2}}>
+{top.teamA.slice(0,2).map((m,mi)=>(<div key={m.id} style={{marginLeft:mi===0?0:-10}}><Avatar player={m} size={28}/></div>))}
+</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>{lbl}</div>
+<div style={{fontWeight:800,fontSize:16,color:WHITE}}>{top.scoreA}-{top.scoreB} <span style={{color:GREY,fontWeight:400,fontSize:11}}>(verschil {top.diff})</span></div>
+<div style={{color:GREY,fontSize:10}}>{top.date?.slice(5)||""}</div>
+</div>
+<div style={{display:"flex",marginLeft:2}}>
+{top.teamB.slice(0,2).map((m,mi)=>(<div key={m.id} style={{marginLeft:mi===0?0:-10}}><Avatar player={m} size={28}/></div>))}
+</div>
+<span style={{color:GREY,fontSize:14,marginLeft:6,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+{data.map((m,mi)=>(
+<div key={mi} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+<span style={{color:GREY,width:16}}>{mi+1}</span>
+<span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.teamA.map(p=>p.name.split(" ")[0]).join("+")} vs {m.teamB.map(p=>p.name.split(" ")[0]).join("+")}</span>
+<span style={{color:GREY}}>{m.scoreA}-{m.scoreB} <span style={{opacity:0.6}}>· {m.date?.slice(5)||""}</span></span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>🦾 IRON MAN — LANGSTE STREAK ZONDER GEMISTE SPEELDAG</div>
+<div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Aaneengesloten speeldagen waarop een speler altijd meespeelde, zonder er ooit één te missen.</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+{ironManBoard.length===0&&<div style={{color:GREY,fontSize:12}}>Nog geen data.</div>}
+{ironManBoard.length>0&&(()=>{
+const top=ironManBoard[0];
+const rk="ironman";
+const isOpen=expandedRecord===rk;
+return(
+<div onClick={()=>setExpandedRecord(isOpen?null:rk)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?`1px solid ${RED}55`:"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={top.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>LANGSTE STREAK</div>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{top.player.name}</div>
+<div style={{color:GREY,fontSize:10}}>{top.start?.slice(5)} → {top.end?.slice(5)}</div>
+</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18,flexShrink:0}}>{top.streak}×</div>
+<span style={{color:GREY,fontSize:14,marginLeft:4,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+{ironManBoard.map((b,bi)=>(
+<div key={bi} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+<span style={{color:GREY,width:16}}>{bi+1}</span>
+<span style={{color:WHITE,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.player.name}</span>
+<span style={{color:GREY}}>{b.streak}× <span style={{opacity:0.6}}>· {b.start?.slice(5)}→{b.end?.slice(5)}</span></span>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})()}
+</div>
+
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:10}}>⚔️ RIVALITEITEN — GROOTSTE DOMINANTIE</div>
 <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
 {h2hRecords.length===0&&<div style={{color:GREY,fontSize:12}}>Nog geen rivaliteiten met genoeg ontmoetingen (min. 3× tegen elkaar gespeeld).</div>}
@@ -4321,7 +4444,7 @@ return(
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.2,marginBottom:4}}>📊 POWER RANKINGS</div>
 <div style={{color:GREY,fontSize:11,marginBottom:12,lineHeight:1.5}}>Combineert eff-gemiddelde en win% tot één cijfer{prevPeriodLbl?` — pijltje t.o.v. ${prevPeriodLbl}`:""}.</div>
 <div style={{display:"flex",flexDirection:"column",gap:8}}>
-{powerRankings.map(r=>{
+{powerRankings.filter(r=>searchMatch(r.player.name)).map(r=>{
 const moved=r.prevRank!=null?r.prevRank-r.rank:null;
 return(
 <div key={r.player.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
@@ -4351,7 +4474,7 @@ return(
 <div style={{display:"flex",alignItems:"center",gap:10,padding:"0 4px",color:GREY,fontSize:10,fontWeight:700}}>
 <div style={{width:20}}/><div style={{flex:1}}>SPELER</div><div style={{width:60,textAlign:"right"}}>W-L-D</div><div style={{width:44,textAlign:"right"}}>WIN%</div>
 </div>
-{standings.map((s,i)=>(
+{standings.filter(s=>searchMatch(s.player.name)).map((s,i)=>(
 <div key={s.player.id} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 10px"}}>
 <div style={{width:20,color:GREY,fontSize:11,fontWeight:700}}>{i+1}</div>
 <div style={{flex:1,display:"flex",alignItems:"center",gap:8,minWidth:0}}><Avatar player={s.player} size={22}/><span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.player.name}</span></div>
@@ -4453,7 +4576,7 @@ return(
 <div key={k} onClick={()=>toggleStatSort(k)} style={{width:48,textAlign:"right",cursor:"pointer",color:statTableSort.key===k?RED:GREY}}>{lbl}{statTableSort.key===k?(statTableSort.dir==="desc"?" ▾":" ▴"):""}</div>
 ))}
 </div>
-{sortedStatTable.map(r=>(
+{sortedStatTable.filter(r=>searchMatch(r.player.name)).map(r=>(
 <div key={r.player.id} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 4px",borderBottom:`1px solid ${DIVIDER}`}}>
 <div style={{width:110,display:"flex",alignItems:"center",gap:6,minWidth:0}}><Avatar player={r.player} size={20}/><span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.player.name}</span></div>
 <div style={{width:48,textAlign:"right",color:GREY,fontSize:12}}>{r.gp}</div>
@@ -13264,7 +13387,7 @@ setStartingLineup(lineup);
 const btn={background:RED,color:WHITE,border:"none",borderRadius:10,padding:"12px 18px",fontWeight:800,fontSize:13,cursor:"pointer",width:"100%"};
 const card={background:INPUTBG,borderRadius:14,padding:14,marginBottom:10};
 
-if(phase==="select")return(<div>
+if(phase==="select")return(<div style={{paddingBottom:90}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>🧢 GENERAL MANAGER · KIES JE FRANCHISE</div>
 <div style={{color:WHITE,fontSize:12,marginBottom:14,textAlign:"center",opacity:0.7}}>Neem de leiding van een NBA franchise. Lottery → Draft → Trades → Free Agency → Coach. Blijf GM zolang je presteert — bij 3 seizoenen zonder play-offs, 6+ jaar zonder titel, of een dalend roster lig je eruit.</div>
 
@@ -13310,7 +13433,7 @@ if(phase==="select")return(<div>
 
 if(phase==="lottery-reveal"){
 const myPick=lottery.indexOf(myTeamId)+1;
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>DRAFT LOTTERY RESULTS</div>
 <div style={{...card,textAlign:"center",padding:24,background:"linear-gradient(180deg,#2a0808,#1C1C1E)"}}>
 <div style={{fontSize:40,marginBottom:8}}>🎱</div>
@@ -13335,7 +13458,7 @@ const currentTeamId=lottery[pickIndex%lottery.length];
 const round=Math.floor(pickIndex/lottery.length)+1;
 const isMyTurn=currentTeamId===myTeamId;
 const available=draftClass.filter(p=>!drafted[p.id]).sort((a,b)=>b.overall-a.overall);
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>NBA DRAFT {2026+seasonNumber-1} · RONDE {round} · PICK {pickIndex+1}/{totalPicks}</div>
 <div style={{...card,textAlign:"center",background:isMyTurn?"linear-gradient(180deg,#2a0808,#1C1C1E)":INPUTBG}}>
 <div style={{color:GREY,fontSize:11,marginBottom:4}}>ON THE CLOCK</div>
@@ -13354,7 +13477,7 @@ return(<div>
 
 if(phase==="draft-done"){
 const myPicks=Object.entries(drafted).filter(([_,d])=>d.teamId===myTeamId).map(([pid,d])=>({...draftClass.find(p=>p.id===pid),pickNo:d.pickNo}));
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>JOUW DRAFT KLASSE</div>
 {myPicks.sort((a,b)=>a.pickNo-b.pickNo).map(p=>(
 <div key={p.id} style={{...card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -13373,7 +13496,7 @@ const myTotalSalary=myRoster.reduce((s,p)=>s+salaryOf(p),0);
 const myValue=myRoster.filter(p=>tradeGiveList.includes(p.name)).reduce((s,p)=>s+p.overall,0)+(tradeGivePick?PICK_VALUE:0);
 const theirValue=theirRoster.filter(p=>tradeGetList.includes(p.name)).reduce((s,p)=>s+p.overall,0)+(tradeGetPick?PICK_VALUE:0);
 const toggle=(list,setList,name)=>{setList(list.includes(name)?list.filter(n=>n!==name):[...list,name]);};
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>TRADE MARKT</div>
 <div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:8}}>Selecteer meerdere spelers per kant voor multi-player deals, en voeg eventueel een toekomstig pick toe.</div>
 {capMode==="strict"&&<div style={{...card,textAlign:"center",padding:10}}>
@@ -13448,7 +13571,7 @@ return(<div>
 }
 
 if(phase==="fa"){
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>FREE AGENCY · CAP RUIMTE</div>
 <div style={{...card,textAlign:"center"}}>
 <div style={{color:GREY,fontSize:11}}>BESCHIKBAAR BUDGET</div>
@@ -13479,7 +13602,7 @@ const currentCoach=COACHES.find(c=>c.id===coachId);
 const otherCoaches=COACHES.filter(c=>c.team!==myTeamId);
 const defaultCoach=COACHES.find(c=>c.team===myTeamId);
 const startersRating=POS.reduce((s,pos)=>{const p=roster.find(x=>x.name===startingLineup[pos]);return s+(p?p.overall:0);},0)/Math.max(1,POS.filter(pos=>startingLineup[pos]).length);
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>BASISOPSTELLING & COACH</div>
 <div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:10}}>Stel je eigen starting five samen zoals jij het als GM voor je ziet, en kies wie de leiding krijgt op de bank.</div>
 
@@ -13522,7 +13645,7 @@ return(<div>
 
 if(phase==="result"){
 const confStandings=result.standings[result.myConf];
-return(<div>
+return(<div style={{paddingBottom:90}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10,textAlign:"center"}}>SEIZOEN {seasonNumber} RESULTAAT · {myTeam.name}</div>
 <div style={{...card,textAlign:"center",padding:24,background:result.champion?"linear-gradient(180deg,#8B6914,#1C1C1E)":"linear-gradient(180deg,#2a0808,#1C1C1E)"}}>
 {result.champion&&<div style={{fontSize:48,marginBottom:8}}>🏆</div>}
@@ -13769,6 +13892,7 @@ const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
 const [showAnnouncement,setShowAnnouncement]=useState(false);
 const [tab,setTab]=useState("performances");
+function changeTab(id){setTab(id);if(typeof window!=="undefined")window.scrollTo({top:0,left:0});}
 const [modal,setModal]=useState(null);
 const [compareTarget,setCompareTarget]=useState(null); // {player} of null
 const [showConfetti,setShowConfetti]=useState(false);
@@ -14521,7 +14645,7 @@ setShowAnnouncement(false);
 function handleAdminQuickAction(action){
 if(action==="logGame"){setModal("logGame");}
 else if(action==="addPlayer"){setModal("addPlayer");}
-else if(action==="scheduleGame"){setModal(null);setTab("fullgames");}
+else if(action==="scheduleGame"){setModal(null);changeTab("fullgames");}
 else if(action==="hallOfFame"){setModal(null);setShowHallOfFame(true);}
 }
 // Fantasy League: simple username/password accounts stored in Firestore (no real auth backend,
@@ -14711,7 +14835,7 @@ Nu updaten
 {/* Tabs — 5 tabs now */}
 <div style={{display:"flex",borderBottom:`1px solid ${DIVIDER}`}}>
 {[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Stats"},{id:"larp",label:"LARP"},{id:"players",label:"Players"}].map(({id,label})=>(
-<button key={id} data-testid={`top-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
+<button key={id} data-testid={`top-tab-${id}`} onClick={()=>changeTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
 ))}
 </div>
 
@@ -14848,7 +14972,7 @@ const pinnedLarp = larpPosts.find(p => p.pinned);
 if (!pinnedLarp) return null;
 const preview = (pinnedLarp.text||"").slice(0,80) || (pinnedLarp.gif?"[GIF]":"") || (pinnedLarp.performanceId?"[Performance]":"");
 return (
-<div data-testid="pinned-banner-bottom" onClick={() => setTab("larp")} style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",borderTop:`1px solid ${RED}55`,borderBottom:`1px solid ${RED}22`,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,zIndex:50,backdropFilter:"blur(8px)"}}>
+<div data-testid="pinned-banner-bottom" onClick={() => changeTab("larp")} style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",borderTop:`1px solid ${RED}55`,borderBottom:`1px solid ${RED}22`,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,zIndex:50,backdropFilter:"blur(8px)"}}>
 <span style={{fontSize:18}}>📌</span>
 <div style={{flex:1,minWidth:0}}>
 <div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:2}}>GEPIIND · {pinnedLarp.tempName}</div>
@@ -14862,7 +14986,7 @@ return (
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
 {[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Stats"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"},{id:"nbapred",icon:"🎮",label:"Minigames"}].filter(({id})=>(id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false)&&(id!=="nbapred"||isAdmin||appSettings?.nbaPredictionsEnabled!==false)).map(({id,icon,label})=>(
-<button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>setTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+<button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>changeTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>
 </button>

@@ -2960,6 +2960,7 @@ return(
 
 // ── Monthly Stats Tab
 function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
+const{IS}=styles();
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [rangeMode,setRangeMode]=useState("month"); // "month" | "season" | "alltime"

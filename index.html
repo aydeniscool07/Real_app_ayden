@@ -1684,28 +1684,38 @@ const [y,mo]=m.split("-");
 return{p:stats[0].p,eff:stats[0].eff,lbl:`${MONTHS[parseInt(mo)-1].slice(0,3)} ${y}`};
 }
 
-function computeTrophies(player,allGames,allPlayers,manualAwards){
+function computeTrophies(player,allGames,allPlayers,manualAwards,seasons=[]){
 // manualAwards: [{id, month, awardId, playerIds:[...], lbl}] from Firestore
 const awards=manualAwards||[];
-const won=awards.filter(a=>Array.isArray(a.playerIds)?a.playerIds.includes(player.id):a.playerId===player.id);
+const won=awards.filter(a=>Array.isArray(a.playerIds)?a.playerIds.includes(player.id):a.playerId===player.id).map(a=>{
+let periodGames;
+if(a.month&&a.month.startsWith("szn_")){
+const seasonId=a.month.slice(4);
+const season=seasons.find(s=>s.id===seasonId);
+periodGames=season?allGames.filter(g=>g.playerId===player.id&&g.date>=season.startDate&&g.date<=season.endDate):[];
+}else{
+periodGames=allGames.filter(g=>g.playerId===player.id&&g.date&&g.date.slice(0,7)===a.month);
+}
+return{...a,periodGames};
+});
 // Special achievements — still automatic
 const myGames=allGames.filter(g=>g.playerId===player.id);
 const special=[];
-const c30=myGames.filter(g=>(+g.pts||0)>=7).length;
-if(c30>0)special.push({key:"pts7",icon:"🔥",label:`7+ punten game`,count:c30});
-const c20r=myGames.filter(g=>(+g.reb||0)>=8).length;
-if(c20r>0)special.push({key:"reb8",icon:"💪",label:`8+ rebounds`,count:c20r});
-const c10a=myGames.filter(g=>(+g.ast||0)>=5).length;
-if(c10a>0)special.push({key:"ast5",icon:"🎯",label:`5+ assists`,count:c10a});
-const c5s=myGames.filter(g=>(+g.stl||0)>=4).length;
-if(c5s>0)special.push({key:"stl4",icon:"🦅",label:`4+ steals`,count:c5s});
-const c5b=myGames.filter(g=>(+g.blk||0)>=4).length;
-if(c5b>0)special.push({key:"blk4",icon:"🚫",label:`4+ blocks`,count:c5b});
-const td=myGames.filter(g=>{
+const pts7Games=myGames.filter(g=>(+g.pts||0)>=7);
+if(pts7Games.length>0)special.push({key:"pts7",icon:"🔥",label:`7+ punten game`,count:pts7Games.length,games:pts7Games});
+const reb8Games=myGames.filter(g=>(+g.reb||0)>=8);
+if(reb8Games.length>0)special.push({key:"reb8",icon:"💪",label:`8+ rebounds`,count:reb8Games.length,games:reb8Games});
+const ast5Games=myGames.filter(g=>(+g.ast||0)>=5);
+if(ast5Games.length>0)special.push({key:"ast5",icon:"🎯",label:`5+ assists`,count:ast5Games.length,games:ast5Games});
+const stl4Games=myGames.filter(g=>(+g.stl||0)>=4);
+if(stl4Games.length>0)special.push({key:"stl4",icon:"🦅",label:`4+ steals`,count:stl4Games.length,games:stl4Games});
+const blk4Games=myGames.filter(g=>(+g.blk||0)>=4);
+if(blk4Games.length>0)special.push({key:"blk4",icon:"🚫",label:`4+ blocks`,count:blk4Games.length,games:blk4Games});
+const tdGames=myGames.filter(g=>{
 const ten=["pts","reb","ast","stl","blk"].filter(k=>(+g[k]||0)>=5).length;
 return ten>=3;
-}).length;
-if(td>0)special.push({key:"td",icon:"💎",label:`Triple-double`,count:td});
+});
+if(tdGames.length>0)special.push({key:"td",icon:"💎",label:`Triple-double`,count:tdGames.length,games:tdGames});
 return{won,special};
 }
 
@@ -1918,9 +1928,30 @@ achieved.push({key:k,threshold:th,date:g.date,label:`${th}ste ${MILESTONE_LABELS
 return{achieved:achieved.sort((a,b)=>(b.date||"").localeCompare(a.date||"")),totals};
 }
 
+// ── Popup: toont een lijst games die aan een specifieke voorwaarde voldoen (special prestatie, matchup, of award-periode)
+function SpecialGamesModal({title,subtitle,games,onPerfClick,onClose}){
+return(
+<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:280}}>
+<div onClick={e=>e.stopPropagation()} className="fade-in" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"80vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
+<div style={{fontWeight:800,fontSize:18,color:WHITE,marginBottom:2}}>{title}</div>
+{subtitle&&<div style={{color:GREY,fontSize:12,marginBottom:16}}>{subtitle}</div>}
+{(!games||games.length===0)&&<div style={{color:GREY,fontSize:14,textAlign:"center",padding:20}}>Geen games gevonden.</div>}
+{(games||[]).slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(g=>(
+<div key={g.id} onClick={()=>onPerfClick&&onPerfClick(g)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`,cursor:onPerfClick?"pointer":"default"}}>
+<div style={{flex:1}}><StatLine game={g} max={3}/><div style={{color:GREY,fontSize:12,marginTop:4}}>{g.date}{g.opponent?` · vs ${g.opponent.toUpperCase()}`:""}</div></div>
+<div style={{color:RED,fontSize:14,fontWeight:700,flexShrink:0}}>{calcFps(g)} fps</div>
+</div>
+))}
+<button onClick={onClose} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"13px 0",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%",marginTop:16}}>Sluiten</button>
+</div>
+</div>
+);
+}
+
 // ── Trophy Case Component (on player profile)
-function TrophyCase({player,allGames,allPlayers,manualAwards}){
-const t=useMemo(()=>computeTrophies(player,allGames,allPlayers,manualAwards),[player,allGames,allPlayers,manualAwards]);
+function TrophyCase({player,allGames,allPlayers,manualAwards,seasons=[],onPerfClick}){
+const t=useMemo(()=>computeTrophies(player,allGames,allPlayers,manualAwards,seasons),[player,allGames,allPlayers,manualAwards,seasons]);
+const [gamesPopup,setGamesPopup]=useState(null); // {title,subtitle,games}
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,allPlayers),[allGames,allPlayers]);
 const isProjectedLeader=projected&&projected.p.id===player.id;
 const totalAwards=t.won.length;
@@ -1928,6 +1959,7 @@ const totalTrophies=totalAwards+t.special.reduce((s,x)=>s+x.count,0);
 if(totalTrophies===0&&!isProjectedLeader)return null;
 return(
 <div data-testid="trophy-case" style={{marginBottom:20}}>
+{gamesPopup&&<SpecialGamesModal title={gamesPopup.title} subtitle={gamesPopup.subtitle} games={gamesPopup.games} onPerfClick={onPerfClick} onClose={()=>setGamesPopup(null)}/>}
 <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",marginBottom:10}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5}}>🏆 TROPHY CASE</div>
 {totalTrophies>0&&<div style={{color:"#f5a524",fontSize:11,fontWeight:700}}>{totalTrophies} prijzen</div>}
@@ -1953,7 +1985,7 @@ const at=getAwardType(a.awardId);
 const Icon=at.Icon;
 const isSeason=isSeasonAwardEntry(a);
 return(
-<div key={i} style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"8px 12px"}}>
+<div key={i} onClick={()=>setGamesPopup({title:`${awardTypeLabel(at,isSeason,a.lbl)}`,subtitle:`Games uit ${a.lbl}`,games:a.periodGames})} style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"8px 12px",cursor:"pointer"}}>
 <Icon size={28} color={at.color}/>
 <div style={{flex:1,minWidth:0}}>
 <div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,isSeason,a.lbl).toUpperCase()}</div>
@@ -1970,7 +2002,7 @@ return(
 <div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6}}>⭐ SPECIALE PRESTATIES</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
 {t.special.map((s,i)=>(
-<div key={i} style={{background:INPUTBG,border:"1px solid #f5a52455",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:8}}>
+<div key={i} onClick={()=>setGamesPopup({title:`${s.icon} ${s.label}`,subtitle:`${s.count} game${s.count===1?"":"s"} met ${player.name}`,games:s.games})} style={{background:INPUTBG,border:"1px solid #f5a52455",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
 <div style={{fontSize:20}}>{s.icon}</div>
 <div style={{flex:1,minWidth:0}}>
 <div style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</div>
@@ -2690,7 +2722,7 @@ return(
 );
 }
 
-function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
+function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,seasons=[],onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
 const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
@@ -2699,6 +2731,7 @@ const matchups=useMemo(()=>computeMatchups(pg),[pg]);
 const milestones=useMemo(()=>computeMilestones(pg),[pg]);
 const [showCard,setShowCard]=useState(false);
 const [showStatusGraphic,setShowStatusGraphic]=useState(false);
+const [gamesPopup,setGamesPopup]=useState(null); // {title,subtitle,games} — voor matchup drill-down
 const latestMonth=pg.length?gameYearMonth(pg[0]):currentMonthKey();
 const profileRef=useRef();
 const [exporting,setExporting]=useState(false);
@@ -2769,14 +2802,14 @@ return(
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>MATCHUPS</div>
 <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
 {matchups.best&&(
-<div style={{background:"linear-gradient(135deg,#0a1f0a,#0d2b0d)",border:"1px solid #27AE6055",borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200}}>
+<div onClick={()=>setGamesPopup({title:`✅ Beste matchup — vs ${matchups.best.opponent}`,subtitle:`${matchups.best.ppg} PPG · ${matchups.best.rpg} RPG · ${matchups.best.apg} APG · ${matchups.best.games}G`,games:pg.filter(g=>(g.opponent||"").trim()===matchups.best.opponent)})} style={{background:"linear-gradient(135deg,#0a1f0a,#0d2b0d)",border:"1px solid #27AE6055",borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200,cursor:"pointer"}}>
 <div style={{color:"#27AE60",fontSize:11,fontWeight:700,letterSpacing:1}}>✅ BESTE MATCHUP</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:16,marginTop:4}}>vs {matchups.best.opponent}</div>
 <div style={{color:GREY,fontSize:12,marginTop:4}}>{matchups.best.ppg} PPG · {matchups.best.rpg} RPG · {matchups.best.apg} APG · {matchups.best.games}G</div>
 </div>
 )}
 {matchups.worst&&matchups.worst.opponent!==matchups.best?.opponent&&(
-<div style={{background:"linear-gradient(135deg,#1f0a0a,#2b0d0d)",border:`1px solid ${RED}55`,borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200}}>
+<div onClick={()=>setGamesPopup({title:`⚠️ Moeilijkste matchup — vs ${matchups.worst.opponent}`,subtitle:`${matchups.worst.ppg} PPG · ${matchups.worst.rpg} RPG · ${matchups.worst.apg} APG · ${matchups.worst.games}G`,games:pg.filter(g=>(g.opponent||"").trim()===matchups.worst.opponent)})} style={{background:"linear-gradient(135deg,#1f0a0a,#2b0d0d)",border:`1px solid ${RED}55`,borderRadius:12,padding:"12px 14px",flex:"1 1 220px",minWidth:200,cursor:"pointer"}}>
 <div style={{color:RED,fontSize:11,fontWeight:700,letterSpacing:1}}>⚠️ MOEILIJKSTE MATCHUP</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:16,marginTop:4}}>vs {matchups.worst.opponent}</div>
 <div style={{color:GREY,fontSize:12,marginTop:4}}>{matchups.worst.ppg} PPG · {matchups.worst.rpg} RPG · {matchups.worst.apg} APG · {matchups.worst.games}G</div>
@@ -2801,7 +2834,7 @@ return(
 </div>
 </div>
 )}
-<TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards}/>
+<TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards} seasons={seasons} onPerfClick={onPerfClick}/>
 {pg.length>=3&&<NBAComparison player={player} allGames={allGames}/>}
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
@@ -2853,6 +2886,7 @@ return(
 </div>
 {showCard&&<PlayerCardModal player={player} allGames={allGames} monthKey={latestMonth} onClose={()=>setShowCard(false)}/>}
 {showStatusGraphic&&<StatusGraphicModal player={player} onClose={()=>setShowStatusGraphic(false)}/>}
+{gamesPopup&&<SpecialGamesModal title={gamesPopup.title} subtitle={gamesPopup.subtitle} games={gamesPopup.games} onPerfClick={onPerfClick} onClose={()=>setGamesPopup(null)}/>}
 </div>
 );
 }
@@ -15015,7 +15049,7 @@ return (
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(
-<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin}
+<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]}
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
 onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
 onOpenHighlight={hl=>setHighlightView(hl)}

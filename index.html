@@ -1658,6 +1658,13 @@ const AWARD_TYPES=[
 {id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
 ];
 function getAwardType(id){return AWARD_TYPES.find(a=>a.id===id)||AWARD_TYPES[0];}
+// Seizoensawards krijgen de seizoensnaam in de titel i.p.v. "van de Maand"/"vd Maand" — bv. "MVP 'Herfst 2026'"
+function awardTypeLabel(at,isSeason,periodLbl){
+if(!isSeason||!periodLbl)return at.label;
+const stripped=at.label.replace(/\s*(van de Maand|vd Maand)\s*$/i,"").trim();
+return `${stripped} '${periodLbl}'`;
+}
+function isSeasonAwardEntry(a){return!!(a&&a.month&&a.month.startsWith("szn_"));}
 
 // Compute the projected (not-yet-final) MVP leader for the current, still-running month
 function computeProjectedMonthMvp(allGames,allPlayers){
@@ -1944,12 +1951,13 @@ return(
 {t.won.map((a,i)=>{
 const at=getAwardType(a.awardId);
 const Icon=at.Icon;
+const isSeason=isSeasonAwardEntry(a);
 return(
 <div key={i} style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"8px 12px"}}>
 <Icon size={28} color={at.color}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
-<div style={{color:WHITE,fontSize:12,fontWeight:600}}>{a.lbl}</div>
+<div style={{color:at.color,fontSize:11,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,isSeason,a.lbl).toUpperCase()}</div>
+{!isSeason&&<div style={{color:WHITE,fontSize:12,fontWeight:600}}>{a.lbl}</div>}
 </div>
 </div>
 );
@@ -2306,7 +2314,7 @@ return(
 <button key={a.id} onClick={()=>setSelAward(a.id)} style={{display:"flex",alignItems:"center",gap:8,background:sel?`${a.color}22`:INPUTBG,border:`1.5px solid ${sel?a.color:"transparent"}`,borderRadius:10,padding:"10px 10px",cursor:"pointer",textAlign:"left"}}>
 <Ic size={22} color={a.color}/>
 <div style={{minWidth:0}}>
-<div style={{color:sel?a.color:WHITE,fontWeight:700,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.label}</div>
+<div style={{color:sel?a.color:WHITE,fontWeight:700,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{awardTypeLabel(a,scope==="season",periodLbl)}</div>
 <div style={{color:GREY,fontSize:10}}>{a.desc}</div>
 </div>
 </button>
@@ -3543,7 +3551,7 @@ return(
 <div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
 <Icon size={24} color={at.color}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,rangeMode==="season",monthLabel).toUpperCase()}</div>
 <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
 {leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
 </div>
@@ -6563,14 +6571,15 @@ function AwardEmbed({award,players}){
 if(!award)return null;
 const at=getAwardType(award.awardId);
 const Icon=at.Icon;
+const isSeason=isSeasonAwardEntry(award);
 const names=(Array.isArray(award.playerIds)?award.playerIds:[award.playerId]).filter(Boolean).map(pid=>players.find(pl=>pl.id===pid)?.name||"?").join(", ");
 return(
 <div style={{display:"flex",alignItems:"center",gap:10,background:`${at.color}18`,border:`1px solid ${at.color}55`,borderRadius:12,padding:"10px 12px",marginTop:8}}>
 <Icon size={30} color={at.color}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{at.label.toUpperCase()}</div>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,isSeason,award.lbl).toUpperCase()}</div>
 <div style={{color:WHITE,fontSize:13,fontWeight:700}}>{names}</div>
-<div style={{color:GREY,fontSize:11}}>{award.lbl}</div>
+{!isSeason&&<div style={{color:GREY,fontSize:11}}>{award.lbl}</div>}
 </div>
 </div>
 );
@@ -6679,13 +6688,14 @@ return(
 {sorted.map(a=>{
 const at=getAwardType(a.awardId);
 const Icon=at.Icon;
+const isSeason=isSeasonAwardEntry(a);
 const names=(Array.isArray(a.playerIds)?a.playerIds:[a.playerId]).filter(Boolean).map(pid=>players.find(pl=>pl.id===pid)?.name||"?").join(", ");
 return(
 <div key={a.id} onClick={()=>onSelect(a)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"#111",borderRadius:10,marginBottom:6,cursor:"pointer"}}>
 <Icon size={26} color={at.color}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{fontWeight:700,fontSize:13,color:WHITE}}>{at.label}</div>
-<div style={{color:GREY,fontSize:11}}>{names} · {a.lbl}</div>
+<div style={{fontWeight:700,fontSize:13,color:WHITE}}>{awardTypeLabel(at,isSeason,a.lbl)}</div>
+<div style={{color:GREY,fontSize:11}}>{names}{!isSeason?` · ${a.lbl}`:""}</div>
 </div>
 </div>
 );

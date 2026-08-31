@@ -103,8 +103,15 @@ window.__APP_BOOTED__ = false;
 var fb = document.getElementById('boot-fallback');
 var errBox = document.getElementById('boot-fallback-err');
 var msgBox = document.getElementById('boot-fallback-msg');
+// Errors injected by the host browser/app itself (Android WebView autofill,
+// in-app browser polyfills, extensions) are not real app crashes — ignore them.
+var IGNORE_ERR_RE = /autofillbackhandler|autofill|gsi_logger|inpage|contentscript|__cf_|cloudflareinsights|webkit\.messagehandlers/i;
+function isIgnorableError(detail){
+return IGNORE_ERR_RE.test(String(detail||''));
+}
 function showFallback(detail){
 if (window.__APP_BOOTED__) return;
+if (isIgnorableError(detail)) return;
 fb.classList.add('show');
 if (detail) {
 errBox.style.display = 'block';

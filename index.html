@@ -6228,24 +6228,48 @@ const [rainChances,setRainChances]=useState({});
 // Auto-balance teams — available to every user (not just admin) directly on a scheduled
 // game card. Uses each player's recent-vs-season form rating (shared with the AI Coach
 // card); computed live in the browser and not saved, so anyone can try it risk-free.
-const [balancePreview,setBalancePreview]=useState({}); // { [gameId]: {splits, idx} }
-function autoBalanceGame(g){
-const outIds=new Set(Object.entries(g.injuryReport||{}).filter(([,r])=>r?.status==="out").map(([pid])=>pid));
-const eligible=players.filter(p=>!outIds.has(p.id));
-if(eligible.length<2)return;
+// Only players marked "Active" on the injury sheet are eligible by default — "Questionable"
+// players can be opted in per game, and "Out"/unmarked players are never included.
+const [balancePreview,setBalancePreview]=useState({}); // { [gameId]: {splits, idx, tooFew} }
+const [includeQuestionable,setIncludeQuestionable]=useState({}); // { [gameId]: bool }
+function eligiblePlayersForBalance(g,includeQ){
+return players.filter(p=>{
+const st=g.injuryReport?.[p.id]?.status;
+return st==="active"||(includeQ&&st==="questionable");
+});
+}
+function autoBalanceGame(g,includeQ){
+const eligible=eligiblePlayersForBalance(g,includeQ);
+if(eligible.length<2){setBalancePreview(bp=>({...bp,[g.id]:{splits:[],idx:0,tooFew:true,chameleon:null}}));return;}
 const rated=eligible.map(p=>{const fm=getPlayerFormRating(p.id,pastGames||[],5);return{id:p.id,name:p.name,rating:fm.rating};});
 const known=rated.filter(p=>p.rating!==null);
 const fallback=known.length?known.reduce((s,p)=>s+p.rating,0)/known.length:5;
 const finalRated=rated.map(p=>p.rating===null?{...p,rating:+fallback.toFixed(1)}:p);
-const splits=computeBalancedSplits(finalRated);
-if(!splits.length)return;
-setBalancePreview(bp=>({...bp,[g.id]:{splits,idx:0}}));
+// Odd group: Team A and Team B must always come out exactly even in size, so the
+// lowest-rated player sits out as Kameleon instead of leaving one team a player short/up.
+let chameleon=null;
+let poolForSplit=finalRated;
+if(finalRated.length%2===1){
+const worst=finalRated.reduce((min,p)=>p.rating<min.rating?p:min,finalRated[0]);
+chameleon=worst;
+poolForSplit=finalRated.filter(p=>p.id!==worst.id);
+}
+const splits=computeBalancedSplits(poolForSplit);
+setBalancePreview(bp=>({...bp,[g.id]:{splits,idx:0,tooFew:!splits.length,chameleon}}));
 }
 function cycleBalanceGame(g){
 setBalancePreview(bp=>{
 const cur=bp[g.id];
-if(!cur)return bp;
+if(!cur||!cur.splits.length)return bp;
 return{...bp,[g.id]:{...cur,idx:(cur.idx+1)%cur.splits.length}};
+});
+}
+function toggleIncludeQuestionable(g){
+setIncludeQuestionable(prev=>{
+const nextVal=!prev[g.id];
+const next={...prev,[g.id]:nextVal};
+if(balancePreview[g.id])autoBalanceGame(g,nextVal); // live-refresh an already-open preview
+return next;
 });
 }
 
@@ -6421,10 +6445,20 @@ return(
 )}
 {/* Auto-balance teams — available to everyone, not just admins */}
 <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
+<div onClick={()=>toggleIncludeQuestionable(g)} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,cursor:"pointer"}}>
+<div style={{width:18,height:18,borderRadius:5,border:`1.5px solid ${includeQuestionable[g.id]?"#00D4FF":"#555"}`,background:includeQuestionable[g.id]?"#00D4FF":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#000",fontSize:11,fontWeight:900}}>{includeQuestionable[g.id]?"✓":""}</div>
+<div style={{color:GREY,fontSize:12}}>Ook Questionable spelers meenemen</div>
+</div>
 {!balancePreview[g.id]&&(
-<button onClick={()=>autoBalanceGame(g)} style={{width:"100%",background:"transparent",border:"1px solid #00D4FF55",borderRadius:10,padding:"10px 0",color:"#00D4FF",fontSize:13,fontWeight:700,cursor:"pointer"}}>⚖️ Auto-balanceer teams</button>
+<button onClick={()=>autoBalanceGame(g,!!includeQuestionable[g.id])} style={{width:"100%",background:"transparent",border:"1px solid #00D4FF55",borderRadius:10,padding:"10px 0",color:"#00D4FF",fontSize:13,fontWeight:700,cursor:"pointer"}}>⚖️ Auto-balanceer teams</button>
 )}
-{balancePreview[g.id]&&(()=>{
+{balancePreview[g.id]&&balancePreview[g.id].tooFew&&(
+<div>
+<div style={{color:GREY,fontSize:12,textAlign:"center",padding:"10px 0"}}>Niet genoeg spelers gemarkeerd als Active{includeQuestionable[g.id]?" of Questionable":""} om teams te balanceren.</div>
+<button onClick={()=>setBalancePreview(prev=>{const n={...prev};delete n[g.id];return n;})} style={{width:"100%",background:"transparent",border:"1px solid #333",borderRadius:8,padding:"8px 0",color:GREY,fontSize:12,fontWeight:700,cursor:"pointer"}}>Sluiten</button>
+</div>
+)}
+{balancePreview[g.id]&&!balancePreview[g.id].tooFew&&(()=>{
 const bp=balancePreview[g.id];
 const cur=bp.splits[bp.idx];
 const sumA=cur.teamA.reduce((s,p)=>s+p.rating,0),sumB=cur.teamB.reduce((s,p)=>s+p.rating,0);
@@ -6448,6 +6482,15 @@ return(
 </div>
 ))}
 </div>
+{bp.chameleon&&(
+<div style={{background:"#151517",borderRadius:10,padding:10,marginBottom:8}}>
+<div style={{color:"#8e5cff",fontSize:11,fontWeight:800,marginBottom:4}}>🦎 KAMELEON — oneven groep, slechtste speler zit erbuiten</div>
+<div style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
+<span style={{color:WHITE,fontSize:12,fontWeight:600}}>{bp.chameleon.name}</span>
+<span style={{color:GREY,fontSize:11}}>{bp.chameleon.rating}</span>
+</div>
+</div>
+)}
 <div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:8}}>Ratingverschil: {cur.diff}{cur.diff<1?" — zo gelijk als het wordt 🎯":""}</div>
 <div style={{display:"flex",gap:8}}>
 {bp.splits.length>1&&(
@@ -6462,6 +6505,7 @@ return(
 </div>
 );
 })}
+
 
 
 {/* Past Games — detailed */}

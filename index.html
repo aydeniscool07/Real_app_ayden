@@ -978,6 +978,64 @@ const clean=await callGroqAI(prompt,400,0.9);
 return JSON.parse(clean);
 }
 function avg(arr,key){if(!arr.length)return 0;return parseFloat((arr.reduce((s,g)=>s+(+g[key]||0),0)/arr.length).toFixed(1));}
+// ── Shared "form" calculation — used by both the AI Coach card and the Team Balancer,
+// so both features always agree on what a player's current rating/trend is.
+function getPlayerFormRating(playerId,allGames,recentN=5){
+const pg=allGames.filter(g=>g.playerId===playerId).slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+if(!pg.length)return{gp:0,rating:null,seasonAvgFps:null,recentAvgFps:null,trend:0,recentGames:[],seasonAverages:null,recentAverages:null};
+const withFps=pg.map(g=>({...g,fps:+calcFps(g)}));
+const seasonAvgFps=withFps.reduce((s,g)=>s+g.fps,0)/withFps.length;
+const recentGames=withFps.slice(-Math.min(recentN,withFps.length));
+const recentAvgFps=recentGames.reduce((s,g)=>s+g.fps,0)/recentGames.length;
+// Recent form counts more once there's enough history to actually call it a trend
+const rating=withFps.length>=recentN?(seasonAvgFps*0.4+recentAvgFps*0.6):seasonAvgFps;
+const statKeys=["pts","reb","ast","stl","blk","to","fg","threept"];
+const seasonAverages={},recentAverages={};
+statKeys.forEach(k=>{seasonAverages[k]=avg(pg,k);recentAverages[k]=avg(recentGames,k);});
+return{gp:pg.length,rating:+rating.toFixed(1),seasonAvgFps:+seasonAvgFps.toFixed(1),recentAvgFps:+recentAvgFps.toFixed(1),trend:+(recentAvgFps-seasonAvgFps).toFixed(1),recentGames,seasonAverages,recentAverages};
+}
+// Picks out the stat categories that moved the most between season avg and recent form,
+// so the AI coach gets concrete numbers to talk about instead of vague generalities.
+function detectFormTrends(seasonAverages,recentAverages){
+const labels={pts:"scoring",reb:"rebounds",ast:"assists",stl:"steals",blk:"blocks",to:"turnovers",fg:"schutpercentage",threept:"3-punters"};
+const trends=Object.keys(labels).map(k=>{
+const s=seasonAverages[k]||0,r=recentAverages[k]||0,delta=r-s;
+const pctChange=s!==0?Math.round((delta/s)*100):(r>0?100:0);
+return{key:k,label:labels[k],season:s,recent:r,delta:+delta.toFixed(1),pctChange};
+});
+return trends.filter(t=>Math.abs(t.season)>0.3||Math.abs(t.recent)>0.3).sort((a,b)=>Math.abs(b.pctChange)-Math.abs(a.pctChange)).slice(0,4);
+}
+// Exhaustively finds the most balanced way to split a group into two teams by summed rating.
+// For realistic friend-group sizes (<=16) this brute-forces every split in well under a second,
+// which is both faster and more reliably correct than asking an LLM to do arithmetic.
+function computeBalancedSplits(ratedPlayers){
+const n=ratedPlayers.length;
+if(n<2)return[];
+if(n<=16){
+const totalSum=ratedPlayers.reduce((s,p)=>s+p.rating,0);
+const results=[];
+for(let mask=1;mask<(1<<n)-1;mask++){
+if(!(mask&1))continue; // player[0] always in team A — skips exact complement duplicates
+let aSize=0,sumA=0;
+for(let i=0;i<n;i++){if(mask&(1<<i)){aSize++;sumA+=ratedPlayers[i].rating;}}
+const bSize=n-aSize;
+if(Math.abs(aSize-bSize)>1)continue; // keep team sizes fair
+results.push({mask,diff:Math.abs(sumA-(totalSum-sumA))});
+}
+results.sort((a,b)=>a.diff-b.diff);
+return results.slice(0,5).map(r=>({
+teamA:ratedPlayers.filter((p,i)=>r.mask&(1<<i)),
+teamB:ratedPlayers.filter((p,i)=>!(r.mask&(1<<i))),
+diff:+r.diff.toFixed(1)
+}));
+}
+// Fallback for larger groups: snake draft by rating (still balanced, just not exhaustively optimal)
+const sorted=[...ratedPlayers].sort((a,b)=>b.rating-a.rating);
+const teamA=[],teamB=[];
+sorted.forEach((p,i)=>{const round=Math.floor(i/2),pos=i%2;const goA=round%2===0?pos===0:pos===1;(goA?teamA:teamB).push(p);});
+const diff=Math.abs(teamA.reduce((s,p)=>s+p.rating,0)-teamB.reduce((s,p)=>s+p.rating,0));
+return[{teamA,teamB,diff:+diff.toFixed(1)}];
+}
 // MVP ranking score: eff average is still the main driver, but games played now gives
 // a real (small, capped) bonus — playing more games actually helps your ranking, not just
 // "less uncertainty penalty" for low samples. Bonus is capped so it can nudge close eff
@@ -2149,6 +2207,92 @@ return(
 );
 }
 
+// ── AI Coach — personal, numbers-driven feedback comparing a player's recent form to their season average
+function AICoachCard({player,allGames}){
+const COACH="#1ABC9C";
+const form=useMemo(()=>getPlayerFormRating(player.id,allGames,5),[player.id,allGames]);
+const [result,setResult]=useState(null);
+const [loading,setLoading]=useState(false);
+const [err,setErr]=useState(null);
+const [open,setOpen]=useState(false);
+if(form.gp<5)return null; // need real history before a "trend" means anything
+async function runCoach(){
+if(loading)return;
+setLoading(true);setErr(null);setResult(null);setOpen(true);
+const trends=detectFormTrends(form.seasonAverages,form.recentAverages);
+const trendLines=trends.map(t=>`${t.label}: seizoensgem. ${t.season} → laatste ${form.recentGames.length} games ${t.recent} (${t.delta>=0?"+":""}${t.delta}, ${t.pctChange>=0?"+":""}${t.pctChange}%)`).join("; ");
+const prompt=`Je bent een basketbalcoach die in het Nederlands korte, eerlijke en concrete feedback geeft aan een speler in een casual vrienden basketballcompetitie (games tot 10 punten).
+Speler: ${player.name}
+Games gespeeld: ${form.gp}
+Efficiency-trend: seizoensgemiddelde ${form.seasonAvgFps}, laatste ${form.recentGames.length} games ${form.recentAvgFps} (${form.trend>=0?"+":""}${form.trend})
+Stat-trends: ${trendLines||"geen significante trends, speler is stabiel"}
+Geef concrete, cijfermatige feedback — geen vage algemeenheden. Wees eerlijk over zwaktes maar motiverend. Noem minstens één sterk punt en één verbeterpunt, beide onderbouwd met de cijfers hierboven.
+Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
+{"headline":"korte pakkende kop, max 6 woorden","body":"2-3 zinnen concrete coaching feedback, cijfermatig onderbouwd, aanspreken met jij/je","strength":"kort (max 12 woorden), welke stat/skill gaat goed, met cijfer","focus":"kort (max 12 woorden), grootste verbeterkans, met cijfer"}`;
+try{
+const clean=await callGroqAI(prompt,350,0.8);
+setResult(JSON.parse(clean));
+}catch(e){setErr("Fout: "+(e&&e.message?e.message:String(e)));}
+setLoading(false);
+}
+if(!open){
+return(
+<div style={{marginBottom:20}}>
+<button onClick={runCoach} style={{width:"100%",background:"linear-gradient(135deg,#0a1f1a,#0a1a15)",border:`1px solid ${COACH}55`,borderRadius:14,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+<span style={{fontSize:24}}>🧠</span>
+<div style={{flex:1,textAlign:"left"}}>
+<div style={{color:COACH,fontWeight:700,fontSize:12,letterSpacing:1}}>AI COACH</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>Persoonlijke feedback op basis van je vorm</div>
+</div>
+<span style={{color:GREY,fontSize:18}}>›</span>
+</button>
+</div>
+);
+}
+return(
+<div style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🧠 AI COACH</div>
+{loading&&(
+<div style={{background:"linear-gradient(135deg,#0a1f1a,#0a1a15)",border:`1px solid ${COACH}33`,borderRadius:14,padding:"24px 16px",display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+<div style={{fontSize:32,animation:"spin 1.5s linear infinite"}}>🧠</div>
+<div style={{color:COACH,fontWeight:700,fontSize:13}}>Analyseert je vorm...</div>
+<div style={{color:GREY,fontSize:12}}>Vergelijkt laatste {form.recentGames.length} games met seizoensgemiddelde</div>
+<style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+</div>
+)}
+{err&&(
+<div style={{background:INPUTBG,borderRadius:14,padding:"16px",textAlign:"center"}}>
+<div style={{color:"#ff6b6b",marginBottom:8}}>{err}</div>
+<button onClick={runCoach} style={{background:RED,color:WHITE,border:"none",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontWeight:700}}>Opnieuw</button>
+</div>
+)}
+{result&&(
+<div style={{background:"linear-gradient(135deg,#0a1f1a,#08150f)",border:`1px solid ${COACH}88`,borderRadius:14,overflow:"hidden"}}>
+<div style={{padding:"14px 16px",borderBottom:`1px solid ${COACH}22`}}>
+<div style={{color:COACH,fontWeight:900,fontSize:16,lineHeight:1.2}}>{result.headline}</div>
+</div>
+<div style={{padding:"12px 16px",borderBottom:`1px solid ${COACH}22`}}>
+<div style={{color:WHITE,fontSize:13,lineHeight:1.6}}>{result.body}</div>
+</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:`${COACH}22`}}>
+<div style={{background:"#0a1f1a",padding:"10px 14px"}}>
+<div style={{color:"#2ecc71",fontSize:10,fontWeight:700,letterSpacing:1}}>💪 STERK PUNT</div>
+<div style={{color:WHITE,fontSize:12,marginTop:4,lineHeight:1.4}}>{result.strength}</div>
+</div>
+<div style={{background:"#0a1f1a",padding:"10px 14px"}}>
+<div style={{color:"#f5a524",fontSize:10,fontWeight:700,letterSpacing:1}}>🎯 FOCUSPUNT</div>
+<div style={{color:WHITE,fontSize:12,marginTop:4,lineHeight:1.4}}>{result.focus}</div>
+</div>
+</div>
+<div style={{padding:"8px 16px 12px",borderTop:`1px solid ${COACH}22`}}>
+<button onClick={runCoach} style={{background:"transparent",border:`1px solid ${COACH}55`,borderRadius:8,padding:"6px 12px",color:GREY,fontSize:11,cursor:"pointer",fontWeight:600}}>🔄 Opnieuw analyseren</button>
+</div>
+</div>
+)}
+</div>
+);
+}
+
 // ── Admin: Give Awards Modal
 // Berekent per award-type wie de stats van deze periode (maand of seizoen) als winnaar aanwijzen (admin beslist alsnog zelf)
 function computeAwardSuggestion(awardId,periodGames,prevPeriodGames,players,periodLbl){
@@ -2844,6 +2988,7 @@ return(
 )}
 <TrophyCase player={player} allGames={allGames} allPlayers={allPlayers} manualAwards={manualAwards} seasons={seasons} onPerfClick={onPerfClick}/>
 {pg.length>=3&&<NBAComparison player={player} allGames={allGames}/>}
+{pg.length>=5&&<AICoachCard player={player} allGames={allGames}/>}
 {pg.length>0&&(()=>{
 const best=[...pg].sort((a,b)=>+calcFps(b)-+calcFps(a))[0];
 return(
@@ -6080,6 +6225,29 @@ const [showAddModal,setShowAddModal]=useState(false);
 const [editingScheduled,setEditingScheduled]=useState(null);
 const [editingMatch,setEditingMatch]=useState(null);
 const [rainChances,setRainChances]=useState({});
+// Auto-balance teams — available to every user (not just admin) directly on a scheduled
+// game card. Uses each player's recent-vs-season form rating (shared with the AI Coach
+// card); computed live in the browser and not saved, so anyone can try it risk-free.
+const [balancePreview,setBalancePreview]=useState({}); // { [gameId]: {splits, idx} }
+function autoBalanceGame(g){
+const outIds=new Set(Object.entries(g.injuryReport||{}).filter(([,r])=>r?.status==="out").map(([pid])=>pid));
+const eligible=players.filter(p=>!outIds.has(p.id));
+if(eligible.length<2)return;
+const rated=eligible.map(p=>{const fm=getPlayerFormRating(p.id,pastGames||[],5);return{id:p.id,name:p.name,rating:fm.rating};});
+const known=rated.filter(p=>p.rating!==null);
+const fallback=known.length?known.reduce((s,p)=>s+p.rating,0)/known.length:5;
+const finalRated=rated.map(p=>p.rating===null?{...p,rating:+fallback.toFixed(1)}:p);
+const splits=computeBalancedSplits(finalRated);
+if(!splits.length)return;
+setBalancePreview(bp=>({...bp,[g.id]:{splits,idx:0}}));
+}
+function cycleBalanceGame(g){
+setBalancePreview(bp=>{
+const cur=bp[g.id];
+if(!cur)return bp;
+return{...bp,[g.id]:{...cur,idx:(cur.idx+1)%cur.splits.length}};
+});
+}
 
 // Get days in month
 const getDaysInMonth=(year,month)=>new Date(year,month+1,0).getDate();
@@ -6251,9 +6419,50 @@ return(
 })}
 </div>
 )}
+{/* Auto-balance teams — available to everyone, not just admins */}
+<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
+{!balancePreview[g.id]&&(
+<button onClick={()=>autoBalanceGame(g)} style={{width:"100%",background:"transparent",border:"1px solid #00D4FF55",borderRadius:10,padding:"10px 0",color:"#00D4FF",fontSize:13,fontWeight:700,cursor:"pointer"}}>⚖️ Auto-balanceer teams</button>
+)}
+{balancePreview[g.id]&&(()=>{
+const bp=balancePreview[g.id];
+const cur=bp.splits[bp.idx];
+const sumA=cur.teamA.reduce((s,p)=>s+p.rating,0),sumB=cur.teamB.reduce((s,p)=>s+p.rating,0);
+const maxSum=Math.max(sumA,sumB,1);
+return(
+<div>
+<div style={{color:"#00D4FF",fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>⚖️ AUTO-BALANCED TEAMS</div>
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+{[{label:"Team A",team:cur.teamA,sum:sumA},{label:"Team B",team:cur.teamB,sum:sumB}].map((t,ti)=>(
+<div key={ti} style={{background:"#151517",borderRadius:10,padding:10}}>
+<div style={{color:"#00D4FF",fontSize:11,fontWeight:800,marginBottom:6}}>{t.label}</div>
+{t.team.map(p=>(
+<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}>
+<span style={{color:WHITE,fontSize:12,fontWeight:600}}>{p.name}</span>
+<span style={{color:GREY,fontSize:11}}>{p.rating}</span>
+</div>
+))}
+<div style={{marginTop:6,height:4,background:"#000",borderRadius:2,overflow:"hidden"}}>
+<div style={{width:`${(t.sum/maxSum)*100}%`,height:"100%",background:"#00D4FF",borderRadius:2}}/>
+</div>
+</div>
+))}
+</div>
+<div style={{color:GREY,fontSize:11,textAlign:"center",marginBottom:8}}>Ratingverschil: {cur.diff}{cur.diff<1?" — zo gelijk als het wordt 🎯":""}</div>
+<div style={{display:"flex",gap:8}}>
+{bp.splits.length>1&&(
+<button onClick={()=>cycleBalanceGame(g)} style={{flex:1,background:"transparent",border:"1px solid #333",borderRadius:8,padding:"8px 0",color:GREY,fontSize:12,fontWeight:700,cursor:"pointer"}}>🔀 Andere ({bp.idx+1}/{bp.splits.length})</button>
+)}
+<button onClick={()=>setBalancePreview(prev=>{const n={...prev};delete n[g.id];return n;})} style={{flex:1,background:"transparent",border:"1px solid #333",borderRadius:8,padding:"8px 0",color:GREY,fontSize:12,fontWeight:700,cursor:"pointer"}}>✕ Verbergen</button>
+</div>
+</div>
+);
+})()}
+</div>
 </div>
 );
 })}
+
 
 {/* Past Games — detailed */}
 {(() => {

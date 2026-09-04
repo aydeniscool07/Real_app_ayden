@@ -2874,13 +2874,35 @@ return(
 );
 }
 
-function PlayerProfileModal({player,allGames,allPlayers,highlights,manualAwards,seasons=[],onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
+function PlayerProfileModal({player,allGames,allPlayers,scheduledGames=[],highlights,manualAwards,seasons=[],onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
 const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
 const hotStreak=useMemo(()=>computeHotStreak(pg),[pg]);
 const matchups=useMemo(()=>computeMatchups(pg),[pg]);
 const milestones=useMemo(()=>computeMilestones(pg),[pg]);
+// Rival: the teammate-league opponent this player has faced most often, with their head-to-head record.
+const rival=useMemo(()=>{
+const riv=computeRivalries(allGames,allPlayers,2).find(r=>r.p1.id===player.id||r.p2.id===player.id);
+if(!riv)return null;
+const opp=riv.p1.id===player.id?riv.p2:riv.p1;
+const h2h=computeH2HRecords(allGames,allPlayers,1).find(r=>(r.p1.id===player.id&&r.p2.id===opp.id)||(r.p2.id===player.id&&r.p1.id===opp.id));
+let record=null;
+if(h2h){
+const myWins=h2h.p1.id===player.id?h2h.w1:h2h.w2;
+const oppWins=h2h.p1.id===player.id?h2h.w2:h2h.w1;
+record=`${myWins}-${oppWins}`;
+}
+return{opponent:opp,meetings:riv.meetings,record};
+},[allGames,allPlayers,player.id]);
+// Status history: every scheduled game where this player was ever marked Questionable/Out, newest first —
+// scheduledGames already carry a date + injuryReport, so this is just reading that as a timeline.
+const statusHistory=useMemo(()=>{
+return(scheduledGames||[])
+.filter(g=>{const st=g.injuryReport?.[player.id]?.status;return st&&st!=="active";})
+.map(g=>({date:g.date,title:g.title,status:g.injuryReport[player.id].status,reason:g.injuryReport[player.id].reason}))
+.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+},[scheduledGames,player.id]);
 const [showCard,setShowCard]=useState(false);
 const [showStatusGraphic,setShowStatusGraphic]=useState(false);
 const [gamesPopup,setGamesPopup]=useState(null); // {title,subtitle,games} — voor matchup drill-down
@@ -2915,6 +2937,7 @@ return(
 <div>
 <div style={{fontWeight:800,fontSize:22,color:WHITE}}>{player.name}</div>
 <div style={{color:GREY,fontSize:13}}>{player.position}{player.jersey?` · #${player.jersey}`:""}{player.favPlayer?<span style={{color:RED}}> · ❤️ {player.favPlayer}</span>:""}</div>
+{rival&&<div style={{color:"#f5a524",fontSize:12,fontWeight:700,marginTop:2}}>🥊 Rivaal: {rival.opponent.name}{rival.record?` (${rival.record})`:""}</div>}
 </div>
 </div>
 </div>
@@ -2967,6 +2990,26 @@ return(
 <div style={{color:GREY,fontSize:12,marginTop:4}}>{matchups.worst.ppg} PPG · {matchups.worst.rpg} RPG · {matchups.worst.apg} APG · {matchups.worst.games}G</div>
 </div>
 )}
+</div>
+</div>
+)}
+{statusHistory.length>0&&(
+<div data-testid="status-history-section" style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>🩺 STATUS-GESCHIEDENIS</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{statusHistory.slice(0,10).map((h,i)=>{
+const statusColor=h.status==="questionable"?"#f5a524":RED;
+const statusLabel=h.status==="questionable"?"Questionable":"Out";
+return(
+<div key={i} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 12px"}}>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
+<div style={{color:GREY,fontSize:11}}>{h.date}{h.reason?` · ${h.reason}`:""}</div>
+</div>
+<span style={{color:statusColor,fontSize:11,fontWeight:800,flexShrink:0}}>● {statusLabel}</span>
+</div>
+);
+})}
 </div>
 </div>
 )}
@@ -3240,6 +3283,28 @@ const leaders=["pts","reb","ast","stl","blk"].map(k=>{
 const best=playerStats.slice().sort((a,b)=>avg(b.games,k)-avg(a.games,k))[0];
 return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 });
+
+// Biggest riser/faller: compares each player's eff this calendar month to last calendar month
+// (only meaningful in month view — season/all-time have no single "previous period" to compare to).
+const riserFaller=useMemo(()=>{
+if(rangeMode!=="month")return null;
+let py=+yr,pm=+mo-1;
+if(pm<1){pm=12;py--;}
+const prevMonthKey=`${py}-${String(pm).padStart(2,"0")}`;
+const prevGames=games.filter(g=>gameYearMonth(g)===prevMonthKey);
+const deltas=players.map(p=>{
+const curG=monthGames.filter(g=>g.playerId===p.id);
+const prevG=prevGames.filter(g=>g.playerId===p.id);
+if(curG.length===0||prevG.length===0)return null;
+const curEff=curG.reduce((s,g)=>s+(+calcFps(g)),0)/curG.length;
+const prevEff=prevG.reduce((s,g)=>s+(+calcFps(g)),0)/prevG.length;
+return{player:p,curEff:+curEff.toFixed(1),prevEff:+prevEff.toFixed(1),delta:+(curEff-prevEff).toFixed(1)};
+}).filter(Boolean);
+if(!deltas.length)return null;
+const riser=deltas.slice().sort((a,b)=>b.delta-a.delta)[0];
+const faller=deltas.slice().sort((a,b)=>a.delta-b.delta)[0];
+return{riser:riser&&riser.delta>0?riser:null,faller:faller&&faller.delta<0?faller:null};
+},[rangeMode,monthGames,games,players,yr,mo]);
 
 // "Clutch" telt een "clutch appearance" per match als één van de volgende waar is:
 // 1) Neemt het over — de mvp van deze periode speelde niet, of bleef onder zijn eigen gemiddelde eff, en
@@ -3723,6 +3788,41 @@ return (
 </div>
 {clutchLeader&&(
 <div style={{color:GREY,fontSize:11,marginTop:-14,marginBottom:20,fontStyle:"italic"}}>🕐 Clutch = neemt het over van {mvp.player.name}, carryt een onderpresterende teamgenoot (80%+ meer punten), of speelt enorm goed (50%+ boven eigen eff-gemiddelde) tegen een hoger geplaatste tegenstander</div>
+)}
+
+{/* Biggest riser/faller — this month's eff vs last month's, month view only */}
+{riserFaller&&(riserFaller.riser||riserFaller.faller)&&(
+<div style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>BIGGEST RISER / FALLER — {monthLabel.toUpperCase()}</div>
+<div style={{display:"grid",gridTemplateColumns:riserFaller.riser&&riserFaller.faller?"1fr 1fr":"1fr",gap:10}}>
+{riserFaller.riser&&(
+<div onClick={()=>openPlayer(riserFaller.riser.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:"1px solid #27AE6055"}}>
+<div style={{color:"#27AE60",fontSize:11,fontWeight:700}}>📈 STIJGER</div>
+<div style={{display:"flex",alignItems:"center",gap:10,marginTop:6}}>
+<Avatar player={riserFaller.riser.player} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{riserFaller.riser.player.name}</div>
+<div style={{color:"#27AE60",fontSize:12,fontWeight:700}}>+{riserFaller.riser.delta} eff</div>
+</div>
+</div>
+<div style={{color:GREY,fontSize:11,marginTop:6}}>{riserFaller.riser.prevEff} → {riserFaller.riser.curEff}</div>
+</div>
+)}
+{riserFaller.faller&&(
+<div onClick={()=>openPlayer(riserFaller.faller.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:`1px solid ${RED}55`}}>
+<div style={{color:RED,fontSize:11,fontWeight:700}}>📉 DALER</div>
+<div style={{display:"flex",alignItems:"center",gap:10,marginTop:6}}>
+<Avatar player={riserFaller.faller.player} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{riserFaller.faller.player.name}</div>
+<div style={{color:RED,fontSize:12,fontWeight:700}}>{riserFaller.faller.delta} eff</div>
+</div>
+</div>
+<div style={{color:GREY,fontSize:11,marginTop:6}}>{riserFaller.faller.prevEff} → {riserFaller.faller.curEff}</div>
+</div>
+)}
+</div>
+</div>
 )}
 
 {/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
@@ -6235,8 +6335,16 @@ const [includeQuestionable,setIncludeQuestionable]=useState({}); // { [gameId]: 
 function eligiblePlayersForBalance(g,includeQ){
 return players.filter(p=>{
 const st=g.injuryReport?.[p.id]?.status;
-return st==="active"||(includeQ&&st==="questionable");
+const rsvp=g.rsvp?.[p.id];
+if(st==="out"||rsvp==="no")return false;
+return st==="active"||(includeQ&&st==="questionable")||rsvp==="yes";
 });
+}
+const RSVP_ORDER=["none","yes","maybe","no"];
+function cycleRsvp(g,pid){
+const cur=g.rsvp?.[pid]||"none";
+const next=RSVP_ORDER[(RSVP_ORDER.indexOf(cur)+1)%RSVP_ORDER.length];
+onEditScheduledGame({...g,rsvp:{...(g.rsvp||{}),[pid]:next}});
 }
 function autoBalanceGame(g,includeQ){
 const eligible=eligiblePlayersForBalance(g,includeQ);
@@ -6423,6 +6531,23 @@ return(
 })}
 </div>
 )}
+{/* RSVP — available to everyone, tap a player's chip to cycle their status */}
+<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
+<div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>✋ RSVP</div>
+<div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+{players.map(p=>{
+const status=g.rsvp?.[p.id]||"none";
+const cfg={none:{icon:"–",color:GREY,bg:"#2a2a2a"},yes:{icon:"✓",color:"#27AE60",bg:"#0e2a14"},maybe:{icon:"?",color:"#f5a524",bg:"#2a1f08"},no:{icon:"✕",color:RED,bg:"#2a0a0a"}}[status];
+return(
+<button key={p.id} onClick={()=>cycleRsvp(g,p.id)} style={{display:"flex",alignItems:"center",gap:5,background:cfg.bg,border:`1px solid ${cfg.color}55`,borderRadius:14,padding:"4px 8px 4px 4px",cursor:"pointer"}}>
+<Avatar player={p} size={20}/>
+<span style={{color:WHITE,fontSize:11,fontWeight:600}}>{p.name}</span>
+<span style={{color:cfg.color,fontSize:11,fontWeight:800}}>{cfg.icon}</span>
+</button>
+);
+})}
+</div>
+</div>
 {injuredEntries.length>0&&(
 <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${DIVIDER}`}}>
 <div style={{color:GREY,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>🩺 INJURY REPORT</div>
@@ -7645,11 +7770,13 @@ Notificaties zijn geblokkeerd. Ga naar je browser-instellingen om ze toe te staa
 }
 
 // ── Game Row
-function GameRow({game,players,onDelete,onClick,isAdmin}){
+function GameRow({game,players,allGames,onDelete,onClick,isAdmin}){
 const player=players.find(p=>p.id===game.playerId);
 if(!player)return null;
 const fps=calcFps(game);
 const tAN=game.teamAName||"Team A",tBN=game.teamBName||"Team B";
+const form=useMemo(()=>allGames?getPlayerFormRating(player.id,allGames,5):null,[player.id,allGames]);
+const trendBadge=form&&form.gp>=3?(form.trend>=1?{icon:"🔥",color:"#E8312A"}:form.trend<=-1?{icon:"🧊",color:"#4FA8E8"}:null):null;
 return(
 <div onClick={onClick} style={{background:BG,borderBottom:`1px solid ${DIVIDER}`,padding:"14px 16px",cursor:"pointer"}}>
 <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
@@ -7659,6 +7786,7 @@ return(
 <div style={{display:"flex",alignItems:"center",gap:6}}>
 <span style={{fontWeight:700,fontSize:16}}>{player.name}</span>
 <span style={{color:GREY,fontSize:13}}>· {fps} fps</span>
+{trendBadge&&<span title={`Vorm: ${form.trend>0?"+":""}${form.trend} t.o.v. seizoensgemiddelde`} style={{background:`${trendBadge.color}22`,color:trendBadge.color,fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>{trendBadge.icon} {form.trend>0?"+":""}{form.trend}</span>}
 </div>
 <span style={{color:GREY,fontSize:13,fontWeight:600}}>▽ {fps}</span>
 </div>
@@ -11582,6 +11710,7 @@ const [mode,setMode]=useState(null);
 const [pendingMode,setPendingMode]=useState(null);
 const [draftSpinning,setDraftSpinning]=useState(false);
 const [draftDisplay,setDraftDisplay]=useState(null);
+const [showLegendCompare,setShowLegendCompare]=useState(false);
 const [draftResult,setDraftResult]=useState(null);
 const [player,setPlayer]=useState(null);
 const [seasons,setSeasons]=useState([]);
@@ -12646,6 +12775,39 @@ return(
 </div>
 ))}
 </div>
+{player.legends&&player.legends.length===CAREER_ATTRS.length&&(
+<div style={{marginBottom:16}}>
+<button onClick={()=>setShowLegendCompare(v=>!v)} style={{background:"transparent",border:"1px solid #4a1c1c",color:"#ffe066",borderRadius:12,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>🆚 Vergelijk met je legends {showLegendCompare?"▲":"▼"}</button>
+{showLegendCompare&&(
+<div style={{marginTop:10,display:"flex",flexDirection:"column",gap:8}}>
+{CAREER_ATTRS.map((a,i)=>{
+const legendName=player.legends[i];
+const legend=NBA_LEGENDS.find(l=>l.name===legendName);
+if(!legend)return null;
+const legendVal=legend[a.key];
+const ceiling=player.ceilings?player.ceilings[a.key]:legendVal;
+const finalVal=player.attrs[a.key];
+const pctOfLegend=Math.round((finalVal/legendVal)*100);
+return(
+<div key={a.key} style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:10,padding:"10px 12px"}}>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+<span style={{color:WHITE,fontWeight:700,fontSize:12}}>{a.icon} {a.label}</span>
+<span style={{color:"#c98a8a",fontSize:11}}>vs {legendName}</span>
+</div>
+<div style={{display:"flex",alignItems:"center",gap:8}}>
+<div style={{flex:1,height:6,background:"#2C1414",borderRadius:4,overflow:"hidden",position:"relative"}}>
+<div style={{width:`${Math.min(100,pctOfLegend)}%`,height:"100%",background:"linear-gradient(90deg,#ff5b52,#ffe066)",borderRadius:4}}/>
+</div>
+<span style={{color:"#ffe066",fontWeight:800,fontSize:12,whiteSpace:"nowrap"}}>{pctOfLegend}%</span>
+</div>
+<div style={{color:'#c98a8a',fontSize:10,marginTop:4}}>Jij: {finalVal} (plafond {ceiling}) · {legendName}: {legendVal}</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+)}
 <button onClick={()=>startDraftNight("quick")} style={{background:"#2C1414",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
 <button onClick={()=>startDraftNight("standard")} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
 <button onClick={backToHub} style={{background:"transparent",border:"none",color:'#c98a8a',fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>Annuleren</button>
@@ -15158,7 +15320,7 @@ Nu updaten
 </div>
 )}
 {sorted.map(g=>(
-<GameRow key={g.id} game={g} players={players} onDelete={deleteGame} isAdmin={isAdmin}
+<GameRow key={g.id} game={g} players={players} allGames={games} onDelete={deleteGame} isAdmin={isAdmin}
 onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 ))}
 </div>
@@ -15310,7 +15472,7 @@ return (
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(
-<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]}
+<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} scheduledGames={scheduledGames} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]}
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
 onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
 onOpenHighlight={hl=>setHighlightView(hl)}

@@ -3845,6 +3845,80 @@ return (
 </div>
 )}
 
+{/* Full leaderboard this month */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>
+{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>(
+<div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
+<div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
+<div title={`Games-bonus in de MVP-race: ${Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)}/${GAMES_BONUS_CAP_GAMES} games — meer games spelen helpt echt mee in de ranking`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:40,flexShrink:0}}>
+<div style={{background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#3a1414",color:ps.games.length>=GAMES_BONUS_CAP_GAMES?WHITE:"#ff8f88",border:ps.games.length>=GAMES_BONUS_CAP_GAMES?"none":`1px solid ${RED}66`,borderRadius:6,padding:"2px 5px",fontSize:11,fontWeight:800,lineHeight:1.1,whiteSpace:"nowrap"}}>+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)}</div>
+<div style={{width:32,height:4,borderRadius:2,background:INPUTBG,overflow:"hidden"}}>
+<div style={{width:`${Math.min(ps.games.length/GAMES_BONUS_CAP_GAMES,1)*100}%`,height:"100%",background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#8a2c2c",borderRadius:2}}/>
+</div>
+</div>
+<div onClick={()=>openPlayer(ps.player.id)} style={{cursor:"pointer"}}><Avatar player={ps.player} size={40}/></div>
+<div onClick={()=>openPlayer(ps.player.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
+<div style={{fontWeight:700,fontSize:15}}>{ps.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>{ps.games.length}G · {ps.eff} eff <span style={{color:"#ff8f88",fontWeight:700}}>(+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)} bonus)</span> = {mvpScore(ps.eff,ps.games.length).toFixed(2)} score</div>
+</div>
+<div style={{display:"flex",gap:12,textAlign:"center",flexShrink:0}}>
+{[["PPG",ps.ppg],["RPG",ps.rpg],["APG",ps.apg]].map(([l,v])=>(
+<div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:16}}>{v}</div><div style={{color:GREY,fontSize:10}}>{l}</div></div>
+))}
+</div>
+<button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
+</div>
+))}
+
+
+
+
+{/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
+{awardRace.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 AWARD RACE — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Live stand als de awards nu uitgereikt zouden worden. Puur een preview — de admin beslist nog steeds wie 'm daadwerkelijk krijgt.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{awardRace.map(({at,sug,leadPlayers})=>{
+const Icon=at.Icon;
+const runnerUp=sug.runnerUpId?players.find(p=>p.id===sug.runnerUpId):null;
+return(
+<div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Icon size={24} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,rangeMode==="season",monthLabel).toUpperCase()}</div>
+<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+{leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
+</div>
+<div style={{color:GREY,fontSize:10}}>{sug.reason}{sug.gap!=null&&runnerUp?` · voor op ${runnerUp.name} (${Math.abs(sug.gap)})`:""}</div>
+</div>
+</div>
+);
+})}
+</div>
+</div>
+)}
+
+{/* Milestone Watch — carrière-mijlpalen die binnenkort vallen, over de hele geschiedenis (niet periode-gebonden) */}
+{milestoneWatch.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 MILESTONE WATCH</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Carrière-mijlpalen die er binnenkort aankomen.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{milestoneWatch.map((m,i)=>(
+<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={m.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{m.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{m.cur} → {m.next} {MILESTONE_LABELS[m.key]}</div>
+</div>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:15,flexShrink:0}}>nog {m.dist}</div>
+</div>
+))}
+</div>
+</div>
+)}
+
           {/* MVP Race — what does it take? (alleen zinvol in maand-weergave, seizoen/all-time hebben geen "resterende games deze maand") */}
           {rangeMode==="month"&&(() => {
             // Stop once the MVP award has actually been handed out for this month —
@@ -4111,79 +4185,6 @@ return (
               </div>
             );
           })()}
-
-{/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
-{awardRace.length>0&&(
-<div style={{marginBottom:24}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 AWARD RACE — {monthLabel.toUpperCase()}</div>
-<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Live stand als de awards nu uitgereikt zouden worden. Puur een preview — de admin beslist nog steeds wie 'm daadwerkelijk krijgt.</div>
-<div style={{display:"flex",flexDirection:"column",gap:8}}>
-{awardRace.map(({at,sug,leadPlayers})=>{
-const Icon=at.Icon;
-const runnerUp=sug.runnerUpId?players.find(p=>p.id===sug.runnerUpId):null;
-return(
-<div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-<Icon size={24} color={at.color}/>
-<div style={{flex:1,minWidth:0}}>
-<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,rangeMode==="season",monthLabel).toUpperCase()}</div>
-<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-{leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
-</div>
-<div style={{color:GREY,fontSize:10}}>{sug.reason}{sug.gap!=null&&runnerUp?` · voor op ${runnerUp.name} (${Math.abs(sug.gap)})`:""}</div>
-</div>
-</div>
-);
-})}
-</div>
-</div>
-)}
-
-{/* Milestone Watch — carrière-mijlpalen die binnenkort vallen, over de hele geschiedenis (niet periode-gebonden) */}
-{milestoneWatch.length>0&&(
-<div style={{marginBottom:24}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 MILESTONE WATCH</div>
-<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Carrière-mijlpalen die er binnenkort aankomen.</div>
-<div style={{display:"flex",flexDirection:"column",gap:8}}>
-{milestoneWatch.map((m,i)=>(
-<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-<Avatar player={m.player} size={30}/>
-<div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{m.player.name}</div>
-<div style={{color:GREY,fontSize:11}}>{m.cur} → {m.next} {MILESTONE_LABELS[m.key]}</div>
-</div>
-<div style={{color:"#f5a524",fontWeight:800,fontSize:15,flexShrink:0}}>nog {m.dist}</div>
-</div>
-))}
-</div>
-</div>
-)}
-
-{/* Full leaderboard this month */}
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>
-{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>(
-<div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
-<div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
-<div title={`Games-bonus in de MVP-race: ${Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)}/${GAMES_BONUS_CAP_GAMES} games — meer games spelen helpt echt mee in de ranking`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:40,flexShrink:0}}>
-<div style={{background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#3a1414",color:ps.games.length>=GAMES_BONUS_CAP_GAMES?WHITE:"#ff8f88",border:ps.games.length>=GAMES_BONUS_CAP_GAMES?"none":`1px solid ${RED}66`,borderRadius:6,padding:"2px 5px",fontSize:11,fontWeight:800,lineHeight:1.1,whiteSpace:"nowrap"}}>+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)}</div>
-<div style={{width:32,height:4,borderRadius:2,background:INPUTBG,overflow:"hidden"}}>
-<div style={{width:`${Math.min(ps.games.length/GAMES_BONUS_CAP_GAMES,1)*100}%`,height:"100%",background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#8a2c2c",borderRadius:2}}/>
-</div>
-</div>
-<div onClick={()=>openPlayer(ps.player.id)} style={{cursor:"pointer"}}><Avatar player={ps.player} size={40}/></div>
-<div onClick={()=>openPlayer(ps.player.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
-<div style={{fontWeight:700,fontSize:15}}>{ps.player.name}</div>
-<div style={{color:GREY,fontSize:12}}>{ps.games.length}G · {ps.eff} eff <span style={{color:"#ff8f88",fontWeight:700}}>(+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)} bonus)</span> = {mvpScore(ps.eff,ps.games.length).toFixed(2)} score</div>
-</div>
-<div style={{display:"flex",gap:12,textAlign:"center",flexShrink:0}}>
-{[["PPG",ps.ppg],["RPG",ps.rpg],["APG",ps.apg]].map(([l,v])=>(
-<div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:16}}>{v}</div><div style={{color:GREY,fontSize:10}}>{l}</div></div>
-))}
-</div>
-<button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
-</div>
-))}
-
-
 
           {/* MVPs van afgelopen maanden — carousel */}
           {(() => {

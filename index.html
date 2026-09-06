@@ -14395,6 +14395,7 @@ const [highlightForm,setHighlightForm]=useState(null); // {existing, defaults}
 const [highlightView,setHighlightView]=useState(null); // a highlight object
 const [highlightsList,setHighlightsList]=useState(null); // {items, title}
 const [loading,setLoading]=useState(true);
+const [connectionIssue,setConnectionIssue]=useState(false); // initial load timed out or errored — show a refresh prompt instead of a misleading "no games" empty state
 const [saveStatus,setSaveStatus]=useState("");
 const [updateAvailable,setUpdateAvailable]=useState(false);
 const [showAnnouncement,setShowAnnouncement]=useState(false);
@@ -14443,31 +14444,32 @@ setUserIp(fp);
 
 useEffect(()=>{
 let uP,uG,uC,uS,uB,uL,uLR;
-// Safety: force loading=false after 6s even if Firebase hasn't responded
-const timeout=setTimeout(()=>setLoading(false),6000);
+// Safety: force loading=false after 6s even if Firebase hasn't responded — but flag it as a
+// connection issue so the UI can offer a refresh instead of quietly showing empty-state screens.
+const timeout=setTimeout(()=>{setLoading(false);setConnectionIssue(true);},6000);
 waitForFirebase().then(()=>{
 const {_db,_col,_onSnapshot}=window;
 let pReady=false,gReady=false,cReady=false,sReady=false,bReady=false;
 uP=_onSnapshot(_col(_db,"players"),s=>{
 setPlayers(s.docs.map(d=>d.data()));
-pReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
-},(err)=>{console.error("Players listener error:",err);clearTimeout(timeout);setLoading(false);});
+pReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);setConnectionIssue(false);}
+},(err)=>{console.error("Players listener error:",err);clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 uG=_onSnapshot(_col(_db,"games"),s=>{
 setGames(s.docs.map(d=>d.data()));
-gReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
-},(err)=>{console.error("Games listener error:",err);clearTimeout(timeout);setLoading(false);});
+gReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);setConnectionIssue(false);}
+},(err)=>{console.error("Games listener error:",err);clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 uC=_onSnapshot(_col(_db,"comments"),s=>{
 setComments(s.docs.map(d=>d.data()));
-cReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
-},(err)=>{console.error("Comments listener error:",err);clearTimeout(timeout);setLoading(false);});
+cReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);setConnectionIssue(false);}
+},(err)=>{console.error("Comments listener error:",err);clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 uS=_onSnapshot(_col(_db,"scheduled_games"),s=>{
 setScheduledGames(s.docs.map(d=>d.data()));
-sReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
-},(err)=>{console.error("Scheduled games listener error:",err);clearTimeout(timeout);setLoading(false);});
+sReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);setConnectionIssue(false);}
+},(err)=>{console.error("Scheduled games listener error:",err);clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 uB=_onSnapshot(_col(_db,"blog_posts"),s=>{
 setBlogPosts(s.docs.map(d=>d.data()));
-bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);}
-},(err)=>{console.error("Blog posts listener error:",err);clearTimeout(timeout);setLoading(false);});
+bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);setLoading(false);setConnectionIssue(false);}
+},(err)=>{console.error("Blog posts listener error:",err);clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 uL=_onSnapshot(_col(_db,"larp_posts"),s=>{
 setLarpPosts(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp posts listener error:",err));
@@ -14502,7 +14504,7 @@ _onSnapshot(_col(_db,"app_settings"),s=>{
 const docs=s.docs.map(d=>d.data());
 setAppSettings(docs.find(d=>d.id==="config")||null);
 },(err)=>console.error("App settings listener error:",err));
-}).catch(()=>{clearTimeout(timeout);setLoading(false);});
+}).catch(()=>{clearTimeout(timeout);setLoading(false);setConnectionIssue(true);});
 // Listen for SW update
 const onUpdate=()=>setUpdateAvailable(true);
 window.addEventListener('swUpdateAvailable',onUpdate);
@@ -15271,6 +15273,15 @@ if(loading)return(
 <div style={{position:"relative",zIndex:1,color:GREY,fontSize:14}}>Verbinden met database...</div>
 <div style={{position:"relative",zIndex:1,width:32,height:32,border:`3px solid ${DIVIDER}`,borderTop:`3px solid ${RED}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
 <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+</div>
+);
+
+if(connectionIssue)return(
+<div style={{position:"fixed",inset:0,zIndex:99998,background:`#000 url("${SPLASH_SRC}") center top / cover no-repeat`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",paddingBottom:"calc(28px + env(safe-area-inset-bottom,0px))",gap:14}}>
+<div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom, transparent 55%, rgba(0,0,0,0.85) 100%)"}}/>
+<div style={{position:"relative",zIndex:1,color:WHITE,fontSize:15,fontWeight:700,textAlign:"center",padding:"0 28px"}}>📡 Verbinding met de database lukt niet goed</div>
+<div style={{position:"relative",zIndex:1,color:GREY,fontSize:13,textAlign:"center",padding:"0 32px",lineHeight:1.4}}>Check je internetverbinding en probeer het opnieuw — de data (zoals games) is nu mogelijk niet volledig geladen.</div>
+<button onClick={()=>window.location.reload()} style={{position:"relative",zIndex:1,background:RED,color:WHITE,border:"none",borderRadius:24,padding:"12px 30px",fontWeight:700,fontSize:14,cursor:"pointer"}}>🔄 Vernieuwen</button>
 </div>
 );
 

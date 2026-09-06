@@ -926,7 +926,21 @@ const rawText=await res.text();
 if(!res.ok)throw new Error("API fout "+res.status+": "+rawText.slice(0,200));
 const data=JSON.parse(rawText);
 const text=data.choices?.[0]?.message?.content||"";
-return text.replace(/```json|```/g,"").trim();
+return extractJsonPayload(text);
+}
+// The model occasionally wraps its JSON in a stray sentence ("Hier is de feedback: {...}"), leaves
+// trailing commas in, or gets cut off mid-object when max_tokens is a bit tight — any of which makes
+// a plain JSON.parse blow up. This pulls out just the outermost {...}/[...] and repairs the common cases.
+function extractJsonPayload(text){
+let t=(text||"").replace(/```json|```/g,"").trim();
+const starts=[t.indexOf("{"),t.indexOf("[")].filter(i=>i>=0);
+const ends=[t.lastIndexOf("}"),t.lastIndexOf("]")].filter(i=>i>=0);
+if(starts.length&&ends.length){
+const start=Math.min(...starts),end=Math.max(...ends);
+if(end>start)t=t.slice(start,end+1);
+}
+t=t.replace(/,(\s*[}\]])/g,"$1"); // trailing commas before a closing brace/bracket
+return t;
 }
 // Detect statistical milestones in a single performance so the AI has real facts to work with
 function detectMilestones(g){
@@ -2113,7 +2127,7 @@ const rawText=await res.text();
 if(!res.ok){setErr("API fout "+res.status+": "+rawText.slice(0,200));setLoading(false);return;}
 const data=JSON.parse(rawText);
 const text=data.choices?.[0]?.message?.content||"";
-const clean=text.replace(/```json|```/g,"").trim();
+const clean=extractJsonPayload(text);
 const parsed=JSON.parse(clean);
 setResult(parsed);
 }catch(e){setErr("Fout: "+(e&&e.message?e.message:String(e)));}
@@ -2230,7 +2244,7 @@ Geef concrete, cijfermatige feedback — geen vage algemeenheden. Wees eerlijk o
 Antwoord ALLEEN met geldige JSON (geen markdown, geen backticks):
 {"headline":"korte pakkende kop, max 6 woorden","body":"2-3 zinnen concrete coaching feedback, cijfermatig onderbouwd, aanspreken met jij/je","strength":"kort (max 12 woorden), welke stat/skill gaat goed, met cijfer","focus":"kort (max 12 woorden), grootste verbeterkans, met cijfer"}`;
 try{
-const clean=await callGroqAI(prompt,350,0.8);
+const clean=await callGroqAI(prompt,500,0.8);
 setResult(JSON.parse(clean));
 }catch(e){setErr("Fout: "+(e&&e.message?e.message:String(e)));}
 setLoading(false);
@@ -3066,7 +3080,13 @@ return(
 {pg.length===0&&<div style={{color:GREY,fontSize:14}}>Nog geen games.</div>}
 {pg.map(g=>(
 <div key={g.id} onClick={()=>onPerfClick(g)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`,cursor:"pointer"}}>
-<div style={{flex:1}}><StatLine game={g} max={3}/><div style={{color:GREY,fontSize:12,marginTop:4}}>{g.date}{g.opponent?` · vs ${g.opponent.toUpperCase()}`:""}</div></div>
+<div style={{flex:1}}>
+<StatLine game={g} max={3}/>
+<div style={{color:GREY,fontSize:12,marginTop:4,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+<span>{g.date}{g.opponent?` · vs ${g.opponent.toUpperCase()}`:""}</span>
+{g.exhibition&&<span style={{background:"#f5a52422",color:"#f5a524",fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>⚠️ TELT NIET MEE</span>}
+</div>
+</div>
 <div style={{color:RED,fontSize:14,fontWeight:700,flexShrink:0}}>{calcFps(g)} fps</div>
 </div>
 ))}
@@ -3825,77 +3845,6 @@ return (
 </div>
 )}
 
-{/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
-{awardRace.length>0&&(
-<div style={{marginBottom:24}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 AWARD RACE — {monthLabel.toUpperCase()}</div>
-<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Live stand als de awards nu uitgereikt zouden worden. Puur een preview — de admin beslist nog steeds wie 'm daadwerkelijk krijgt.</div>
-<div style={{display:"flex",flexDirection:"column",gap:8}}>
-{awardRace.map(({at,sug,leadPlayers})=>{
-const Icon=at.Icon;
-const runnerUp=sug.runnerUpId?players.find(p=>p.id===sug.runnerUpId):null;
-return(
-<div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-<Icon size={24} color={at.color}/>
-<div style={{flex:1,minWidth:0}}>
-<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,rangeMode==="season",monthLabel).toUpperCase()}</div>
-<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-{leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
-</div>
-<div style={{color:GREY,fontSize:10}}>{sug.reason}{sug.gap!=null&&runnerUp?` · voor op ${runnerUp.name} (${Math.abs(sug.gap)})`:""}</div>
-</div>
-</div>
-);
-})}
-</div>
-</div>
-)}
-
-{/* Milestone Watch — carrière-mijlpalen die binnenkort vallen, over de hele geschiedenis (niet periode-gebonden) */}
-{milestoneWatch.length>0&&(
-<div style={{marginBottom:24}}>
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 MILESTONE WATCH</div>
-<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Carrière-mijlpalen die er binnenkort aankomen.</div>
-<div style={{display:"flex",flexDirection:"column",gap:8}}>
-{milestoneWatch.map((m,i)=>(
-<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
-<Avatar player={m.player} size={30}/>
-<div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{m.player.name}</div>
-<div style={{color:GREY,fontSize:11}}>{m.cur} → {m.next} {MILESTONE_LABELS[m.key]}</div>
-</div>
-<div style={{color:"#f5a524",fontWeight:800,fontSize:15,flexShrink:0}}>nog {m.dist}</div>
-</div>
-))}
-</div>
-</div>
-)}
-
-{/* Full leaderboard this month */}
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>
-{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>(
-<div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
-<div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
-<div title={`Games-bonus in de MVP-race: ${Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)}/${GAMES_BONUS_CAP_GAMES} games — meer games spelen helpt echt mee in de ranking`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:40,flexShrink:0}}>
-<div style={{background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#3a1414",color:ps.games.length>=GAMES_BONUS_CAP_GAMES?WHITE:"#ff8f88",border:ps.games.length>=GAMES_BONUS_CAP_GAMES?"none":`1px solid ${RED}66`,borderRadius:6,padding:"2px 5px",fontSize:11,fontWeight:800,lineHeight:1.1,whiteSpace:"nowrap"}}>+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)}</div>
-<div style={{width:32,height:4,borderRadius:2,background:INPUTBG,overflow:"hidden"}}>
-<div style={{width:`${Math.min(ps.games.length/GAMES_BONUS_CAP_GAMES,1)*100}%`,height:"100%",background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#8a2c2c",borderRadius:2}}/>
-</div>
-</div>
-<div onClick={()=>openPlayer(ps.player.id)} style={{cursor:"pointer"}}><Avatar player={ps.player} size={40}/></div>
-<div onClick={()=>openPlayer(ps.player.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
-<div style={{fontWeight:700,fontSize:15}}>{ps.player.name}</div>
-<div style={{color:GREY,fontSize:12}}>{ps.games.length}G · {ps.eff} eff <span style={{color:"#ff8f88",fontWeight:700}}>(+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)} bonus)</span> = {mvpScore(ps.eff,ps.games.length).toFixed(2)} score</div>
-</div>
-<div style={{display:"flex",gap:12,textAlign:"center",flexShrink:0}}>
-{[["PPG",ps.ppg],["RPG",ps.rpg],["APG",ps.apg]].map(([l,v])=>(
-<div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:16}}>{v}</div><div style={{color:GREY,fontSize:10}}>{l}</div></div>
-))}
-</div>
-<button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
-</div>
-))}
-
           {/* MVP Race — what does it take? (alleen zinvol in maand-weergave, seizoen/all-time hebben geen "resterende games deze maand") */}
           {rangeMode==="month"&&(() => {
             // Stop once the MVP award has actually been handed out for this month —
@@ -4162,6 +4111,78 @@ return(
               </div>
             );
           })()}
+
+{/* Award Race Panel — live, read-only preview van de awards; admin beslist nog steeds in het echte modal */}
+{awardRace.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🏁 AWARD RACE — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Live stand als de awards nu uitgereikt zouden worden. Puur een preview — de admin beslist nog steeds wie 'm daadwerkelijk krijgt.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{awardRace.map(({at,sug,leadPlayers})=>{
+const Icon=at.Icon;
+const runnerUp=sug.runnerUpId?players.find(p=>p.id===sug.runnerUpId):null;
+return(
+<div key={at.id} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Icon size={24} color={at.color}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:at.color,fontSize:10,fontWeight:700,letterSpacing:0.5}}>{awardTypeLabel(at,rangeMode==="season",monthLabel).toUpperCase()}</div>
+<div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+{leadPlayers.map(p=>(<span key={p.id} style={{color:WHITE,fontWeight:700,fontSize:13}}>{p.name}</span>))}
+</div>
+<div style={{color:GREY,fontSize:10}}>{sug.reason}{sug.gap!=null&&runnerUp?` · voor op ${runnerUp.name} (${Math.abs(sug.gap)})`:""}</div>
+</div>
+</div>
+);
+})}
+</div>
+</div>
+)}
+
+{/* Milestone Watch — carrière-mijlpalen die binnenkort vallen, over de hele geschiedenis (niet periode-gebonden) */}
+{milestoneWatch.length>0&&(
+<div style={{marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 MILESTONE WATCH</div>
+<div style={{color:GREY,fontSize:12,marginBottom:12,lineHeight:1.5}}>Carrière-mijlpalen die er binnenkort aankomen.</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+{milestoneWatch.map((m,i)=>(
+<div key={i} style={{background:INPUTBG,borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+<Avatar player={m.player} size={30}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{m.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{m.cur} → {m.next} {MILESTONE_LABELS[m.key]}</div>
+</div>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:15,flexShrink:0}}>nog {m.dist}</div>
+</div>
+))}
+</div>
+</div>
+)}
+
+{/* Full leaderboard this month */}
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>RANGLIJST — {monthLabel.toUpperCase()}</div>
+{playerStats.filter(ps=>searchMatch(ps.player.name)).map((ps,i)=>(
+<div key={ps.player.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 0",borderBottom:`1px solid ${DIVIDER}`}}>
+<div style={{width:28,height:28,borderRadius:"50%",background:i===0?RED:INPUTBG,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0}}>{i+1}</div>
+<div title={`Games-bonus in de MVP-race: ${Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)}/${GAMES_BONUS_CAP_GAMES} games — meer games spelen helpt echt mee in de ranking`} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,width:40,flexShrink:0}}>
+<div style={{background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#3a1414",color:ps.games.length>=GAMES_BONUS_CAP_GAMES?WHITE:"#ff8f88",border:ps.games.length>=GAMES_BONUS_CAP_GAMES?"none":`1px solid ${RED}66`,borderRadius:6,padding:"2px 5px",fontSize:11,fontWeight:800,lineHeight:1.1,whiteSpace:"nowrap"}}>+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)}</div>
+<div style={{width:32,height:4,borderRadius:2,background:INPUTBG,overflow:"hidden"}}>
+<div style={{width:`${Math.min(ps.games.length/GAMES_BONUS_CAP_GAMES,1)*100}%`,height:"100%",background:ps.games.length>=GAMES_BONUS_CAP_GAMES?RED:"#8a2c2c",borderRadius:2}}/>
+</div>
+</div>
+<div onClick={()=>openPlayer(ps.player.id)} style={{cursor:"pointer"}}><Avatar player={ps.player} size={40}/></div>
+<div onClick={()=>openPlayer(ps.player.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
+<div style={{fontWeight:700,fontSize:15}}>{ps.player.name}</div>
+<div style={{color:GREY,fontSize:12}}>{ps.games.length}G · {ps.eff} eff <span style={{color:"#ff8f88",fontWeight:700}}>(+{(GAMES_BONUS_PER_GAME*Math.min(ps.games.length,GAMES_BONUS_CAP_GAMES)).toFixed(2)} bonus)</span> = {mvpScore(ps.eff,ps.games.length).toFixed(2)} score</div>
+</div>
+<div style={{display:"flex",gap:12,textAlign:"center",flexShrink:0}}>
+{[["PPG",ps.ppg],["RPG",ps.rpg],["APG",ps.apg]].map(([l,v])=>(
+<div key={l}><div style={{color:WHITE,fontWeight:700,fontSize:16}}>{v}</div><div style={{color:GREY,fontSize:10}}>{l}</div></div>
+))}
+</div>
+<button data-testid={`open-card-${ps.player.id}`} onClick={()=>setCardFor(ps.player)} title="Spelerskaart" style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",flexShrink:0,padding:4}}>🎴</button>
+</div>
+))}
+
 
 
           {/* MVPs van afgelopen maanden — carousel */}
@@ -7786,6 +7807,7 @@ return(
 <div style={{display:"flex",alignItems:"center",gap:6}}>
 <span style={{fontWeight:700,fontSize:16}}>{player.name}</span>
 <span style={{color:GREY,fontSize:13}}>· {fps} fps</span>
+{game.exhibition&&<span style={{background:"#f5a52422",color:"#f5a524",fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>⚠️ TELT NIET MEE</span>}
 {trendBadge&&<span title={`Vorm: ${form.trend>0?"+":""}${form.trend} t.o.v. seizoensgemiddelde`} style={{background:`${trendBadge.color}22`,color:trendBadge.color,fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>{trendBadge.icon} {form.trend>0?"+":""}{form.trend}</span>}
 </div>
 <span style={{color:GREY,fontSize:13,fontWeight:600}}>▽ {fps}</span>
@@ -7849,6 +7871,7 @@ teamAName:form.teamAName,
 teamBName:form.teamBName,
 teamAScore:form.teamAScore,
 teamBScore:form.teamBScore,
+exhibition:!!form.exhibition,
 })));
 }
 await onSave(updated);
@@ -7885,6 +7908,13 @@ return(
 <input type="text" inputMode="decimal" placeholder="0" style={IS} value={form.teamBScore||""} onChange={e=>setF("teamBScore",e.target.value)}/>
 </div>
 </div>
+<label style={{display:"flex",alignItems:"center",gap:8,background:form.exhibition?"#2a1f08":"#111",border:form.exhibition?"1px solid #f5a52466":"1px solid transparent",borderRadius:10,padding:"10px 12px",marginTop:8,cursor:"pointer"}}>
+<input type="checkbox" checked={!!form.exhibition} onChange={e=>setF("exhibition",e.target.checked)} style={{width:18,height:18,flexShrink:0}}/>
+<div>
+<div style={{color:form.exhibition?"#f5a524":WHITE,fontWeight:700,fontSize:13}}>⚠️ Telt niet mee</div>
+<div style={{color:GREY,fontSize:11}}>Uitgesloten van de maandstatistieken, blijft zichtbaar bij Performances en op spelersprofielen.</div>
+</div>
+</label>
 </div>
 {/* Stats */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>STATS</div>
@@ -7924,6 +7954,7 @@ const [inputMode,setInputMode]=useState("table"); // "table" = achteraf snel inv
 const [tableSubStep,setTableSubStep]=useState("basic"); // binnen tabel-modus: "basic" (kern-stats) → "advanced" (FG%/MIN/etc.)
 const [gameDate,setGameDate]=useState(new Date().toISOString().slice(0,10));
 const [location,setLocation]=useState("");
+const [exhibition,setExhibition]=useState(false); // "telt niet mee" — uitgesloten van de maandstatistieken
 const [tAN,setTAN]=useState("Team A"),[tBN,setTBN]=useState("Team B");
 const [teamA,setTeamA]=useState([]),[teamB,setTeamB]=useState([]),[chams,setChams]=useState([]);
 const [tAS,setTAS]=useState(""),[tBS,setTBS]=useState("");
@@ -8005,7 +8036,7 @@ setSaving(true);
 const mid=Date.now().toString();
 const newGames=all.map((pid,i)=>{
 const sf=statForms[pid]||{};
-const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||"",commentaryHint:sf.commentaryHint||""};
+const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||"",commentaryHint:sf.commentaryHint||"",exhibition:!!exhibition};
 if(teamA.includes(pid)){g.team="A";g.opponent=tBN;}
 else if(teamB.includes(pid)){g.team="B";g.opponent=tAN;}
 else{g.team="chameleon";g.opponent="";}
@@ -8056,6 +8087,13 @@ return(
 </div>
 <input type="date" style={{...IS,marginBottom:12}} value={gameDate} onChange={e=>setGameDate(e.target.value)}/>
 <input placeholder="📍 Locatie (optioneel, bijv. Sporthal Noord)" style={{...IS,marginBottom:12}} value={location} onChange={e=>setLocation(e.target.value)}/>
+<label style={{display:"flex",alignItems:"center",gap:8,background:exhibition?"#2a1f08":BG2,border:exhibition?"1px solid #f5a52466":"1px solid transparent",borderRadius:10,padding:"10px 12px",marginBottom:12,cursor:"pointer"}}>
+<input type="checkbox" checked={exhibition} onChange={e=>setExhibition(e.target.checked)} style={{width:18,height:18,flexShrink:0}}/>
+<div>
+<div style={{color:exhibition?"#f5a524":WHITE,fontWeight:700,fontSize:13}}>⚠️ Telt niet mee</div>
+<div style={{color:GREY,fontSize:11}}>Game blijft zichtbaar bij Performances en op spelersprofielen, maar telt niet mee voor de maandstatistieken.</div>
+</div>
+</label>
 <textarea placeholder="📺 Coach commentaar over de wedstrijd (optioneel) — AI maakt er een ESPN-stijl recap van" value={matchHint} onChange={e=>setMatchHint(e.target.value)} rows={2} style={{...IS,marginBottom:12,resize:"vertical",fontFamily:"inherit"}}/>
 {inputMode==="classic"?(
 <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
@@ -9055,7 +9093,7 @@ const rawText=await res.text();
 if(!res.ok){setAiErr("API fout "+res.status+": "+rawText.slice(0,200));setAiLoading(false);return;}
 const data=JSON.parse(rawText);
 const text=data.choices?.[0]?.message?.content||"";
-const clean=text.replace(/```json|```/g,"").trim();
+const clean=extractJsonPayload(text);
 setAiPrediction(JSON.parse(clean));
 }catch(e){setAiErr("Fout: "+(e&&e.message?e.message:String(e)));}
 setAiLoading(false);
@@ -9084,7 +9122,7 @@ const rawText=await res.text();
 if(!res.ok){setNbaErr("API fout "+res.status+": "+rawText.slice(0,200));setNbaLoading(false);return;}
 const data=JSON.parse(rawText);
 const text=data.choices?.[0]?.message?.content||"";
-const clean=text.replace(/```json|```/g,"").trim();
+const clean=extractJsonPayload(text);
 setNbaCompare(JSON.parse(clean));
 }catch(e){setNbaErr("Fout: "+(e&&e.message?e.message:String(e)));}
 setNbaLoading(false);
@@ -9922,7 +9960,7 @@ const rawText=await res.text();
 if(!res.ok)throw new Error("API fout "+res.status+": "+rawText.slice(0,200));
 const data=JSON.parse(rawText);
 const text=data.choices?.[0]?.message?.content||"";
-const clean=text.replace(/```json|```/g,"").trim();
+const clean=extractJsonPayload(text);
 const parsed=JSON.parse(clean);
 if(!Array.isArray(parsed)||!parsed.length)throw new Error("Geen vragen ontvangen");
 return parsed;
@@ -15327,7 +15365,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* STATS TAB */}
-{tab==="monthly"&&<MonthlyStats games={games} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
+{tab==="monthly"&&<MonthlyStats games={games.filter(g=>!g.exhibition)} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} onSaveFullMatch={saveGames} isAdmin={isAdmin}/>}

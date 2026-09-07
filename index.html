@@ -13306,10 +13306,18 @@ function toCourt(e){
 const svg=svgRef.current;
 if(!svg)return{x:0,y:0};
 const rect=svg.getBoundingClientRect();
-const vbH=pbCourtType==="full"?900:450;
-const x=((e.clientX-rect.left)/rect.width)*500;
-const y=((e.clientY-rect.top)/rect.height)*vbH;
-return{x:Math.round(Math.max(0,Math.min(500,x))),y:Math.round(Math.max(0,Math.min(vbH,y)))};
+const vbW=500,vbH=pbCourtType==="full"?900:450;
+// The SVG keeps its aspect ratio (preserveAspectRatio default "xMidYMid meet"), so unless the
+// container box happens to match the viewBox ratio exactly, it letterboxes — padding gets added
+// on either the sides or top/bottom. Dividing by the raw box size (as before) ignores that padding
+// and shifts every click. This finds the actual rendered content rect first, then maps into it.
+const boxRatio=rect.width/rect.height,vbRatio=vbW/vbH;
+let contentW,contentH,offsetX=0,offsetY=0;
+if(boxRatio>vbRatio){contentH=rect.height;contentW=contentH*vbRatio;offsetX=(rect.width-contentW)/2;}
+else{contentW=rect.width;contentH=contentW/vbRatio;offsetY=(rect.height-contentH)/2;}
+const x=((e.clientX-rect.left-offsetX)/contentW)*vbW;
+const y=((e.clientY-rect.top-offsetY)/contentH)*vbH;
+return{x:Math.round(Math.max(0,Math.min(vbW,x))),y:Math.round(Math.max(0,Math.min(vbH,y)))};
 }
 
 function onCourtPointerDown(e){

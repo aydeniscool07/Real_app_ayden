@@ -13119,6 +13119,461 @@ return(
 return null;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// PLAYBOOK — draw offensive & defensive schemes on a real court, save as a team library.
+// Self-contained: subscribes to / writes the "playbook_plays" Firestore collection directly.
+// ══════════════════════════════════════════════════════════════════════════
+const PLAYBOOK_OFF_CATEGORIES=["Pick & Roll","Motion Offense","Isolation","Fast Break","Zone Offense","Out of Bounds (baseline)","Out of Bounds (sideline)","Press Break","Special / Trick Play"];
+const PLAYBOOK_DEF_CATEGORIES=["Man-to-Man","2-3 Zone","3-2 Zone","1-3-1 Zone","Full Court Press","Half Court Trap","Box-and-1","Special"];
+const PLAYBOOK_ROUTE_TYPES=[
+{key:"cut",label:"Cut",icon:"➡️",color:WHITE,hint:"Speler loopt zonder bal"},
+{key:"pass",label:"Pass",icon:"⤏",color:"#4FA8E8",hint:"Bal wordt overgespeeld"},
+{key:"screen",label:"Screen",icon:"⊥",color:"#c98a3a",hint:"Loopt naar een blok"},
+{key:"dribble",label:"Dribbel",icon:"〰️",color:"#f5a524",hint:"Speler dribbelt met de bal"},
+];
+
+function playbookId(){return "pb_"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+
+// Turns a straight multi-point path into a zigzag — the classic "dribble" squiggle used in real playbooks.
+function pbZigzag(points,amp=7,step=13){
+const out=[];
+for(let i=0;i<points.length-1;i++){
+const a=points[i],b=points[i+1];
+const dx=b.x-a.x,dy=b.y-a.y;
+const len=Math.hypot(dx,dy)||1;
+const ux=dx/len,uy=dy/len,px=-uy,py=ux;
+const steps=Math.max(1,Math.round(len/step));
+for(let s=(i===0?0:1);s<=steps;s++){
+const t=s/steps;
+const bx=a.x+dx*t,by=a.y+dy*t;
+const isEdge=(i===0&&s===0)||(i===points.length-2&&s===steps);
+const off=isEdge?0:(s%2===0?1:-1)*amp;
+out.push({x:bx+px*off,y:by+py*off});
+}
+}
+return out.length?out:points;
+}
+// Perpendicular bar drawn at the end of a "screen" route, at the point of contact.
+function pbScreenBar(points){
+if(points.length<2)return null;
+const a=points[points.length-2],b=points[points.length-1];
+const dx=b.x-a.x,dy=b.y-a.y;
+const len=Math.hypot(dx,dy)||1;
+const ux=dx/len,uy=dy/len,px=-uy,py=ux,half=13;
+return{x1:b.x+px*half,y1:b.y+py*half,x2:b.x-px*half,y2:b.y-py*half};
+}
+function pbPathD(points){return points.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");}
+
+// Static court markings for one half (hoop near y=0, half-court line at y=450). Reused (mirrored) for full-court.
+function PlaybookCourtMarks(){
+return(
+<>
+<rect x="170" y="0" width="160" height="190" fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+<circle cx="250" cy="190" r="60" fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+<path d="M30,0 L30,140 A220,220 0 0 0 470,140 L470,0" fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+<path d="M210,52 A40,40 0 0 0 290,52" fill="none" stroke="#2f5c46" strokeWidth="1.5" strokeDasharray="3 4"/>
+<line x1="220" y1="40" x2="280" y2="40" stroke="#2f5c46" strokeWidth="3.5"/>
+<circle cx="250" cy="52" r="9" fill="none" stroke="#c94b3f" strokeWidth="2"/>
+</>
+);
+}
+
+function PlaybookRouteShape({route,selected,onClick}){
+const rt=PLAYBOOK_ROUTE_TYPES.find(r=>r.key===route.type)||PLAYBOOK_ROUTE_TYPES[0];
+const pts=route.type==="dribble"?pbZigzag(route.points):route.points;
+const d=pbPathD(pts);
+const dash=route.type==="pass"?"9 6":undefined;
+const marker=route.type==="screen"?undefined:`url(#pb-arrow-${route.type})`;
+const bar=route.type==="screen"?pbScreenBar(route.points):null;
+const strokeColor=selected?"#ffe066":rt.color;
+return(
+<g onClick={onClick} style={{cursor:onClick?"pointer":"default"}}>
+<path d={d} fill="none" stroke={strokeColor} strokeWidth={selected?4:2.75} strokeDasharray={dash} markerEnd={marker} strokeLinecap="round" strokeLinejoin="round"/>
+{bar&&<line x1={bar.x1} y1={bar.y1} x2={bar.x2} y2={bar.y2} stroke={strokeColor} strokeWidth={selected?4:3} strokeLinecap="round"/>}
+</g>
+);
+}
+
+// The court itself — used both as the live interactive editor and as a static read-only thumbnail.
+function PlaybookCourtSVG({svgRef,courtType="half",players,routes,drawPoints=[],revealIdx=Infinity,interactive=false,selectedId,onCourtPointerDown,onCourtPointerMove,onCourtPointerUp,onPlayerDown,onRouteClick,height=380}){
+const vbH=courtType==="full"?900:450;
+return(
+<svg ref={svgRef} viewBox={`0 0 500 ${vbH}`} style={{width:"100%",height,background:"linear-gradient(180deg,#0e3325,#0a2a1e)",borderRadius:14,touchAction:interactive?"none":"auto",display:"block",userSelect:"none"}}
+onPointerDown={interactive?onCourtPointerDown:undefined}
+onPointerMove={interactive?onCourtPointerMove:undefined}
+onPointerUp={interactive?onCourtPointerUp:undefined}
+onPointerLeave={interactive?onCourtPointerUp:undefined}>
+<defs>
+{PLAYBOOK_ROUTE_TYPES.filter(r=>r.key!=="screen").map(r=>(
+<marker key={r.key} id={`pb-arrow-${r.key}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+<path d="M0,0L10,5L0,10z" fill={r.color}/>
+</marker>
+))}
+</defs>
+<rect x="0" y="0" width="500" height={vbH} fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+<PlaybookCourtMarks/>
+{courtType==="full"&&(
+<g transform="translate(0,900) scale(1,-1)"><PlaybookCourtMarks/></g>
+)}
+{courtType==="full"?(
+<>
+<line x1="0" y1="450" x2="500" y2="450" stroke="#2f5c46" strokeWidth="2.5"/>
+<circle cx="250" cy="450" r="60" fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+</>
+):(
+<path d="M190,450 A60,60 0 0 1 310,450" fill="none" stroke="#2f5c46" strokeWidth="2.5"/>
+)}
+
+{routes.map((r,i)=>i<revealIdx&&(
+<PlaybookRouteShape key={r.id} route={r} selected={selectedId?.kind==="route"&&selectedId.id===r.id} onClick={interactive?(e)=>{e.stopPropagation();onRouteClick&&onRouteClick(r.id);}:undefined}/>
+))}
+
+{drawPoints.length>0&&(
+<>
+<polyline points={drawPoints.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={WHITE} strokeWidth="2.5" strokeDasharray="4 5" opacity="0.85"/>
+{drawPoints.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3.5" fill={WHITE}/>)}
+</>
+)}
+
+{players.map(p=>{
+const isSel=selectedId?.kind==="player"&&selectedId.id===p.id;
+return(
+<g key={p.id} onPointerDown={interactive?(e)=>{e.stopPropagation();onPlayerDown(e,p.id);}:undefined} style={{cursor:interactive?"grab":"default"}}>
+<circle cx={p.x} cy={p.y} r="16" fill={p.side==="offense"?RED:"#2C2C2E"} stroke={isSel?"#ffe066":WHITE} strokeWidth={isSel?3:2}/>
+<text x={p.x} y={p.y+5} textAnchor="middle" fontSize="14" fontWeight="800" fill={WHITE} style={{pointerEvents:"none"}}>{p.side==="offense"?p.num:("X"+p.num)}</text>
+</g>
+);
+})}
+</svg>
+);
+}
+
+function PlaybookSection({isAdmin}){
+const [plays,setPlays]=useState([]);
+const [playsLoaded,setPlaysLoaded]=useState(false);
+const [view,setView]=useState("library"); // "library" | "editor"
+const [editingId,setEditingId]=useState(null);
+
+// Filters (library)
+const [filterType,setFilterType]=useState("all");
+const [filterCat,setFilterCat]=useState(null);
+const [search,setSearch]=useState("");
+const [favOnly,setFavOnly]=useState(false);
+
+// Editor meta
+const [pbName,setPbName]=useState("");
+const [pbType,setPbType]=useState("offense");
+const [pbCategory,setPbCategory]=useState(PLAYBOOK_OFF_CATEGORIES[0]);
+const [pbNotes,setPbNotes]=useState("");
+const [pbCourtType,setPbCourtType]=useState("half");
+const [saving,setSaving]=useState(false);
+
+// Editor board state
+const [players,setPlayers]=useState([]);
+const [routes,setRoutes]=useState([]);
+const [mode,setMode]=useState("select"); // select | add-offense | add-defense | route:<type>
+const [drawPoints,setDrawPoints]=useState([]);
+const [selectedId,setSelectedId]=useState(null);
+const [dragId,setDragId]=useState(null);
+const [history,setHistory]=useState([]);
+const [playingBack,setPlayingBack]=useState(false);
+const [revealIdx,setRevealIdx]=useState(Infinity);
+const svgRef=useRef(null);
+
+useEffect(()=>{
+let unsub;
+waitForFirebase().then(()=>{
+const{_db,_col,_onSnapshot}=window;
+unsub=_onSnapshot(_col(_db,"playbook_plays"),snap=>{
+setPlays(snap.docs.map(d=>d.data()));
+setPlaysLoaded(true);
+},()=>setPlaysLoaded(true));
+});
+return()=>unsub&&unsub();
+},[]);
+
+function pushHistory(){setHistory(h=>[...h.slice(-19),{players,routes}]);}
+function undo(){
+setHistory(h=>{
+if(!h.length)return h;
+const last=h[h.length-1];
+setPlayers(last.players);setRoutes(last.routes);
+return h.slice(0,-1);
+});
+}
+
+function toCourt(e){
+const svg=svgRef.current;
+if(!svg)return{x:0,y:0};
+const rect=svg.getBoundingClientRect();
+const vbH=pbCourtType==="full"?900:450;
+const x=((e.clientX-rect.left)/rect.width)*500;
+const y=((e.clientY-rect.top)/rect.height)*vbH;
+return{x:Math.round(Math.max(0,Math.min(500,x))),y:Math.round(Math.max(0,Math.min(vbH,y)))};
+}
+
+function onCourtPointerDown(e){
+if(mode==="add-offense"||mode==="add-defense"){
+const side=mode==="add-offense"?"offense":"defense";
+const count=players.filter(p=>p.side===side).length;
+if(count>=5){alert(`Al 5 ${side==="offense"?"aanvallers":"verdedigers"} op het veld.`);return;}
+pushHistory();
+const pt=toCourt(e);
+setPlayers(pl=>[...pl,{id:playbookId(),side,num:count+1,x:pt.x,y:pt.y}]);
+return;
+}
+if(mode.startsWith("route:")){
+const pt=toCourt(e);
+setDrawPoints(pts=>[...pts,pt]);
+return;
+}
+setSelectedId(null);
+}
+function onCourtPointerMove(e){
+if(!dragId)return;
+const pt=toCourt(e);
+setPlayers(pl=>pl.map(p=>p.id===dragId?{...p,x:pt.x,y:pt.y}:p));
+}
+function onCourtPointerUp(){setDragId(null);}
+function onPlayerDown(e,pid){
+if(mode!=="select")return;
+pushHistory();
+setDragId(pid);
+setSelectedId({kind:"player",id:pid});
+}
+function onRouteClick(rid){
+if(mode!=="select")return;
+setSelectedId(sel=>sel?.kind==="route"&&sel.id===rid?null:{kind:"route",id:rid});
+}
+function finishRoute(){
+if(drawPoints.length<2){setDrawPoints([]);setMode("select");return;}
+pushHistory();
+const routeType=mode.split(":")[1];
+setRoutes(r=>[...r,{id:playbookId(),type:routeType,points:drawPoints}]);
+setDrawPoints([]);
+setMode("select");
+}
+function undoLastPoint(){setDrawPoints(pts=>pts.slice(0,-1));}
+function cancelRoute(){setDrawPoints([]);setMode("select");}
+function deleteSelected(){
+if(!selectedId)return;
+pushHistory();
+if(selectedId.kind==="player")setPlayers(pl=>pl.filter(p=>p.id!==selectedId.id));
+else setRoutes(rt=>rt.filter(r=>r.id!==selectedId.id));
+setSelectedId(null);
+}
+function clearBoard(){
+if(!players.length&&!routes.length)return;
+if(!confirm("Hele bord leegmaken?"))return;
+pushHistory();
+setPlayers([]);setRoutes([]);setSelectedId(null);
+}
+
+function openNew(presetType){
+setEditingId(null);
+setPbName("");setPbType(presetType||"offense");
+setPbCategory((presetType==="defense"?PLAYBOOK_DEF_CATEGORIES:PLAYBOOK_OFF_CATEGORIES)[0]);
+setPbNotes("");setPbCourtType("half");
+setPlayers([]);setRoutes([]);setMode("select");setSelectedId(null);setDrawPoints([]);setHistory([]);
+setView("editor");
+}
+function openEdit(play){
+setEditingId(play.id);
+setPbName(play.name);setPbType(play.type);setPbCategory(play.category);
+setPbNotes(play.notes||"");setPbCourtType(play.courtType||"half");
+setPlayers(play.players||[]);setRoutes(play.routes||[]);
+setMode("select");setSelectedId(null);setDrawPoints([]);setHistory([]);setRevealIdx(Infinity);setPlayingBack(false);
+setView("editor");
+}
+async function savePlay(){
+if(!pbName.trim()){alert("Geef de tactiek een naam.");return;}
+setSaving(true);
+try{
+await waitForFirebase();
+const existing=editingId?plays.find(p=>p.id===editingId):null;
+const id=editingId||playbookId();
+const payload={id,name:pbName.trim(),type:pbType,category:pbCategory,courtType:pbCourtType,notes:pbNotes,players,routes,
+favorite:existing?.favorite||false,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+await window._setDoc(window._doc(window._db,"playbook_plays",id),payload);
+setEditingId(id);
+setView("library");
+}catch(e){console.error(e);alert("Opslaan mislukt, probeer opnieuw.");}
+setSaving(false);
+}
+async function deletePlay(id){
+if(!confirm("Deze tactiek definitief verwijderen?"))return;
+try{
+await waitForFirebase();
+await window._deleteDoc(window._doc(window._db,"playbook_plays",id));
+}catch(e){console.error(e);}
+}
+async function toggleFavorite(play){
+try{
+await waitForFirebase();
+await window._setDoc(window._doc(window._db,"playbook_plays",play.id),{...play,favorite:!play.favorite});
+}catch(e){console.error(e);}
+}
+async function duplicatePlay(play){
+try{
+await waitForFirebase();
+const id=playbookId();
+await window._setDoc(window._doc(window._db,"playbook_plays",id),{...play,id,name:play.name+" (kopie)",favorite:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+}catch(e){console.error(e);}
+}
+
+function playBack(){
+if(playingBack||!routes.length)return;
+setPlayingBack(true);
+setRevealIdx(0);
+let i=0;
+const iv=setInterval(()=>{
+i++;
+setRevealIdx(i);
+if(i>=routes.length){
+clearInterval(iv);
+setTimeout(()=>{setPlayingBack(false);setRevealIdx(Infinity);},900);
+}
+},750);
+}
+
+const categories=pbType==="offense"?PLAYBOOK_OFF_CATEGORIES:PLAYBOOK_DEF_CATEGORIES;
+
+// ── LIBRARY VIEW ──────────────────────────────────────────────────────
+if(view==="library"){
+const allCats=[...new Set(plays.map(p=>p.category).filter(Boolean))];
+const filtered=plays.filter(p=>{
+if(filterType!=="all"&&p.type!==filterType)return false;
+if(filterCat&&p.category!==filterCat)return false;
+if(favOnly&&!p.favorite)return false;
+if(search.trim()&&!p.name.toLowerCase().includes(search.trim().toLowerCase()))return false;
+return true;
+}).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+
+return(
+<div>
+<div style={{textAlign:"center",marginBottom:16}}>
+<div style={{fontSize:32,marginBottom:4}}>📋</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:18}}>Playbook</div>
+<div style={{color:GREY,fontSize:12,marginTop:2}}>{plays.length} tactiek{plays.length===1?"":"en"} opgeslagen</div>
+</div>
+
+<div style={{display:"flex",gap:8,marginBottom:14}}>
+<button onClick={()=>openNew("offense")} style={{flex:1,background:RED,color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>⚡ Nieuw aanvalsschema</button>
+<button onClick={()=>openNew("defense")} style={{flex:1,background:"#2C2C2E",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>🛡️ Nieuw verdedigingsschema</button>
+</div>
+
+<input placeholder="🔍 Zoek een tactiek..." value={search} onChange={e=>setSearch(e.target.value)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"11px 14px",fontSize:14,outline:"none",width:"100%",marginBottom:10,boxSizing:"border-box"}}/>
+
+<div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+{[["all","Alle"],["offense","⚡ Aanval"],["defense","🛡️ Verdediging"]].map(([k,l])=>(
+<button key={k} onClick={()=>{setFilterType(k);setFilterCat(null);}} style={{background:filterType===k?RED:INPUTBG,color:WHITE,border:"none",borderRadius:14,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>{l}</button>
+))}
+<button onClick={()=>setFavOnly(v=>!v)} style={{background:favOnly?"#f5a524":INPUTBG,color:favOnly?"#1a1a1a":WHITE,border:"none",borderRadius:14,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>⭐ Favorieten</button>
+</div>
+
+{allCats.length>0&&(
+<div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+{allCats.map(c=>(
+<button key={c} onClick={()=>setFilterCat(fc=>fc===c?null:c)} style={{background:filterCat===c?"#3a3a3c":"transparent",color:filterCat===c?WHITE:GREY,border:`1px solid ${filterCat===c?"#555":DIVIDER}`,borderRadius:12,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
+))}
+</div>
+)}
+
+{!playsLoaded&&<div style={{color:GREY,fontSize:13,textAlign:"center",padding:30}}>Playbook laden...</div>}
+{playsLoaded&&filtered.length===0&&(
+<div style={{color:GREY,fontSize:13,textAlign:"center",padding:30}}>{plays.length===0?"Nog geen tactieken getekend. Begin met een aanvals- of verdedigingsschema hierboven.":"Geen tactieken gevonden met deze filters."}</div>
+)}
+
+<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+{filtered.map(play=>(
+<div key={play.id} style={{background:INPUTBG,borderRadius:14,overflow:"hidden",border:`1px solid ${play.type==="offense"?RED+"44":"#4FA8E844"}`}}>
+<div onClick={()=>openEdit(play)} style={{cursor:"pointer"}}>
+<PlaybookCourtSVG courtType={play.courtType||"half"} players={play.players||[]} routes={play.routes||[]} height={120}/>
+</div>
+<div style={{padding:"8px 10px"}}>
+<div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:4}}>
+<div onClick={()=>openEdit(play)} style={{cursor:"pointer",minWidth:0}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:12.5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{play.name}</div>
+<div style={{color:play.type==="offense"?RED:"#4FA8E8",fontSize:10,fontWeight:700,marginTop:2}}>{play.type==="offense"?"⚡ AANVAL":"🛡️ VERDEDIGING"}</div>
+</div>
+<button onClick={()=>toggleFavorite(play)} style={{background:"transparent",border:"none",cursor:"pointer",fontSize:15,flexShrink:0,padding:0,opacity:play.favorite?1:0.35}}>⭐</button>
+</div>
+<div style={{color:GREY,fontSize:10,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{play.category}</div>
+<div style={{display:"flex",gap:6,marginTop:8}}>
+<button onClick={()=>duplicatePlay(play)} style={{flex:1,background:"#2C2C2E",color:GREY,border:"none",borderRadius:8,padding:"5px 0",fontSize:10,fontWeight:700,cursor:"pointer"}}>⧉ Kopie</button>
+<button onClick={()=>deletePlay(play.id)} style={{flex:1,background:"#2C2C2E",color:RED,border:"none",borderRadius:8,padding:"5px 0",fontSize:10,fontWeight:700,cursor:"pointer"}}>🗑️ Wis</button>
+</div>
+</div>
+</div>
+))}
+</div>
+</div>
+);
+}
+
+// ── EDITOR VIEW ───────────────────────────────────────────────────────
+const activeRouteType=mode.startsWith("route:")?mode.split(":")[1]:null;
+return(
+<div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+<button onClick={()=>setView("library")} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer"}}>‹ Playbook</button>
+{routes.length>0&&<button onClick={playBack} disabled={playingBack} style={{background:"transparent",border:`1px solid ${DIVIDER}`,color:playingBack?GREY:WHITE,borderRadius:14,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:playingBack?"default":"pointer"}}>{playingBack?"▶ Speelt af...":"▶ Afspelen"}</button>}
+</div>
+
+<input placeholder="Naam van de tactiek (bijv. 'Horns Flare')" value={pbName} onChange={e=>setPbName(e.target.value)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"12px 14px",fontSize:15,fontWeight:700,outline:"none",width:"100%",marginBottom:10,boxSizing:"border-box"}}/>
+
+<div style={{display:"flex",gap:8,marginBottom:10}}>
+<div style={{flex:1,display:"flex",background:INPUTBG,borderRadius:10,padding:3}}>
+{["offense","defense"].map(t=>(
+<button key={t} onClick={()=>{setPbType(t);setPbCategory((t==="defense"?PLAYBOOK_DEF_CATEGORIES:PLAYBOOK_OFF_CATEGORIES)[0]);}} style={{flex:1,background:pbType===t?(t==="offense"?RED:"#4FA8E8"):"transparent",color:WHITE,border:"none",borderRadius:8,padding:"8px 0",fontSize:12,fontWeight:700,cursor:"pointer"}}>{t==="offense"?"⚡ Aanval":"🛡️ Verdediging"}</button>
+))}
+</div>
+<button onClick={()=>setPbCourtType(c=>c==="half"?"full":"half")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"0 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>{pbCourtType==="half"?"Half veld":"Heel veld"}</button>
+</div>
+
+<select value={pbCategory} onChange={e=>setPbCategory(e.target.value)} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",marginBottom:12,boxSizing:"border-box"}}>
+{categories.map(c=><option key={c} value={c}>{c}</option>)}
+</select>
+
+{/* Toolbar */}
+<div style={{display:"flex",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+<button onClick={()=>setMode("select")} style={{background:mode==="select"?"#3a3a3c":INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>👆 Selecteer/Sleep</button>
+<button onClick={()=>setMode("add-offense")} style={{background:mode==="add-offense"?RED:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Aanvaller ({players.filter(p=>p.side==="offense").length}/5)</button>
+<button onClick={()=>setMode("add-defense")} style={{background:mode==="add-defense"?"#2C2C2E":INPUTBG,color:WHITE,border:mode==="add-defense"?`1px solid ${WHITE}`:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Verdediger ({players.filter(p=>p.side==="defense").length}/5)</button>
+</div>
+<div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+{PLAYBOOK_ROUTE_TYPES.map(rt=>(
+<button key={rt.key} onClick={()=>{setMode(m=>m===`route:${rt.key}`?"select":`route:${rt.key}`);setDrawPoints([]);}} title={rt.hint} style={{background:mode===`route:${rt.key}`?rt.color:INPUTBG,color:mode===`route:${rt.key}`&&rt.key!=="dribble"?WHITE:(mode===`route:${rt.key}`?"#1a1a1a":rt.color),border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>{rt.icon} {rt.label}</button>
+))}
+</div>
+
+{activeRouteType&&(
+<div style={{background:"#151517",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+<span style={{color:GREY,fontSize:11}}>Tik het veld aan om punten toe te voegen ({drawPoints.length} gezet){drawPoints.length<2?" — minstens 2 nodig":""}</span>
+<div style={{display:"flex",gap:6}}>
+{drawPoints.length>0&&<button onClick={undoLastPoint} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>↩︎ Laatste punt</button>}
+<button onClick={cancelRoute} style={{background:"#2C2C2E",color:GREY,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>✕ Annuleer</button>
+<button onClick={finishRoute} disabled={drawPoints.length<2} style={{background:drawPoints.length<2?"#2C2C2E":RED,color:WHITE,border:"none",borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:drawPoints.length<2?"default":"pointer"}}>✓ Klaar</button>
+</div>
+</div>
+)}
+
+<PlaybookCourtSVG svgRef={svgRef} courtType={pbCourtType} players={players} routes={routes} drawPoints={drawPoints} revealIdx={playingBack?revealIdx:Infinity} interactive={true} selectedId={selectedId}
+onCourtPointerDown={onCourtPointerDown} onCourtPointerMove={onCourtPointerMove} onCourtPointerUp={onCourtPointerUp} onPlayerDown={onPlayerDown} onRouteClick={onRouteClick} height={420}/>
+
+<div style={{display:"flex",gap:6,marginTop:10,marginBottom:14,flexWrap:"wrap"}}>
+<button onClick={deleteSelected} disabled={!selectedId} style={{background:selectedId?"#3a1414":"#1a1a1a",color:selectedId?RED:DARKGREY,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:selectedId?"pointer":"default"}}>🗑️ Verwijder geselecteerde</button>
+<button onClick={undo} disabled={!history.length} style={{background:history.length?INPUTBG:"#1a1a1a",color:history.length?WHITE:DARKGREY,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:history.length?"pointer":"default"}}>↩️ Ongedaan maken</button>
+<button onClick={clearBoard} style={{background:INPUTBG,color:GREY,border:"none",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🧹 Leegmaken</button>
+</div>
+
+<textarea placeholder="Coach notes — waarom deze tactiek werkt, wanneer je 'm gebruikt..." value={pbNotes} onChange={e=>setPbNotes(e.target.value)} rows={3} style={{background:INPUTBG,border:"none",color:WHITE,borderRadius:10,padding:"11px 14px",fontSize:13,outline:"none",width:"100%",marginBottom:14,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+
+<button onClick={savePlay} disabled={saving} style={{background:RED,color:WHITE,border:"none",borderRadius:12,padding:"14px 0",fontWeight:700,fontSize:15,cursor:"pointer",width:"100%"}}>{saving?"Opslaan...":"💾 Tactiek opslaan"}</button>
+</div>
+);
+}
+
 function GmModeSection({teams}){
 const NBA_TEAMS=[
 {id:"BOS",name:"Boston Celtics",record:"56-26",cap:195.7,status:"Over cap",conf:"E"},
@@ -14283,6 +14738,22 @@ return(
 <div style={{color:GREY,fontSize:12}}>Run een NBA franchise: lottery, draft, trades & free agency onder cap regels</div>
 </div>
 </div>
+<div data-testid="playbook-mode-tile" onClick={()=>setMinigame("playbook")} style={{background:INPUTBG,borderRadius:16,padding:"20px 18px",marginTop:12,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+<div style={{fontSize:32,flexShrink:0}}>📋</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:2}}>Playbook</div>
+<div style={{color:GREY,fontSize:12}}>Teken aanvals- en verdedigingsschema's op een echt speelveld, sla ze op als team</div>
+</div>
+</div>
+</div>
+);
+}
+
+if(minigame==="playbook"){
+return(
+<div>
+<button onClick={()=>setMinigame(null)} style={{background:"transparent",border:"none",color:GREY,fontSize:12,cursor:"pointer",marginBottom:14}}>‹ Minigames</button>
+<PlaybookSection isAdmin={isAdmin}/>
 </div>
 );
 }

@@ -8226,6 +8226,26 @@ const fta=deriveFga(cur.ftm,ft);
 return{...f,[pid]:{...cur,ft,fta,ftTier:tier}};
 });
 }
+// 2-punters: zelfde principe — jij vult in hoeveel er achter de lijn GEMAAKT zijn (2PM), de kwaliteitsknop verzint
+// een realistisch 2PT% (lager dan FG%, het zijn verre schoten) en leidt daar het aantal pogingen (2PA) uit af.
+function setTwoPtMade(pid,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+const next={...cur,twoPtMade:v};
+if(cur.twoPtPct)next.twoPtAtt=deriveFga(v,cur.twoPtPct);
+return{...f,[pid]:next};
+});
+}
+function rollTwoPtNight(pid,tier){
+const ranges={fire:[55,70],good:[42,55],mid:[30,42],bad:[10,30]};
+const r=ranges[tier];
+const pct=Math.round((r[0]+Math.random()*(r[1]-r[0]))*10)/10;
+setStatForms(f=>{
+const cur=f[pid]||{};
+const twoPtAtt=deriveFga(cur.twoPtMade,pct);
+return{...f,[pid]:{...cur,twoPtPct:pct,twoPtAtt,twoPtTier:tier}};
+});
+}
 // Live preview van wat er opgeslagen gaat worden → voedt de waarschuwingsbanner (alleen "Per speler"-modus, live blijft ongemoeid)
 const previewGames=all.map(pid=>{
 const sf=statForms[pid]||{};
@@ -8443,7 +8463,7 @@ return(
 {STAT_KEYS.filter(k=>hasTwoPointLine||!TWO_PT_KEYS.includes(k)).map(k=>(
 <div key={k}>
 <div style={{color:TWO_PT_KEYS.includes(k)?"#f5a524":GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}{k==="twoPtMade"?" (achter de lijn)":""}</div>
-<input data-testid={`classic-stat-${k}-${activeP}`} type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>setStat(activeP,k,e.target.value)}/>
+<input data-testid={`classic-stat-${k}-${activeP}`} type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>k==="twoPtMade"?setTwoPtMade(activeP,e.target.value):setStat(activeP,k,e.target.value)}/>
 </div>
 ))}
 </div>
@@ -8505,6 +8525,35 @@ return(
 </div>
 <div style={{color:GREY,fontSize:10,marginTop:4}}>Vul eerst "FTM" (gemaakte vrije worpen) in, dan een kwaliteitsknop — die tellen al mee in de punten hierboven.</div>
 </div>
+
+{/* 2-punters: alleen op een veld mét 2-punt lijn. Zelfde principe als FT — 2PM invullen, kwaliteitsknop verzint 2PT% en leidt 2PA af. */}
+{hasTwoPointLine&&(
+<div data-testid="two-pt-quality-section" style={{marginTop:14}}>
+<div style={{color:"#f5a524",fontSize:11,marginBottom:6,display:"flex",alignItems:"center",gap:5}}><CourtTypeIcon state="twopt" size={12}/>2-punters (2PT%) — hetzelfde principe</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{all.map(pid=>{
+const p=players.find(x=>x.id===pid);const sf=statForms[pid]||{};
+const tiers=[["fire","🔥","Enorm goed"],["good","✅","Goed"],["mid","😐","Middelmatig"],["bad","❌","Slecht"]];
+return(
+<div key={pid} style={{display:"flex",alignItems:"center",gap:6,background:"#111",borderRadius:10,padding:"6px 8px"}}>
+<div style={{width:64,flexShrink:0,display:"flex",alignItems:"center",gap:5}}>
+<Avatar player={p} size={20}/>
+<span style={{fontSize:11,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</span>
+</div>
+<input data-testid={`twopt-made-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="2PM" value={sf.twoPtMade||""} onChange={e=>setTwoPtMade(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
+<div style={{display:"flex",gap:4,flex:1}}>
+{tiers.map(([tier,emoji,lbl])=>(
+<button key={tier} data-testid={`twopt-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollTwoPtNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.twoPtTier===tier?`1px solid #f5a524`:"1px solid transparent",background:sf.twoPtTier===tier?"#f5a52422":INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
+))}
+</div>
+{sf.twoPtPct!=null&&<div data-testid={`twopt-result-${pid}`} style={{flexShrink:0,textAlign:"right",fontSize:10,color:GREY,minWidth:70}}>2PT {sf.twoPtPct}%<br/>{sf.twoPtAtt||0} pog.</div>}
+</div>
+);
+})}
+</div>
+<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul eerst "2PM" (gemaakte 2-punters) in, dan een kwaliteitsknop — elke 2-punter telt voor 2 in de punten hierboven.</div>
+</div>
+)}
 
 {/* Coach commentaar geldt voor de actieve speler in klassieke modus, of de eerste speler in live-modus (optioneel bijschrift) */}
 <div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar (optioneel)</div>

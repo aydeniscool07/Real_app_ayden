@@ -1340,7 +1340,7 @@ return(
 <div style={{color:GREY,fontSize:10}}>EFF</div>
 </div>
 </div>
-{courtState(game)==="twopt"&&(
+{(courtState(game)==="twopt"||(+game.twoPtAtt||0)>0||(+game.twoPtMade||0)>0)&&(
 <div data-testid="two-pt-stat-row" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:8}}>
 {[["twoPtMade","2PM"],["twoPtAtt","2PA"]].map(([k,l])=>(
 <div key={k} style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>

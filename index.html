@@ -157,9 +157,123 @@ window.__showBootFallback = showFallback;
 const {useState,useEffect,useRef,useMemo}=React;
 
 const RED="#E8312A",WHITE="#fff",GREY="#8E8E93",DARKGREY="#3A3A3C",BG="#000",DIVIDER="#1C1C1E",INPUTBG="#1C1C1E";
-const STAT_KEYS=["pts","reb","ast","stl","blk","to","fga","fg","ftm","fta","ft","threept","min","pf","oreb","dreb","ts","plusminus"];
-const STAT_LABEL={pts:"PTS",reb:"REB",ast:"AST",stl:"STL",blk:"BLK",to:"TO",fga:"FGA",fg:"FG%",ftm:"FTM",fta:"FTA",ft:"FT%",threept:"3FG",min:"MIN",pf:"PF",oreb:"OREB",dreb:"DREB",ts:"TS%",plusminus:"+/-"};
-const STAT_SMALL={pts:"pts",reb:"reb",ast:"ast",stl:"stl",blk:"blk",to:"to",fg:"% fg",threept:"3pm",min:"min",pf:"pf",oreb:"oreb",dreb:"dreb",ts:"ts%",plusminus:"+/-"};
+const STAT_KEYS=["pts","reb","ast","stl","blk","to","fga","fg","ftm","fta","ft","twoPtMade","twoPtAtt","threept","min","pf","oreb","dreb","ts","plusminus"];
+const STAT_LABEL={pts:"PTS",reb:"REB",ast:"AST",stl:"STL",blk:"BLK",to:"TO",fga:"FGA",fg:"FG%",ftm:"FTM",fta:"FTA",ft:"FT%",twoPtMade:"2PM",twoPtAtt:"2PA",twoPt:"2PT%",threept:"3FG",min:"MIN",pf:"PF",oreb:"OREB",dreb:"DREB",ts:"TS%",plusminus:"+/-"};
+const STAT_SMALL={pts:"pts",reb:"reb",ast:"ast",stl:"stl",blk:"blk",to:"to",fg:"% fg",twoPtMade:"2pm",twoPt:"% 2pt",threept:"3pm",min:"min",pf:"pf",oreb:"oreb",dreb:"dreb",ts:"ts%",plusminus:"+/-"};
+// ── 2-punt lijn (2PT) — additieve helpers. Ontbrekende velden = game gelogd vóór de 2PT-regel ("legacy").
+const TWO_PT_KEYS=["twoPtMade","twoPtAtt"];
+const COURT_STATE_INFO={
+twopt:{label:"2-punt lijn court",color:"#f5a524"},
+noline:{label:"Geen 2-punt lijn",color:"#8E8E93"},
+legacy:{label:"Gelogd vóór de 2-punt regel",color:"#6b6b70"}
+};
+function courtState(g){if(!g||g.hasTwoPointLine===undefined||g.hasTwoPointLine===null)return "legacy";return g.hasTwoPointLine?"twopt":"noline";}
+function gameCounts(g){if(!g)return false;if(typeof g.counts==="boolean")return g.counts;return !g.exhibition;}
+function isCameleonGame(g){return !!g&&(g.isCameleon===true||g.team==="chameleon");}
+function twoPtPctOf(made,att){const m=+made||0,a=Math.max(+att||0,m);return a>0?parseFloat((m/a*100).toFixed(1)):0;}
+function twoPtTotals(games){
+const el=(games||[]).filter(g=>courtState(g)==="twopt");
+const made=el.reduce((s,g)=>s+(+g.twoPtMade||0),0),att=el.reduce((s,g)=>s+(+g.twoPtAtt||0),0);
+return{made,att,pct:twoPtPctOf(made,att),gp:el.length};
+}
+// Sniper Award: snipeScore = (2PT makes / league-max makes) × 0.7 + 2PT% × 0.3 — geen minimum, volume weegt het zwaarst
+function computeSniperRanking(games,players){
+const byPid={};
+(games||[]).forEach(g=>{
+if(!g.playerId||!gameCounts(g)||courtState(g)!=="twopt")return;
+const t=byPid[g.playerId]||(byPid[g.playerId]={made:0,att:0,gp:0});
+t.made+=+g.twoPtMade||0;t.att+=+g.twoPtAtt||0;t.gp+=1;
+});
+const rows=Object.entries(byPid).filter(([pid,t])=>t.made>0&&players.find(p=>p.id===pid)).map(([pid,t])=>({pid,...t,pct:twoPtPctOf(t.made,t.att)}));
+const maxMade=Math.max(0,...rows.map(r=>r.made));
+rows.forEach(r=>{r.score=parseFloat(((maxMade?r.made/maxMade:0)*0.7+(r.pct/100)*0.3).toFixed(4));});
+return rows.sort((a,b)=>b.score-a.score||b.made-a.made||b.pct-a.pct);
+}
+// Team-reconciliatie: kameleon wordt raw gelogd maar telt 0.5× mee (zweeft over beide teams)
+function effectivePts(g){const p=+g.pts||0;return isCameleonGame(g)?p*0.5:p;}
+// Gemaakte veldschoten afgeleid uit punten: elk punt = 1 schot, behalve 2PT (2 pts/schot) en vrije worpen (1 pt, geen veldschot)
+function derivedFgMade(g){const pts=+g.pts||0,ftm=+g.ftm||0,m2=courtState(g)==="twopt"?(+g.twoPtMade||0):0;return{inside:pts-m2*2-ftm,total:pts-m2-ftm};}
+// Validatie bij het loggen — WAARSCHUWT alleen, blokkeert nooit. Geeft een lijst met alle niet-geslaagde checks terug.
+function validateLoggedMatch(gs,tAS,tBS,tAN,tBN,players){
+const warn=[];
+const nm=pid=>{const p=players.find(x=>x.id===pid);return p?p.name.split(" ")[0]:"?";};
+gs.forEach(g=>{
+const n=nm(g.playerId),twoOn=courtState(g)==="twopt";
+const pts=+g.pts||0,fga=+g.fga||0,m2=+g.twoPtMade||0,a2=+g.twoPtAtt||0,ftm=+g.ftm||0,fta=+g.fta||0;
+const fgm=derivedFgMade(g);
+if(fga>0&&fgm.total>fga)warn.push(`${n}: ${fgm.total} FG gemaakt > ${fga} FGA`);
+if(twoOn&&m2>a2)warn.push(`${n}: ${m2} 2PT gemaakt > ${a2} 2PT pogingen`);
+if(fta>0&&ftm>fta)warn.push(`${n}: ${ftm} FT gemaakt > ${fta} FTA`);
+if(!isCameleonGame(g)&&fgm.inside<0)warn.push(`${n}: ${pts} pts klopt niet met de schoten (${twoOn?`${m2}× 2PT = ${m2*2} + `:""}${ftm} FT = ${twoOn?m2*2+ftm:ftm} pts minimaal)`);
+});
+const A=parseFloat(tAS),B=parseFloat(tBS);
+const fixedA=gs.filter(g=>g.team==="A"&&!isCameleonGame(g)),fixedB=gs.filter(g=>g.team==="B"&&!isCameleonGame(g)),chams=gs.filter(isCameleonGame);
+if(!isNaN(A)&&!isNaN(B)&&(A||B)){
+const aF=fixedA.reduce((s,g)=>s+effectivePts(g),0),bF=fixedB.reduce((s,g)=>s+effectivePts(g),0),C=chams.reduce((s,g)=>s+effectivePts(g),0);
+if(aF>A+1e-9)warn.push(`${tAN}: spelers samen ${aF} pts, maar teamscore is ${A}`);
+if(bF>B+1e-9)warn.push(`${tBN}: spelers samen ${bF} pts, maar teamscore is ${B}`);
+const pool=parseFloat(((A-aF)+(B-bF)).toFixed(2));
+if(aF<=A+1e-9&&bF<=B+1e-9&&Math.abs(pool-C)>1e-6)warn.push(chams.length?`Kameleon-punten kloppen niet: ${C} effectief (0.5× raw) vs ${pool} pts over in de teamscores`:`Teamscores kloppen niet met de spelerspunten (${pool} pts onverklaard)`);
+}
+[[tAN,fixedA],[tBN,fixedB]].forEach(([name,list])=>{
+if(!list.length)return;
+const ast=list.reduce((s,g)=>s+(+g.ast||0),0);
+const fgTot=Math.max(0,list.reduce((s,g)=>s+derivedFgMade(g).total,0)+chams.reduce((s,g)=>s+derivedFgMade(g).total,0));
+if(ast>fgTot)warn.push(`${name}: ${ast} assists > ${fgTot} gemaakte veldschoten`);
+});
+return warn;
+}
+// Sniper streak: aantal opeenvolgende games op een 2-punt-lijn-veld (t/m deze game) met ≥1 2PT-make. ≥3 = hot hand.
+function sniperStreakAt(playerId,allGames,upToGame){
+const mine=(allGames||[]).filter(g=>g.playerId===playerId&&courtState(g)==="twopt").sort((a,b)=>(a.date||"").localeCompare(b.date||"")||String(a.id).localeCompare(String(b.id)));
+let idx=upToGame?mine.findIndex(g=>g.id===upToGame.id):mine.length-1;
+if(idx<0)return 0;
+let n=0;
+for(let i=idx;i>=0;i--){if((+mine[i].twoPtMade||0)>0)n++;else break;}
+return n;
+}
+function SniperStreakBadge({count,size=10}){
+if(count<3)return null;
+return <span data-testid="sniper-streak-badge" title={`${count} games op rij met een 2PT-make`} style={{display:"inline-flex",alignItems:"center",gap:3,background:"#1ABC9C22",color:"#1ABC9C",fontSize:size,fontWeight:800,borderRadius:6,padding:"2px 6px",whiteSpace:"nowrap"}}><SniperIcon size={size+4} color="#1ABC9C"/>{count} OP RIJ</span>;
+}
+function CourtTypeIcon({state,size=16,color}){
+const c=color||COURT_STATE_INFO[state].color;
+return(
+<svg width={size} height={size} viewBox="0 0 24 24" style={{display:"block",flexShrink:0}}>
+<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke={c} strokeWidth="2" strokeDasharray={state==="legacy"?"3 2":"0"}/>
+<circle cx="12" cy="7" r="1.7" fill={c}/>
+{state==="twopt"&&<path d="M5 6 C5 15.5 19 15.5 19 6" fill="none" stroke={c} strokeWidth="2"/>}
+{state==="noline"&&<line x1="7" y1="17" x2="17" y2="17" stroke={c} strokeWidth="2" strokeLinecap="round"/>}
+{state==="legacy"&&<text x="12" y="19.5" textAnchor="middle" fontSize="10" fontWeight="800" fill={c}>?</text>}
+</svg>
+);
+}
+// Klein icoon per game — tik erop om te zien wat voor veld het was
+function CourtBadge({game,size=14,style}){
+const [open,setOpen]=useState(false);
+const st=courtState(game),info=COURT_STATE_INFO[st];
+useEffect(()=>{if(!open)return;const t=setTimeout(()=>setOpen(false),2500);return()=>clearTimeout(t);},[open]);
+return(
+<span data-testid={`court-badge-${st}`} onClick={e=>{e.stopPropagation();setOpen(o=>!o);}} style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:size+8,height:size+8,borderRadius:6,background:`${info.color}22`,cursor:"pointer",flexShrink:0,...(style||{})}}>
+<CourtTypeIcon state={st} size={size}/>
+{open&&<span data-testid="court-badge-tooltip" style={{position:"absolute",top:"calc(100% + 4px)",left:0,zIndex:40,background:"#000",border:`1px solid ${info.color}88`,color:WHITE,fontSize:11,fontWeight:600,padding:"5px 8px",borderRadius:8,whiteSpace:"nowrap",boxShadow:"0 4px 14px rgba(0,0,0,0.5)"}}>{info.label}</span>}
+</span>
+);
+}
+function CourtStateSelector({value,onChange}){
+const opts=[["legacy","Vóór 2PT-regel"],["noline","Geen lijn"],["twopt","2-punt lijn"]];
+const cur=value===true?"twopt":value===false?"noline":"legacy";
+return(
+<div data-testid="court-state-selector" style={{background:"#111",borderRadius:10,padding:"10px 12px"}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,marginBottom:6}}>📏 Veldtype (2-punt lijn)</div>
+<div style={{display:"flex",gap:6}}>
+{opts.map(([st,lbl])=>{const sel=cur===st;const c=COURT_STATE_INFO[st].color;return(
+<button key={st} data-testid={`court-state-${st}`} onClick={()=>onChange(st==="twopt"?true:st==="noline"?false:undefined)} style={{flex:1,padding:"8px 4px",borderRadius:8,border:sel?`1px solid ${c}`:"1px solid transparent",background:sel?`${c}22`:INPUTBG,color:sel?WHITE:GREY,fontWeight:700,fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}><CourtTypeIcon state={st} size={13}/>{lbl}</button>
+);})}
+</div>
+</div>
+);
+}
 const POSITIONS=["PG","SG","SF","PF","C","—"];
 const SORT_OPTIONS=["Beste","Slechtste","Datum (nieuwst)","Datum (oudst)","PTS","AST","REB"];
 const MONTHS=["Januari","Februari","Maart","April","Mei","Juni","Juli","Augustus","September","Oktober","November","December"];
@@ -1226,6 +1340,20 @@ return(
 <div style={{color:GREY,fontSize:10}}>EFF</div>
 </div>
 </div>
+{courtState(game)==="twopt"&&(
+<div data-testid="two-pt-stat-row" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:8}}>
+{[["twoPtMade","2PM"],["twoPtAtt","2PA"]].map(([k,l])=>(
+<div key={k} style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:20}}>{game[k]||0}</div>
+<div style={{color:GREY,fontSize:10}}>{l}</div>
+</div>
+))}
+<div style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:20}}>{twoPtPctOf(game.twoPtMade,game.twoPtAtt)}%</div>
+<div style={{color:GREY,fontSize:10}}>2PT%</div>
+</div>
+</div>
+)}
 </div>
 );
 }
@@ -1500,9 +1628,10 @@ return(
 </div>
 </div>
 <div style={{padding:"16px 20px 0"}}>
-<div style={{color:GREY,fontSize:13,marginBottom:4}}>
-{game.date}{game.opponent?` · vs ${game.opponent.toUpperCase()}`:""}
-{game.location?<span style={{marginLeft:6}}>📍 {game.location}</span>:""}
+<div style={{color:GREY,fontSize:13,marginBottom:4,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+<span>{game.date}{game.opponent?` · vs ${game.opponent.toUpperCase()}`:""}
+{game.location?<span style={{marginLeft:6}}>📍 {game.location}</span>:""}</span>
+<CourtBadge game={game} size={12}/>
 </div>
 {game.teamAScore&&game.teamBScore&&(
 <div style={{fontSize:22,fontWeight:800,marginBottom:14}}>
@@ -1724,6 +1853,24 @@ return(
 );
 }
 
+// Sniper Award — jumpshot silhouette met 2-punt boog
+function SniperIcon({size=28,color="#1ABC9C",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="76" cy="15" r="9" fill={c}/>
+<path d="M67 15 L85 15 M76 6 L76 24" stroke="rgba(0,0,0,0.35)" strokeWidth="1.5"/>
+<circle cx="46" cy="24" r="9" fill={c}/>
+<path d="M46 33 L44 58" stroke={c} strokeWidth="9" strokeLinecap="round"/>
+<path d="M46 36 L58 30 L69 22" stroke={c} strokeWidth="7" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M44 40 L34 34 L38 24" stroke={c} strokeWidth="6" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M44 58 L34 70 L40 84" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M44 58 L56 68 L52 84" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M8 95 C28 79 72 79 92 95" stroke={c} strokeWidth="3" fill="none" strokeDasharray="4 3" opacity="0.7"/>
+</svg>
+);
+}
+
 // Award type definitions — NBA-style per maand uitreiken
 const AWARD_TYPES=[
 {id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
@@ -1733,6 +1880,7 @@ const AWARD_TYPES=[
 {id:"scoring",      label:"Scoring Title",             color:"#E8312A", Icon:ScoringIcon,  desc:"Meeste punten gem."},
 {id:"rebounds",     label:"Rebounds Title",            color:"#E67E22", Icon:ReboundsIcon, desc:"Meeste rebounds gem."},
 {id:"assists",      label:"Assists Title",             color:"#3498DB", Icon:AssistsIcon,  desc:"Meeste assists gem."},
+{id:"sniper",       label:"Sniper Award",              color:"#1ABC9C", Icon:SniperIcon,   desc:"Beste 2-punt schutter"},
 {id:"clutch",       label:"Clutch Player vd Maand",    color:"#E8312A", Icon:ClutchIcon,   desc:"Beste in de slotfase"},
 {id:"alllba1",      label:"All-LBA 1e Team",           color:"#f5a524", Icon:AllLBA1Icon,  desc:"Eerste team selectie", multi:true, maxPick:2},
 {id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
@@ -2333,6 +2481,12 @@ case"mvp":{const r=top("eff");return{ids:[r.pid],reason:`${r.eff.toFixed(1)} eff
 case"scoring":{const r=top("ppg");return{ids:[r.pid],reason:`${r.ppg.toFixed(1)} pts gem.`,...withGap("ppg",r)};}
 case"rebounds":{const r=top("rpg");return{ids:[r.pid],reason:`${r.rpg.toFixed(1)} reb gem.`,...withGap("rpg",r)};}
 case"assists":{const r=top("apg");return{ids:[r.pid],reason:`${r.apg.toFixed(1)} ast gem.`,...withGap("apg",r)};}
+case"sniper":{
+const ranked=computeSniperRanking(periodGames,players);
+if(!ranked.length)return null;
+const r=ranked[0],ru=ranked[1];
+return{ids:[r.pid],reason:`${r.made}/${r.att} 2PT (${r.pct}%) · snipe-score ${r.score.toFixed(2)}`,gap:ru?+(r.score-ru.score).toFixed(2):null,runnerUpId:ru?ru.pid:null};
+}
 case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`,...withGap("dpg",r)};}
 case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`,...withGap("cham",r,0)};}
 case"alllba1":{
@@ -2985,6 +3139,13 @@ return(
 </div>
 ))}
 </div>
+{(()=>{const t=twoPtTotals(pg);if(!t.gp)return null;return(
+<div data-testid="profile-two-pt-line" style={{display:"flex",alignItems:"center",gap:8,background:INPUTBG,borderRadius:10,padding:"10px 12px",marginTop:-12,marginBottom:20}}>
+<CourtTypeIcon state="twopt" size={16}/>
+<div style={{flex:1,color:GREY,fontSize:12}}><span style={{color:WHITE,fontWeight:800}}>{t.pct}% 2PT</span> · {t.made}/{t.att} in {t.gp} game{t.gp!==1?"s":""} met 2-punt lijn</div>
+<SniperStreakBadge count={sniperStreakAt(player.id,allGames)}/>
+</div>
+);})()}
 {pg.length>0&&<StatRadarChart pg={pg}/>}
 {(matchups.best||matchups.worst)&&(
 <div data-testid="matchup-section" style={{marginBottom:20}}>
@@ -3303,6 +3464,12 @@ const leaders=["pts","reb","ast","stl","blk"].map(k=>{
 const best=playerStats.slice().sort((a,b)=>avg(b.games,k)-avg(a.games,k))[0];
 return{k,label:STAT_LABEL[k],player:best?.player,val:best?avg(best.games,k):0};
 });
+// 2PT% leader — alleen games op een veld mét 2-punt lijn, minstens 1 make; bij gelijk % wint volume
+const twoPtLeader=useMemo(()=>{
+const rows=playerStats.map(ps=>({player:ps.player,...twoPtTotals(ps.games)})).filter(r=>r.made>0);
+if(!rows.length)return null;
+return rows.sort((a,b)=>b.pct-a.pct||b.made-a.made)[0];
+},[playerStats]);
 
 // Biggest riser/faller: compares each player's eff this calendar month to last calendar month
 // (only meaningful in month view — season/all-time have no single "previous period" to compare to).
@@ -3795,6 +3962,16 @@ return (
 </div>
 </div>
 ))}
+{twoPtLeader&&(
+<div data-testid="two-pt-leader-card" onClick={()=>openPlayer(twoPtLeader.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",border:"1px solid #f5a52455"}}>
+<Avatar player={twoPtLeader.player} size={36}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:"#f5a524",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",gap:4}}><CourtTypeIcon state="twopt" size={11}/>2PT%</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:20}}>{twoPtLeader.pct}% <span style={{color:GREY,fontSize:11,fontWeight:600}}>{twoPtLeader.made}/{twoPtLeader.att}</span></div>
+<div style={{color:GREY,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{twoPtLeader.player.name}</div>
+</div>
+</div>
+)}
 {clutchLeader&&(
 <div title={`Telt op als: (1) ${mvp.player.name} zijn gemiddelde eff (${mvp.eff}) niet haalt of niet speelt, (2) 80%+ meer punten dan een onderpresterende teamgenoot, of (3) 50%+ boven eigen gemiddelde eff tegen een hoger geplaatste tegenstander`} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,border:`1px solid ${RED}55`}}>
 <Avatar player={clutchLeader.player} size={36}/>
@@ -6692,11 +6869,13 @@ return(
                       <span style={{fontSize:22,fontWeight:800,color:bWon?WHITE:GREY}}>{s.teamBScore}</span>
                     </div>
                     <div style={{textAlign:"left",flex:1}}><span style={{fontWeight:700,fontSize:13,color:bWon?WHITE:GREY}}>{tBN}</span></div>
+                    <CourtBadge game={s} size={12} style={{position:"absolute",top:9,left:10}}/>
                     {isAdmin&&<button onClick={()=>setEditingMatch(mG)} style={{position:"absolute",top:8,right:10,background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13}}>✏️</button>}
                   </div>
                 ) : (
                   <div style={{background:"#111",padding:"8px 14px",textAlign:"center",position:"relative"}}>
                     <span style={{fontWeight:700,fontSize:13,color:WHITE}}>{tAN} vs {tBN}</span>
+                    <CourtBadge game={s} size={12} style={{position:"absolute",top:6,left:10}}/>
                     {isAdmin&&<button onClick={()=>setEditingMatch(mG)} style={{position:"absolute",top:6,right:10,background:"transparent",border:"none",color:GREY,cursor:"pointer",fontSize:13}}>✏️</button>}
                   </div>
                 )}
@@ -7808,6 +7987,8 @@ return(
 <div style={{display:"flex",alignItems:"center",gap:6}}>
 <span style={{fontWeight:700,fontSize:16}}>{player.name}</span>
 <span style={{color:GREY,fontSize:13}}>· {fps} fps</span>
+<CourtBadge game={game} size={12}/>
+{allGames&&<SniperStreakBadge count={sniperStreakAt(player.id,allGames,game)}/>}
 {game.exhibition&&<span style={{background:"#f5a52422",color:"#f5a524",fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>⚠️ TELT NIET MEE</span>}
 {trendBadge&&<span title={`Vorm: ${form.trend>0?"+":""}${form.trend} t.o.v. seizoensgemiddelde`} style={{background:`${trendBadge.color}22`,color:trendBadge.color,fontSize:10,fontWeight:800,borderRadius:6,padding:"2px 6px"}}>{trendBadge.icon} {form.trend>0?"+":""}{form.trend}</span>}
 </div>
@@ -7861,10 +8042,17 @@ async function save(){
 setSaving(true);
 const updated={...form};
 STAT_KEYS.forEach(k=>{updated[k]=parseFloat(form[k])||0;});
+// 2PT-velden (additief): veldtype, telt-mee vlag, kameleon-vlag en afgeleid 2PT%
+if(typeof updated.hasTwoPointLine!=="boolean")delete updated.hasTwoPointLine;
+updated.counts=!updated.exhibition;
+updated.isCameleon=updated.team==="chameleon";
+if(updated.hasTwoPointLine!==true){updated.twoPtMade=0;updated.twoPtAtt=0;}
+updated.twoPt=twoPtPctOf(updated.twoPtMade,updated.twoPtAtt);
 // If matchId exists, update shared fields on all games in same match
 if(game.matchId){
 const matchGames=allGames.filter(g=>g.matchId===game.matchId&&g.id!==game.id);
-await Promise.all(matchGames.map(g=>fbSave("games",{
+await Promise.all(matchGames.map(g=>{
+const ug={
 ...g,
 date:form.date,
 location:form.location||"",
@@ -7873,7 +8061,12 @@ teamBName:form.teamBName,
 teamAScore:form.teamAScore,
 teamBScore:form.teamBScore,
 exhibition:!!form.exhibition,
-})));
+counts:!form.exhibition,
+hasTwoPointLine:form.hasTwoPointLine,
+};
+if(typeof ug.hasTwoPointLine!=="boolean")delete ug.hasTwoPointLine;
+return fbSave("games",ug);
+}));
 }
 await onSave(updated);
 setSaving(false);
@@ -7916,11 +8109,12 @@ return(
 <div style={{color:GREY,fontSize:11}}>Uitgesloten van de maandstatistieken, blijft zichtbaar bij Performances en op spelersprofielen.</div>
 </div>
 </label>
+<CourtStateSelector value={form.hasTwoPointLine} onChange={v=>setF("hasTwoPointLine",v)}/>
 </div>
 {/* Stats */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>STATS</div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-{STAT_KEYS.map(k=>(
+{STAT_KEYS.filter(k=>form.hasTwoPointLine===true||!TWO_PT_KEYS.includes(k)).map(k=>(
 <div key={k}>
 <div style={{color:GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
 <input type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS}
@@ -7956,6 +8150,7 @@ const [tableSubStep,setTableSubStep]=useState("basic"); // binnen tabel-modus: "
 const [gameDate,setGameDate]=useState(new Date().toISOString().slice(0,10));
 const [location,setLocation]=useState("");
 const [exhibition,setExhibition]=useState(false); // "telt niet mee" — uitgesloten van de maandstatistieken
+const [hasTwoPointLine,setHasTwoPointLine]=useState(true); // 2-punt lijn op dit veld? uit = 2PT-velden verborgen en op 0
 const [tAN,setTAN]=useState("Team A"),[tBN,setTBN]=useState("Team B");
 const [teamA,setTeamA]=useState([]),[teamB,setTeamB]=useState([]),[chams,setChams]=useState([]);
 const [tAS,setTAS]=useState(""),[tBS,setTBS]=useState("");
@@ -8031,17 +8226,30 @@ const fta=deriveFga(cur.ftm,ft);
 return{...f,[pid]:{...cur,ft,fta,ftTier:tier}};
 });
 }
+// Live preview van wat er opgeslagen gaat worden → voedt de waarschuwingsbanner (alleen "Per speler"-modus, live blijft ongemoeid)
+const previewGames=all.map(pid=>{
+const sf=statForms[pid]||{};
+const g={playerId:pid,team:teamA.includes(pid)?"A":teamB.includes(pid)?"B":"chameleon",hasTwoPointLine:!!hasTwoPointLine};
+g.isCameleon=g.team==="chameleon";
+STAT_KEYS.forEach(k=>{g[k]=parseFloat(sf[k])||0;});
+if(!hasTwoPointLine){g.twoPtMade=0;g.twoPtAtt=0;}
+return g;
+});
+const logWarnings=inputMode==="classic"&&step==="stats"?validateLoggedMatch(previewGames,tAS,tBS,tAN,tBN,players):[];
 
 async function saveAll(){
 setSaving(true);
 const mid=Date.now().toString();
 const newGames=all.map((pid,i)=>{
 const sf=statForms[pid]||{};
-const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||"",commentaryHint:sf.commentaryHint||"",exhibition:!!exhibition};
+const g={id:`${mid}-${i}`,playerId:pid,date:gameDate,matchId:mid,teamAName:tAN,teamBName:tBN,teamAScore:tAS||"",teamBScore:tBS||"",location:location||"",commentaryHint:sf.commentaryHint||"",exhibition:!!exhibition,counts:!exhibition,hasTwoPointLine:!!hasTwoPointLine};
 if(teamA.includes(pid)){g.team="A";g.opponent=tBN;}
 else if(teamB.includes(pid)){g.team="B";g.opponent=tAN;}
 else{g.team="chameleon";g.opponent="";}
+g.isCameleon=g.team==="chameleon";
 STAT_KEYS.forEach(k=>{g[k]=parseFloat(sf[k])||0;});
+if(!hasTwoPointLine){g.twoPtMade=0;g.twoPtAtt=0;}
+g.twoPt=twoPtPctOf(g.twoPtMade,g.twoPtAtt);
 return g;
 });
 // Fire off ESPN-style AI commentary: per-player (where a hint was given or a milestone was hit)
@@ -8089,12 +8297,20 @@ return(
 <input type="date" style={{...IS,marginBottom:12}} value={gameDate} onChange={e=>setGameDate(e.target.value)}/>
 <input placeholder="📍 Locatie (optioneel, bijv. Sporthal Noord)" style={{...IS,marginBottom:12}} value={location} onChange={e=>setLocation(e.target.value)}/>
 <label style={{display:"flex",alignItems:"center",gap:8,background:exhibition?"#2a1f08":BG2,border:exhibition?"1px solid #f5a52466":"1px solid transparent",borderRadius:10,padding:"10px 12px",marginBottom:12,cursor:"pointer"}}>
-<input type="checkbox" checked={exhibition} onChange={e=>setExhibition(e.target.checked)} style={{width:18,height:18,flexShrink:0}}/>
+<input data-testid="game-counts-toggle" type="checkbox" checked={exhibition} onChange={e=>setExhibition(e.target.checked)} style={{width:18,height:18,flexShrink:0}}/>
 <div>
 <div style={{color:exhibition?"#f5a524":WHITE,fontWeight:700,fontSize:13}}>⚠️ Telt niet mee</div>
-<div style={{color:GREY,fontSize:11}}>Game blijft zichtbaar bij Performances en op spelersprofielen, maar telt niet mee voor de maandstatistieken.</div>
+<div style={{color:GREY,fontSize:11}}>Game blijft zichtbaar bij Performances en op spelersprofielen, maar telt niet mee voor de maandstatistieken en awards.</div>
 </div>
 </label>
+<div data-testid="court-two-pt-prompt" style={{background:"#111",borderRadius:10,padding:"10px 12px",marginBottom:12}}>
+<div style={{color:WHITE,fontWeight:700,fontSize:13,marginBottom:3}}>📏 Heeft dit veld een 2-punt lijn?</div>
+<div style={{color:GREY,fontSize:11,marginBottom:8,lineHeight:1.4}}>Mét lijn: schot achter de lijn = 2 punten (2PT-stat), binnen = 1, vrije worp = 1. Zonder lijn: elk veldschot = 1, vrije worp = 1. Kameleon (🦎) wordt raw gelogd en telt 0.5× mee in de teamscore.</div>
+<div style={{display:"flex",gap:6}}>
+<button data-testid="court-two-pt-yes" onClick={()=>setHasTwoPointLine(true)} style={{flex:1,padding:"9px 6px",borderRadius:8,border:"none",cursor:"pointer",background:hasTwoPointLine?"#f5a524":INPUTBG,color:hasTwoPointLine?"#000":GREY,fontWeight:700,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><CourtTypeIcon state="twopt" size={14} color={hasTwoPointLine?"#000":undefined}/>Ja, 2-punt lijn</button>
+<button data-testid="court-two-pt-no" onClick={()=>setHasTwoPointLine(false)} style={{flex:1,padding:"9px 6px",borderRadius:8,border:"none",cursor:"pointer",background:!hasTwoPointLine?RED:INPUTBG,color:!hasTwoPointLine?WHITE:GREY,fontWeight:700,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><CourtTypeIcon state="noline" size={14} color={!hasTwoPointLine?WHITE:undefined}/>Nee, geen lijn</button>
+</div>
+</div>
 <textarea placeholder="📺 Coach commentaar over de wedstrijd (optioneel) — AI maakt er een ESPN-stijl recap van" value={matchHint} onChange={e=>setMatchHint(e.target.value)} rows={2} style={{...IS,marginBottom:12,resize:"vertical",fontFamily:"inherit"}}/>
 {inputMode==="classic"?(
 <div style={{display:"grid",gridTemplateColumns:"1fr auto 1fr",gap:8,alignItems:"center",marginBottom:16}}>
@@ -8224,13 +8440,14 @@ return(
 </div>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-{STAT_KEYS.map(k=>(
+{STAT_KEYS.filter(k=>hasTwoPointLine||!TWO_PT_KEYS.includes(k)).map(k=>(
 <div key={k}>
-<div style={{color:GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
-<input type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>setStat(activeP,k,e.target.value)}/>
+<div style={{color:TWO_PT_KEYS.includes(k)?"#f5a524":GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}{k==="twoPtMade"?" (achter de lijn)":""}</div>
+<input data-testid={`classic-stat-${k}-${activeP}`} type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>setStat(activeP,k,e.target.value)}/>
 </div>
 ))}
 </div>
+{hasTwoPointLine&&(+sf.twoPtMade||0)>0&&<div style={{color:GREY,fontSize:10.5,marginTop:6}}>📏 {sf.twoPtMade}× 2PT = {(+sf.twoPtMade||0)*2} van de {sf.pts||0} pts · 2PT% {twoPtPctOf(sf.twoPtMade,sf.twoPtAtt)}%</div>}
 </div>
 );
 })()}
@@ -8294,9 +8511,18 @@ return(
 <textarea placeholder="bijv. domineerde onder de basket" value={(statForms[activeP||all[0]]||{}).commentaryHint||""} onChange={e=>setStat(activeP||all[0],"commentaryHint",e.target.value)} rows={2} style={{...IS,resize:"vertical",fontFamily:"inherit"}}/>
 
 {commStatus&&<div style={{color:RED,fontSize:12,textAlign:"center",marginTop:10}}>{commStatus}</div>}
+{inputMode==="classic"&&logWarnings.length>0&&(
+<div data-testid="log-warnings-banner" style={{marginTop:14,background:"#2a1f08",border:"1px solid #f5a52466",borderRadius:10,padding:"10px 12px"}}>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:12,marginBottom:6}}>⚠️ {logWarnings.length} controle{logWarnings.length!==1?"s":""} niet geslaagd — je kunt alsnog opslaan</div>
+{logWarnings.map((w,i)=><div key={i} data-testid={`log-warning-${i}`} style={{color:"#f3d9a4",fontSize:11.5,lineHeight:1.5}}>• {w}</div>)}
+</div>
+)}
+{inputMode==="classic"&&logWarnings.length===0&&all.some(pid=>Object.keys(statForms[pid]||{}).length>0)&&(
+<div data-testid="log-checks-ok" style={{marginTop:14,color:"#27AE60",fontSize:11.5,fontWeight:700,textAlign:"center"}}>✓ Alle controles geslaagd (made ≤ pogingen, punten vs schoten, teamscores, assists)</div>
+)}
 <div style={{display:"flex",gap:10,marginTop:14}}>
 <button onClick={()=>setStep("setup")} style={BG2}>← Terug</button>
-<button onClick={saveAll} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":"💾 Opslaan"}</button>
+<button data-testid="log-game-save-btn" onClick={saveAll} disabled={saving} style={{...BR,opacity:saving?0.6:1}}>{saving?"Opslaan...":inputMode==="classic"&&logWarnings.length>0?"⚠️ Toch opslaan":"💾 Opslaan"}</button>
 </div>
 </>
 )}
@@ -8308,7 +8534,7 @@ return(
 // ── Edit Full Match Modal (edit every player's stats for a full match at once, plus ESPN recap)
 function EditFullMatchModal({matchGames,players,onSave,onClose}){
 const s=matchGames[0]||{};
-const [shared,setShared]=useState({date:s.date||"",location:s.location||"",teamAName:s.teamAName||"Team A",teamBName:s.teamBName||"Team B",teamAScore:s.teamAScore||"",teamBScore:s.teamBScore||""});
+const [shared,setShared]=useState({date:s.date||"",location:s.location||"",teamAName:s.teamAName||"Team A",teamBName:s.teamBName||"Team B",teamAScore:s.teamAScore||"",teamBScore:s.teamBScore||"",hasTwoPointLine:s.hasTwoPointLine});
 const [statForms,setStatForms]=useState(()=>{
 const init={};
 matchGames.forEach(g=>{init[g.playerId]={...g};});
@@ -8341,6 +8567,11 @@ const updated=matchGames.map(g=>{
 const sf=statForms[g.playerId]||{};
 const ug={...g,...sf,...shared,matchCommentaryHint:matchHint,matchAiCommentary};
 STAT_KEYS.forEach(k=>{ug[k]=parseFloat(sf[k])||0;});
+if(typeof ug.hasTwoPointLine!=="boolean")delete ug.hasTwoPointLine;
+ug.counts=!ug.exhibition;
+ug.isCameleon=ug.team==="chameleon";
+if(ug.hasTwoPointLine!==true){ug.twoPtMade=0;ug.twoPtAtt=0;}
+ug.twoPt=twoPtPctOf(ug.twoPtMade,ug.twoPtAtt);
 return ug;
 });
 await onSave(updated);
@@ -8363,6 +8594,7 @@ return(
 <div style={{color:GREY,fontSize:18,fontWeight:700,paddingTop:16,textAlign:"center"}}>–</div>
 <div><input placeholder="Team B naam" style={{...IS,marginBottom:6}} value={shared.teamBName} onChange={e=>setSh("teamBName",e.target.value)}/><input type="text" inputMode="decimal" placeholder="0" style={IS} value={shared.teamBScore} onChange={e=>setSh("teamBScore",e.target.value)}/></div>
 </div>
+<CourtStateSelector value={shared.hasTwoPointLine} onChange={v=>setSh("hasTwoPointLine",v)}/>
 </div>
 {/* Per-player stats */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SPELERS</div>
@@ -8391,9 +8623,9 @@ return(
 <div><div style={{fontWeight:700,fontSize:15}}>{p?.name||"?"}</div><div style={{color:RED,fontSize:12}}>{team}</div></div>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-{STAT_KEYS.map(k=>(
+{STAT_KEYS.filter(k=>shared.hasTwoPointLine===true||!TWO_PT_KEYS.includes(k)).map(k=>(
 <div key={k}>
-<div style={{color:GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
+<div style={{color:TWO_PT_KEYS.includes(k)?"#f5a524":GREY,fontSize:11,marginBottom:3}}>{STAT_LABEL[k]}</div>
 <input type="number" min="-99" step={k==="fg"||k==="ts"?"0.1":"1"} placeholder="0" style={IS} value={sf[k]||""} onChange={e=>setStat(activeP,k,e.target.value)}/>
 </div>
 ))}
@@ -15856,7 +16088,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* STATS TAB */}
-{tab==="monthly"&&<MonthlyStats games={games.filter(g=>!g.exhibition)} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
+{tab==="monthly"&&<MonthlyStats games={games.filter(gameCounts)} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} onSaveFullMatch={saveGames} isAdmin={isAdmin}/>}

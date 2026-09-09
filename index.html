@@ -1351,6 +1351,20 @@ return(
 <div style={{color:GREY,fontSize:10}}>EFF</div>
 </div>
 </div>
+{((+game.ftm||0)>0||(+game.fta||0)>0)&&(
+<div data-testid="ft-stat-row" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:8}}>
+{[["ftm","FTM"],["fta","FTA"]].map(([k,l])=>(
+<div key={k} style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+<div style={{color:WHITE,fontWeight:800,fontSize:20}}>{game[k]||0}</div>
+<div style={{color:GREY,fontSize:10}}>{l}</div>
+</div>
+))}
+<div style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>
+<div style={{color:"#F1C40F",fontWeight:800,fontSize:20}}>{game.ft!=null?game.ft:twoPtPctOf(game.ftm,game.fta)}%</div>
+<div style={{color:GREY,fontSize:10}}>FT%</div>
+</div>
+</div>
+)}
 {(courtState(game)==="twopt"||(+game.twoPtAtt||0)>0||(+game.twoPtMade||0)>0)&&(
 <div data-testid="two-pt-stat-row" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:8}}>
 {[["twoPtMade","2PM"],["twoPtAtt","2PA"]].map(([k,l])=>(

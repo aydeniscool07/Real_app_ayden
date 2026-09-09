@@ -189,6 +189,17 @@ const maxMade=Math.max(0,...rows.map(r=>r.made));
 rows.forEach(r=>{r.score=parseFloat(((maxMade?r.made/maxMade:0)*0.7+(r.pct/100)*0.3).toFixed(4));});
 return rows.sort((a,b)=>b.score-a.score||b.made-a.made||b.pct-a.pct);
 }
+// Merchant Award: primair gerangschikt op FT makes, FT% als tiebreaker — bij een exacte gelijke stand (zelfde makes én zelfde %) winnen beide spelers
+function computeMerchantRanking(games,players){
+const byPid={};
+(games||[]).forEach(g=>{
+if(!g.playerId||!gameCounts(g))return;
+const t=byPid[g.playerId]||(byPid[g.playerId]={made:0,att:0,gp:0});
+t.made+=+g.ftm||0;t.att+=+g.fta||0;t.gp+=1;
+});
+const rows=Object.entries(byPid).filter(([pid,t])=>t.made>0&&players.find(p=>p.id===pid)).map(([pid,t])=>({pid,made:t.made,att:Math.max(t.att,t.made),gp:t.gp,pct:twoPtPctOf(t.made,t.att)}));
+return rows.sort((a,b)=>b.made-a.made||b.pct-a.pct);
+}
 // Team-reconciliatie: kameleon wordt raw gelogd maar telt 0.5× mee (zweeft over beide teams)
 function effectivePts(g){const p=+g.pts||0;return isCameleonGame(g)?p*0.5:p;}
 // Gemaakte veldschoten afgeleid uit punten: elk punt = 1 schot, behalve 2PT (2 pts/schot) en vrije worpen (1 pt, geen veldschot)
@@ -1871,6 +1882,20 @@ return(
 );
 }
 
+// Merchant Award — muntstuk (coin) met dollarteken, voor de vrije worp "handelaar"
+function MerchantIcon({size=28,color="#F1C40F",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="50" cy="46" r="34" fill={c}/>
+<circle cx="50" cy="46" r="34" fill="none" stroke="rgba(0,0,0,0.2)" strokeWidth="3"/>
+<circle cx="50" cy="46" r="25" fill="none" stroke="rgba(0,0,0,0.15)" strokeWidth="2" strokeDasharray="3 3"/>
+<path d="M50 28 L50 64 M42 34 C42 30 46 28 50 28 C56 28 60 31 60 35 C60 39 56 41 50 42 C44 43 40 45 40 49 C40 53 44 56 50 56 C54 56 58 54 58 50" fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth="5" strokeLinecap="round"/>
+<path d="M14 92 C30 80 70 80 86 92" stroke={c} strokeWidth="3" fill="none" strokeDasharray="4 3" opacity="0.7"/>
+</svg>
+);
+}
+
 // Award type definitions — NBA-style per maand uitreiken
 const AWARD_TYPES=[
 {id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
@@ -1881,6 +1906,7 @@ const AWARD_TYPES=[
 {id:"rebounds",     label:"Rebounds Title",            color:"#E67E22", Icon:ReboundsIcon, desc:"Meeste rebounds gem."},
 {id:"assists",      label:"Assists Title",             color:"#3498DB", Icon:AssistsIcon,  desc:"Meeste assists gem."},
 {id:"sniper",       label:"Sniper Award",              color:"#1ABC9C", Icon:SniperIcon,   desc:"Beste 2-punt schutter"},
+{id:"merchant",     label:"Merchant Award",            color:"#F1C40F", Icon:MerchantIcon, desc:"Beste vrije worp schutter", multi:true, maxPick:8},
 {id:"clutch",       label:"Clutch Player vd Maand",    color:"#E8312A", Icon:ClutchIcon,   desc:"Beste in de slotfase"},
 {id:"alllba1",      label:"All-LBA 1e Team",           color:"#f5a524", Icon:AllLBA1Icon,  desc:"Eerste team selectie", multi:true, maxPick:2},
 {id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
@@ -2486,6 +2512,14 @@ const ranked=computeSniperRanking(periodGames,players);
 if(!ranked.length)return null;
 const r=ranked[0],ru=ranked[1];
 return{ids:[r.pid],reason:`${r.made}/${r.att} 2PT (${r.pct}%) · snipe-score ${r.score.toFixed(2)}`,gap:ru?+(r.score-ru.score).toFixed(2):null,runnerUpId:ru?ru.pid:null};
+}
+case"merchant":{
+const ranked=computeMerchantRanking(periodGames,players);
+if(!ranked.length)return null;
+const top=ranked[0];
+const winners=ranked.filter(r=>r.made===top.made&&r.pct===top.pct);
+const ru=ranked.find(r=>!(r.made===top.made&&r.pct===top.pct));
+return{ids:winners.map(r=>r.pid),reason:`${top.made}/${top.att} FT (${top.pct}%)${winners.length>1?" · gedeeld":""}`,gap:ru?top.made-ru.made:null,runnerUpId:ru?ru.pid:null};
 }
 case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`,...withGap("dpg",r)};}
 case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`,...withGap("cham",r,0)};}

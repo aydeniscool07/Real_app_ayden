@@ -1030,8 +1030,8 @@ window.addEventListener("firebaseReady",()=>{clearInterval(interval);r();},{once
 async function fbSave(col,obj){await waitForFirebase();await window._setDoc(window._doc(window._db,col,obj.id),obj);}
 async function fbDel(col,id){await waitForFirebase();await window._deleteDoc(window._doc(window._db,col,id));}
 function calcFps(g){
-const p=+g.pts||0,r=+g.reb||0,a=+g.ast||0,s=+g.stl||0,b=+g.blk||0,t=+g.to||0,fg=+g.fg||0;
-return Math.max(0,p*1.2+r*1.1+a*1.5+s*2+b*2-t*1.5+(fg>40?(fg-40)*0.1:0)).toFixed(1);
+const p=+g.pts||0,r=+g.reb||0,a=+g.ast||0,s=+g.stl||0,b=+g.blk||0,t=+g.to||0,fg=+g.fg||0,tw=+g.twoPtMade||0;
+return Math.max(0,p*1.2+r*1.1+a*1.5+s*2+b*2+tw*2-t*1.5+(fg>40?(fg-40)*0.1:0)).toFixed(1);
 }
 // ── ESPN-style AI commentary helpers
 async function callGroqAI(prompt,maxTokens=400,temperature=0.85){
@@ -2262,7 +2262,7 @@ const prompt=`You are a basketball analyst. A player in a casual friend group ba
 Name: ${player.name}
 Games: ${pg.length}
 PPG: ${ppg}, RPG: ${rpg}, APG: ${apg}, SPG: ${spg}, BPG: ${bpg}, TOV: ${topg}, FG%: ${fgp}, 3PT: ${threep}
-Efficiency score: ${eff} (formula: pts*1.2+reb*1.1+ast*1.5+stl*2+blk*2-to*1.5)
+Efficiency score: ${eff} (formula: pts*1.2+reb*1.1+ast*1.5+stl*2+blk*2+twoPtMade*2-to*1.5)
 Position: ${player.position||"unknown"}
 
 Scale-adjust for the smaller game format (games to 10 pts = roughly 3-4x smaller numbers than NBA).
@@ -3388,6 +3388,7 @@ const [manageSeasons,setManageSeasons]=useState(false);
 const [seasonForm,setSeasonForm]=useState({name:"",startDate:"",endDate:""});
 const [cardFor,setCardFor]=useState(null); // player object or null
 const [expandedPlayerId,setExpandedPlayerId]=useState(null); // Eff Lab: welke speler-kaart is uitgeklapt
+const [expandedSniperId,setExpandedSniperId]=useState(null); // 2PT Lab: welke speler-kaart is uitgeklapt
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
 const [expandedClutchId,setExpandedClutchId]=useState(null); // Clutch Lab: welke speler-kaart is uitgeklapt
 const [expandedRecord,setExpandedRecord]=useState(null); // Records: welk record-kaartje is uitgeklapt
@@ -3470,6 +3471,25 @@ const rows=playerStats.map(ps=>({player:ps.player,...twoPtTotals(ps.games)})).fi
 if(!rows.length)return null;
 return rows.sort((a,b)=>b.pct-a.pct||b.made-a.made)[0];
 },[playerStats]);
+// 2PT Lab — alle spelers met ≥1 2PT-make op een 2-punt-lijn veld deze periode, incl. per-game breakdown.
+// Zelfde snipeScore-formule als de Sniper Award: volume (2PM t.o.v. de meeste 2PM) weegt 0.7×, % weegt 0.3×.
+const sniperRows=useMemo(()=>{
+const byPid={};
+monthGames.forEach(g=>{
+if(!g.playerId||!gameCounts(g)||courtState(g)!=="twopt")return;
+const t=byPid[g.playerId]||(byPid[g.playerId]={made:0,att:0,games:[]});
+t.made+=+g.twoPtMade||0;t.att+=+g.twoPtAtt||0;t.games.push(g);
+});
+const rows=Object.entries(byPid).map(([pid,t])=>{
+const player=players.find(p=>p.id===pid);
+if(!player||t.made<=0)return null;
+return{player,made:t.made,att:t.att,pct:twoPtPctOf(t.made,t.att),games:t.games,gp:t.games.length};
+}).filter(Boolean);
+const maxMade=Math.max(0,...rows.map(r=>r.made));
+rows.forEach(r=>{r.score=parseFloat(((maxMade?r.made/maxMade:0)*0.7+(r.pct/100)*0.3).toFixed(4));});
+return rows.sort((a,b)=>b.score-a.score||b.made-a.made||b.pct-a.pct);
+},[monthGames,players]);
+const maxSniperScore=Math.max(0.0001,...sniperRows.map(r=>r.score));
 
 // Biggest riser/faller: compares each player's eff this calendar month to last calendar month
 // (only meaningful in month view — season/all-time have no single "previous period" to compare to).
@@ -4172,7 +4192,7 @@ return(
             const leaderEffSum = leader.games.reduce((s,g)=>s+(+calcFps(g)),0);
             const leaderN = leader.games.length;
 
-            // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 - to*1.5
+            // eff = pts*1.2 + reb*1.1 + ast*1.5 + stl*2 + blk*2 + twoPtMade*2 - to*1.5
             // Given a target eff and a player's current per-game baselines, work out a few
             // realistic "paths" to get there: lean on scoring, lean on playmaking, lean on
             // boards, or just scale everything up proportionally (all-around).
@@ -4430,6 +4450,7 @@ const statWeights=[
 {key:"ast",label:"AST",weight:1.5,color:"#27AE60",emoji:"🎯"},
 {key:"stl",label:"STL",weight:2.0,color:"#f5a524",emoji:"🤏"},
 {key:"blk",label:"BLK",weight:2.0,color:"#9B59B6",emoji:"✋"},
+{key:"twoPtMade",label:"2PM",weight:2.0,color:"#f5a524",emoji:"📏"},
 {key:"to", label:"TO", weight:-1.5,color:"#ff6b6b",emoji:"💸"},
 ];
 
@@ -4565,7 +4586,7 @@ return(
 <div style={{marginTop:28}}>
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>EFF LAB — {monthLabel.toUpperCase()}</div>
 <div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>
-Formule: <span style={{color:WHITE,fontWeight:700}}>PTS×1.2 + REB×1.1 + AST×1.5 + STL×2 + BLK×2 − TO×1.5</span> + FG% bonus boven 40%
+Formule: <span style={{color:WHITE,fontWeight:700}}>PTS×1.2 + REB×1.1 + AST×1.5 + STL×2 + BLK×2 + 2PM×2 − TO×1.5</span> + FG% bonus boven 40%
 </div>
 
 {/* Weight cards */}
@@ -4653,6 +4674,58 @@ return(
 );
 })}
 </div>
+
+{/* 2PT Lab */}
+{sniperRows.length>0&&(
+<div style={{marginTop:8,marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>🎯 2PT LAB — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>
+Sniper-score: <span style={{color:WHITE,fontWeight:700}}>(2PM ÷ meeste 2PM) × 0.7 + 2PT% × 0.3</span> — volume weegt het zwaarst. Alleen games op een veld mét 2-punt lijn tellen mee.
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{sniperRows.filter(r=>searchMatch(r.player.name)).map((r,i)=>{
+const isOpen=expandedSniperId===r.player.id;
+const barPct=Math.round((r.score/maxSniperScore)*100);
+const sortedGames=[...r.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+return(
+<div key={r.player.id} data-testid={`twoptlab-player-card-${r.player.id}`} onClick={()=>setExpandedSniperId(isOpen?null:r.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?"1px solid #f5a52455":"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<div style={{width:22,height:22,borderRadius:"50%",background:i===0?"#f5a524":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0,color:i===0?"#1a1a1a":WHITE}}>{i+1}</div>
+<Avatar player={r.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{r.gp}G op 2-punt lijn</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:"#f5a524",fontWeight:800,fontSize:18}}>{r.pct}%</div>
+<div style={{color:GREY,fontSize:10}}>{r.made}/{r.att}</div>
+</div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+<div style={{height:8,background:"#222",borderRadius:4,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${barPct}%`,background:`linear-gradient(90deg,${i===0?"#f5a524":"#444"},${i===0?"#ffcf6b":"#666"})`,borderRadius:4,transition:"width .4s ease"}}/>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+<div style={{display:"grid",gridTemplateColumns:"1fr 40px 40px 50px",gap:4,fontSize:9,color:GREY,fontWeight:700,padding:"0 4px"}}>
+<div>DATUM</div><div style={{textAlign:"center"}}>2PM</div><div style={{textAlign:"center"}}>2PA</div><div style={{textAlign:"right"}}>2PT%</div>
+</div>
+{sortedGames.map((g,gi)=>(
+<div key={gi} style={{display:"grid",gridTemplateColumns:"1fr 40px 40px 50px",gap:4,fontSize:11,padding:"5px 4px",background:gi%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:6,alignItems:"center"}}>
+<div style={{color:WHITE}}>{g.date?.slice(5)||"—"}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.twoPtMade||0}</div>
+<div style={{textAlign:"center",color:GREY}}>{g.twoPtAtt||0}</div>
+<div style={{textAlign:"right",color:"#f5a524",fontWeight:800}}>{g.twoPt!=null?g.twoPt:twoPtPctOf(g.twoPtMade,g.twoPtAtt)}%</div>
+</div>
+))}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</div>
+)}
 
 {/* Clutch Lab */}
 {clutchLeader&&clutchLeader.board&&clutchLeader.board.length>0&&(

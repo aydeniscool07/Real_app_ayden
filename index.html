@@ -1327,11 +1327,10 @@ return(
 
 function FullStatGrid({game}){
 const rows=[["min","pts","reb","ast","stl","blk"],["threept","fg","to","pf","oreb","dreb"]];
-const hasFt=(+game.ftm||0)>0||(+game.fta||0)>0;
 return(
 <div>
 {rows.map((row,ri)=>(
-<div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",borderBottom:(ri===0||(ri===1&&hasFt))?`1px solid ${DIVIDER}`:"none",paddingBottom:(ri===0||(ri===1&&hasFt))?10:0,paddingTop:ri===0?0:10}}>
+<div key={ri} style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",borderBottom:`1px solid ${DIVIDER}`,paddingBottom:10,paddingTop:ri===0?0:10}}>
 {row.map(k=>(
 <div key={k} style={{textAlign:"center"}}>
 <div style={{color:(k==="blk"||k==="stl")&&(+game[k]||0)>0?RED:WHITE,fontWeight:700,fontSize:17}}>{game[k]||0}</div>
@@ -1340,10 +1339,9 @@ return(
 ))}
 </div>
 ))}
-{hasFt&&(
 <div data-testid="ft-stat-row" style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",paddingTop:10}}>
 {[["ftm","FTM"],["fta","FTA"],["ft","FT%"]].map(([k,l])=>{
-const val=k==="ft"?(game.ft!=null?game.ft:twoPtPctOf(game.ftm,game.fta)):(game[k]||0);
+const val=k==="ft"?(game.fta?twoPtPctOf(game.ftm,game.fta):(game.ft||0)):(game[k]||0);
 return(
 <div key={k} style={{textAlign:"center"}}>
 <div style={{color:WHITE,fontWeight:700,fontSize:17}}>{val}{k==="ft"?"%":""}</div>
@@ -1352,7 +1350,6 @@ return(
 );
 })}
 </div>
-)}
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
 {["ts","plusminus"].map(k=>(
 <div key={k} style={{background:INPUTBG,borderRadius:10,padding:"10px",textAlign:"center"}}>

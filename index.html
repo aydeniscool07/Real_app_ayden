@@ -8361,7 +8361,7 @@ function setStat(pid,k,v){
 setStatForms(f=>{
 const cur=f[pid]||{};
 const next={...cur,[k]:v};
-if(k==="pts"&&cur.fg)next.fga=deriveFga(v,cur.fg);
+if(k==="pts"&&cur.fga)next.fg=twoPtPctOf(v,cur.fga); // FGA al bekend (rechtstreeks ingevuld of eerder afgeleid) → FG% direct herberekenen
 return{...f,[pid]:next};
 });
 }
@@ -8371,8 +8371,16 @@ const cur=f[pid]||{};
 const curVal=parseFloat(cur[k])||0;
 const nextVal=Math.max(0,curVal+delta);
 const next={...cur,[k]:nextVal};
-if(k==="pts"&&cur.fg)next.fga=deriveFga(nextVal,cur.fg);
+if(k==="pts"&&cur.fga)next.fg=twoPtPctOf(nextVal,cur.fga);
 return{...f,[pid]:next};
+});
+}
+// Rechtstreeks schoten invullen (nieuw): FGA/FTA/2PA intypen berekent het percentage meteen uit gemaakt/gepoogd —
+// de kwaliteitsknoppen hieronder blijven het alternatief (percentage verzinnen → pogingen terugrekenen).
+function setFga(pid,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+return{...f,[pid]:{...cur,fga:v,fg:twoPtPctOf(cur.pts,v)}};
 });
 }
 // Achteraf weet je zelden het exacte FG%/TS% nog — vraag gewoon hoe die persoon schoot en verzin er een realistisch
@@ -8400,8 +8408,14 @@ function setFtm(pid,v){
 setStatForms(f=>{
 const cur=f[pid]||{};
 const next={...cur,ftm:v};
-if(cur.ft)next.fta=deriveFga(v,cur.ft);
+if(cur.fta)next.ft=twoPtPctOf(v,cur.fta);
 return{...f,[pid]:next};
+});
+}
+function setFta(pid,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+return{...f,[pid]:{...cur,fta:v,ft:twoPtPctOf(cur.ftm,v)}};
 });
 }
 function rollFtNight(pid,tier){
@@ -8420,8 +8434,14 @@ function setTwoPtMade(pid,v){
 setStatForms(f=>{
 const cur=f[pid]||{};
 const next={...cur,twoPtMade:v};
-if(cur.twoPt)next.twoPtAtt=deriveFga(v,cur.twoPt);
+if(cur.twoPtAtt)next.twoPt=twoPtPctOf(v,cur.twoPtAtt);
 return{...f,[pid]:next};
+});
+}
+function setTwoPtAtt(pid,v){
+setStatForms(f=>{
+const cur=f[pid]||{};
+return{...f,[pid]:{...cur,twoPtAtt:v,twoPt:twoPtPctOf(cur.twoPtMade,v)}};
 });
 }
 function rollTwoPtNight(pid,tier){
@@ -8664,6 +8684,7 @@ return(
 {/* Shotkwaliteit: i.p.v. FG%/TS% zelf te moeten uitrekenen, kies gewoon hoe iemand schoot en er wordt een realistisch percentage bij verzonnen. */}
 <div style={{marginTop:14}}>
 <div style={{color:GREY,fontSize:11,marginBottom:6}}>🎯 Shotkwaliteit (i.p.v. FG%/TS% uitrekenen)</div>
+<div style={{color:GREY,fontSize:10,marginBottom:6}}>Vul "FGA" (schoten) rechtstreeks in voor een exact FG% — of kies gewoon een kwaliteitsknop en laat het percentage verzinnen.</div>
 <div style={{display:"flex",flexDirection:"column",gap:6}}>
 {all.map(pid=>{
 const p=players.find(x=>x.id===pid);const sf=statForms[pid]||{};
@@ -8674,6 +8695,7 @@ return(
 <Avatar player={p} size={20}/>
 <span style={{fontSize:11,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</span>
 </div>
+<input data-testid={`fga-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="FGA" value={sf.fga||""} onChange={e=>setFga(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
 <div style={{display:"flex",gap:4,flex:1}}>
 {tiers.map(([tier,emoji,lbl])=>(
 <button key={tier} data-testid={`shot-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollShootingNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.shootingTier===tier?`1px solid ${RED}`:"1px solid transparent",background:sf.shootingTier===tier?`${RED}22`:INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
@@ -8700,6 +8722,7 @@ return(
 <span style={{fontSize:11,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</span>
 </div>
 <input data-testid={`ftm-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="FTM" value={sf.ftm||""} onChange={e=>setFtm(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
+<input data-testid={`fta-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="FTA" value={sf.fta||""} onChange={e=>setFta(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
 <div style={{display:"flex",gap:4,flex:1}}>
 {tiers.map(([tier,emoji,lbl])=>(
 <button key={tier} data-testid={`ft-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollFtNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.ftTier===tier?`1px solid ${RED}`:"1px solid transparent",background:sf.ftTier===tier?`${RED}22`:INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
@@ -8710,7 +8733,7 @@ return(
 );
 })}
 </div>
-<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul eerst "FTM" (gemaakte vrije worpen) in, dan een kwaliteitsknop — die tellen al mee in de punten hierboven.</div>
+<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul "FTM" (gemaakt) én "FTA" (gepoogd) in voor een exact FT% — of alleen FTM plus een kwaliteitsknop om FTA te laten verzinnen.</div>
 </div>
 
 {/* 2-punters: alleen op een veld mét 2-punt lijn. Zelfde principe als FT — 2PM invullen, kwaliteitsknop verzint 2PT% en leidt 2PA af. */}
@@ -8728,6 +8751,7 @@ return(
 <span style={{fontSize:11,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p?.name?.split(" ")[0]}</span>
 </div>
 <input data-testid={`twopt-made-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="2PM" value={sf.twoPtMade||""} onChange={e=>setTwoPtMade(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
+<input data-testid={`twopt-att-input-${pid}`} type="number" min="0" inputMode="numeric" placeholder="2PA" value={sf.twoPtAtt||""} onChange={e=>setTwoPtAtt(pid,e.target.value)} style={{width:38,textAlign:"center",background:INPUTBG,color:WHITE,border:"none",borderRadius:6,padding:"5px 2px",fontSize:12,flexShrink:0}}/>
 <div style={{display:"flex",gap:4,flex:1}}>
 {tiers.map(([tier,emoji,lbl])=>(
 <button key={tier} data-testid={`twopt-tier-${pid}-${tier}`} title={lbl} onClick={()=>rollTwoPtNight(pid,tier)} style={{flex:1,padding:"6px 2px",borderRadius:7,border:sf.twoPtTier===tier?`1px solid #f5a524`:"1px solid transparent",background:sf.twoPtTier===tier?"#f5a52422":INPUTBG,cursor:"pointer",fontSize:14}}>{emoji}</button>
@@ -8738,7 +8762,7 @@ return(
 );
 })}
 </div>
-<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul eerst "2PM" (gemaakte 2-punters) in, dan een kwaliteitsknop — elke 2-punter telt voor 2 in de punten hierboven.</div>
+<div style={{color:GREY,fontSize:10,marginTop:4}}>Vul "2PM" (gemaakt) én "2PA" (gepoogd) in voor een exact 2PT% — of alleen 2PM plus een kwaliteitsknop om 2PA te laten verzinnen.</div>
 </div>
 )}
 

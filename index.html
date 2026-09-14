@@ -8444,6 +8444,22 @@ const cur=f[pid]||{};
 return{...f,[pid]:{...cur,twoPtAtt:v,twoPt:twoPtPctOf(cur.twoPtMade,v)}};
 });
 }
+// Expliciete "Bereken %" knop — herberekent FG%/FT%/2PT% voor iedereen uit wat er al in de gemaakt/gepoogd
+// velden staat. Vangt af als het live (tijdens typen) bijwerken een keer niet aansloeg.
+function recalcAllPercentages(){
+setStatForms(f=>{
+const next={...f};
+all.forEach(pid=>{
+const cur=next[pid]||{};
+const patched={...cur};
+if(cur.fga)patched.fg=twoPtPctOf(cur.pts,cur.fga);
+if(cur.fta)patched.ft=twoPtPctOf(cur.ftm,cur.fta);
+if(cur.twoPtAtt)patched.twoPt=twoPtPctOf(cur.twoPtMade,cur.twoPtAtt);
+next[pid]=patched;
+});
+return next;
+});
+}
 function rollTwoPtNight(pid,tier){
 const ranges={fire:[55,70],good:[42,55],mid:[30,42],bad:[10,30]};
 const r=ranges[tier];
@@ -8765,6 +8781,8 @@ return(
 <div style={{color:GREY,fontSize:10,marginTop:4}}>Vul "2PM" (gemaakt) én "2PA" (gepoogd) in voor een exact 2PT% — of alleen 2PM plus een kwaliteitsknop om 2PA te laten verzinnen.</div>
 </div>
 )}
+
+<button data-testid="recalc-pct-btn" onClick={recalcAllPercentages} style={{width:"100%",marginTop:6,background:INPUTBG,color:WHITE,border:`1px solid ${DIVIDER}`,borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>🧮 FG%/FT%/2PT% berekenen</button>
 
 {/* Coach commentaar geldt voor de actieve speler in klassieke modus, of de eerste speler in live-modus (optioneel bijschrift) */}
 <div style={{color:GREY,fontSize:11,marginBottom:3,marginTop:10}}>📺 Coach commentaar (optioneel)</div>

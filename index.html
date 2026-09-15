@@ -59,7 +59,7 @@ window._firebaseReady=true;
 setTimeout(()=>window.dispatchEvent(new Event("firebaseReady")),0);
 </script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Oswald:wght@400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:#000;color:#fff;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;overscroll-behavior:none}
 input,select,button{font-family:inherit}
@@ -72,6 +72,11 @@ input[type="file"]{display:none}
 @keyframes careerPopIn{0%{transform:scale(0.4);opacity:0}60%{transform:scale(1.15);opacity:1}100%{transform:scale(1)}}
 .confetti-piece{position:absolute;top:-10px;will-change:transform,opacity;animation:confettiFall linear forwards}
 @keyframes confettiFall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(420px) rotate(720deg);opacity:0}}
+.career-display{font-family:'Oswald','Inter',sans-serif;letter-spacing:.5px}
+.career-gold-text{background:linear-gradient(180deg,#ffe9a8 0%,#f5c518 35%,#c9941a 70%,#8a6412 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 1px 0 rgba(0,0,0,.6))}
+.career-gold-ring{box-shadow:0 0 0 1px rgba(245,197,24,.35),0 0 18px -4px rgba(245,197,24,.55),inset 0 1px 0 rgba(255,255,255,.08)}
+@keyframes careerSheen{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.career-sheen{background:linear-gradient(120deg,transparent 30%,rgba(245,197,24,.16) 50%,transparent 70%);background-size:200% 100%;animation:careerSheen 3.2s ease-in-out infinite}
 </style>
 <style>
 /* Boot-error fallback (shown if React fails to mount) */
@@ -157,6 +162,8 @@ window.__showBootFallback = showFallback;
 const {useState,useEffect,useRef,useMemo}=React;
 
 const RED="#E8312A",WHITE="#fff",GREY="#8E8E93",DARKGREY="#3A3A3C",BG="#000",DIVIDER="#1C1C1E",INPUTBG="#1C1C1E";
+// ── Career Sim "cinematic broadcast" palette — used only inside the career-sim components (Career*, DecisionCard, TeamOfferCard).
+const CGOLD="#f5c518",CGOLD_DIM="#8a6412",CGOLD_SOFT="#f5c51833",CCARD_BG="linear-gradient(155deg,#1a1010 0%,#120a0a 60%,#0a0606 100%)",CCARD_BORDER="1px solid #3a1414",CGLOW="0 0 0 1px rgba(245,197,24,.14), 0 6px 20px -8px rgba(0,0,0,.7)";
 const STAT_KEYS=["pts","reb","ast","stl","blk","to","fga","fg","ftm","fta","ft","twoPtMade","twoPtAtt","twoPt","threept","min","pf","oreb","dreb","ts","plusminus"];
 const STAT_LABEL={pts:"PTS",reb:"REB",ast:"AST",stl:"STL",blk:"BLK",to:"TO",fga:"FGA",fg:"FG%",ftm:"FTM",fta:"FTA",ft:"FT%",twoPtMade:"2PM",twoPtAtt:"2PA",twoPt:"2PT%",threept:"3FG",min:"MIN",pf:"PF",oreb:"OREB",dreb:"DREB",ts:"TS%",plusminus:"+/-"};
 const STAT_SMALL={pts:"pts",reb:"reb",ast:"ast",stl:"stl",blk:"blk",to:"to",fg:"% fg",twoPtMade:"2pm",twoPt:"% 2pt",threept:"3pm",min:"min",pf:"pf",oreb:"oreb",dreb:"dreb",ts:"ts%",plusminus:"+/-"};
@@ -11036,6 +11043,51 @@ const NBA_TEAMS_STATIC=[
 {name:"Atlanta Hawks",abbr:"ATL",conf:"East"},{name:"Boston Celtics",abbr:"BOS",conf:"East"},{name:"Brooklyn Nets",abbr:"BKN",conf:"East"},{name:"Charlotte Hornets",abbr:"CHA",conf:"East"},{name:"Chicago Bulls",abbr:"CHI",conf:"East"},{name:"Cleveland Cavaliers",abbr:"CLE",conf:"East"},{name:"Detroit Pistons",abbr:"DET",conf:"East"},{name:"Indiana Pacers",abbr:"IND",conf:"East"},{name:"Miami Heat",abbr:"MIA",conf:"East"},{name:"Milwaukee Bucks",abbr:"MIL",conf:"East"},{name:"New York Knicks",abbr:"NYK",conf:"East"},{name:"Orlando Magic",abbr:"ORL",conf:"East"},{name:"Philadelphia 76ers",abbr:"PHI",conf:"East"},{name:"Toronto Raptors",abbr:"TOR",conf:"East"},{name:"Washington Wizards",abbr:"WAS",conf:"East"},
 {name:"Dallas Mavericks",abbr:"DAL",conf:"West"},{name:"Denver Nuggets",abbr:"DEN",conf:"West"},{name:"Golden State Warriors",abbr:"GSW",conf:"West"},{name:"Houston Rockets",abbr:"HOU",conf:"West"},{name:"LA Clippers",abbr:"LAC",conf:"West"},{name:"Los Angeles Lakers",abbr:"LAL",conf:"West"},{name:"Memphis Grizzlies",abbr:"MEM",conf:"West"},{name:"Minnesota Timberwolves",abbr:"MIN",conf:"West"},{name:"New Orleans Pelicans",abbr:"NOP",conf:"West"},{name:"Oklahoma City Thunder",abbr:"OKC",conf:"West"},{name:"Phoenix Suns",abbr:"PHX",conf:"West"},{name:"Portland Trail Blazers",abbr:"POR",conf:"West"},{name:"Sacramento Kings",abbr:"SAC",conf:"West"},{name:"San Antonio Spurs",abbr:"SAS",conf:"West"},{name:"Utah Jazz",abbr:"UTA",conf:"West"},
 ];
+// ── Each team's real color pair (public factual data, not copyrighted) — powers the TeamBadge monogram below.
+const TEAM_COLORS={
+ATL:["#E03A3E","#26282A"],BOS:["#007A33","#BA9653"],BKN:["#333333","#000000"],CHA:["#1D1160","#00788C"],CHI:["#CE1141","#000000"],
+CLE:["#860038","#FDBB30"],DET:["#C8102E","#1D42BA"],IND:["#002D62","#FDBB30"],MIA:["#98002E","#F9A01B"],MIL:["#00471B","#EEE1C6"],
+NYK:["#006BB6","#F58426"],ORL:["#0077C0","#C4CED4"],PHI:["#006BB6","#ED174C"],TOR:["#CE1141","#000000"],WAS:["#002B5C","#E31837"],
+DAL:["#00538C","#002B5E"],DEN:["#0E2240","#FEC524"],GSW:["#1D428A","#FFC72C"],HOU:["#CE1141","#000000"],LAC:["#C8102E","#1D428A"],
+LAL:["#552583","#FDB927"],MEM:["#5D76A9","#12173F"],MIN:["#0C2340","#236192"],NOP:["#0C2340","#C8102E"],OKC:["#007AC1","#EF3B24"],
+PHX:["#1D1160","#E56020"],POR:["#E03A3E","#000000"],SAC:["#5A2D81","#63727A"],SAS:["#C4CED4","#000000"],UTA:["#002B5C","#F9A01B"],
+};
+// ── Optional real logo images, keyed by team abbreviation. Leave commented out to use the color-badge fallback in TeamBadge.
+// To add your own logos: host each PNG somewhere reachable by the browser (e.g. Firebase Storage, imgur, your own site —
+// this is a client-only static file so it can't read local disk paths), then uncomment the matching line below and paste the URL in.
+// Any team left commented out (or missing) automatically falls back to the color-badge monogram.
+const TEAM_LOGOS={
+ATL:"https://imgur.com/gallery/atlanta-hawks-T6YkV5Q#hyBYbyH",
+BOS:"https://imgur.com/gallery/boston-celtics-logo-vXz7QiR#NteU0zN",
+BKN:"https://imgur.com/gallery/brooklyn-nets-Yo6jvba#7p23DMv",
+CHA:"https://imgur.com/gallery/charlotte-hornets-cdGODJl#cuyjr5t",
+CHI:"https://imgur.com/gallery/chicago-bulls-FBziBdv#TGeRko0",
+CLE:"https://imgur.com/gallery/cleveland-cavaliers-DiNbQ0d#ipaBmO3",
+DET:"https://imgur.com/gallery/detroit-pistons-WFsS7lt#LKWRkJl",
+IND:"https://imgur.com/gallery/indiana-pacers-5XpYdwM#ZPbK3xx",
+MIA:"https://imgur.com/gallery/miami-heat-DGVrUYD#kh6WicF",
+MIL:"https://imgur.com/gallery/milwaukee-bucks-just-ripped-off-jagermeister-MK5EhrX",
+NYK:"https://imgur.com/gallery/new-york-knicks-CW6PyBH#9quYaJk",
+ORL:"https://imgur.com/gallery/orlando-magic-sticks-ZOgsl#TEoJiLT",
+PHI:"https://imgur.com/gallery/philadelphia-69ers-VJ9zAxd#aiycPSF",
+TOR:"https://imgur.com/gallery/redesigned-toronto-raptors-logo-with-more-accurate-velociraptor-wwSc2c2#wf6vbpB",
+// WAS:"",
+DAL:"https://imgur.com/gallery/dallas-mavericks-F1fieOw#M7sdYi8",
+DEN:"https://imgur.com/gallery/denver-nuggets-01hL8nS#ceBax03",
+GSW:"https://imgur.com/gallery/golden-state-warriors-logo-awuqhVb#If7tbl6",
+HOU:"https://imgur.com/gallery/houston-rockets-logo-concepts-v2-sfe5z87#NrpHvgg",
+LAC:"https://imgur.com/gallery/la-clippers-logo-GkDRxOW#ymqa1VW",
+LAL:"https://imgur.com/gallery/lakers-2zWOI8L#7b3AHLj",
+// MEM:"https://your-host/mem.png",
+MIN:"https://imgur.com/gallery/crying-jordan-minnesota-CnPClPA#4RaOwtk",
+// NOP:"https://your-host/nop.png",
+OKC:"https://imgur.com/gallery/oklahoma-city-thunder-L4UZPCF",
+// PHX:"https://your-host/phx.png",
+POR:"https://imgur.com/gallery/portland-trailblazers-qMpz91P",
+// SAC:"https://your-host/sac.png",
+// SAS:"https://your-host/sas.png",
+// UTA:"https://your-host/uta.png",
+};
 // Random season "vorm" events — nudge a season's rating up or down for narrative variety.
 // Ambient season "vorm" events — no choice, just flavor + a growth nudge.
 const CAREER_EVENTS=[
@@ -11051,6 +11103,34 @@ const CAREER_EVENTS=[
 {icon:"🎯",label:"Focuste volledig op zijn spel",mod:[2,7]},
 {icon:"😴",label:"Verloor wat scherpte",mod:[-5,-1]},
 {icon:"💥",label:"Explosief seizoen",mod:[5,12]},
+{icon:"🎬",label:"Speelde hoofdrol in een documentaire over het team",mod:[-1,3]},
+{icon:"📱",label:"Ging viral na een indrukwekkende actie",mod:[1,4]},
+{icon:"🏋️",label:"Compleet nieuwe trainingsroutine sloeg aan",mod:[3,7]},
+{icon:"🍔",label:"Kwam de zomer uit met wat extra kilo's",mod:[-6,-2]},
+{icon:"👶",label:"Werd vader/moeder en vond een nieuw evenwicht",mod:[-3,3]},
+{icon:"🎮",label:"Verslaafd aan gaming tot diep in de nacht",mod:[-4,0]},
+{icon:"📚",label:"Studeerde de tegenstanders tot in detail",mod:[2,5]},
+{icon:"🧘",label:"Ontdekte meditatie en werd mentaal sterker",mod:[2,6]},
+{icon:"🚗",label:"Verhuisde dichter bij de trainingsfaciliteit",mod:[1,3]},
+{icon:"🥗",label:"Schakelde over op een streng dieet",mod:[1,4]},
+{icon:"😷",label:"Miste weken door een griepgolf in de kleedkamer",mod:[-5,-2]},
+{icon:"🎉",label:"Verloor focus na een zomer vol feestjes",mod:[-7,-2]},
+{icon:"🏆",label:"Kreeg een persoonlijke coach ingevlogen",mod:[3,8]},
+{icon:"🧩",label:"Paste eindelijk perfect in het systeem van de coach",mod:[3,7]},
+{icon:"💔",label:"Worstelde met een persoonlijke tegenslag",mod:[-9,-3]},
+{icon:"🔊",label:"Kreeg kritiek van analisten en bewees hen ongelijk",mod:[3,9]},
+{icon:"🕰️",label:"Speelde met een strak minutenschema om fris te blijven",mod:[0,3]},
+{icon:"🧬",label:"Werkte samen met een sportwetenschapper aan zijn lichaam",mod:[2,6]},
+{icon:"🏝️",label:"Volledig uitgerust teruggekeerd na een rustige zomer",mod:[2,5]},
+{icon:"🎧",label:"Bouwde een eigen pre-game ritueel op",mod:[0,2]},
+{icon:"🚑",label:"Kleine chronische pijn bleef terugkomen",mod:[-4,-1]},
+{icon:"🧑‍🏫",label:"Werd de go-to mentor voor de rookies",mod:[1,4]},
+{icon:"🌪️",label:"Chaotisch seizoen vol line-upwissels",mod:[-5,0]},
+{icon:"🎯",label:"Werkte specifiek aan zijn zwakste vaardigheid",mod:[2,5]},
+{icon:"🥊",label:"Ontwikkelde een fysiekere speelstijl",mod:[1,5]},
+{icon:"🧊",label:"Bleef ijzig kalm onder druk het hele seizoen",mod:[2,5]},
+{icon:"📉",label:"Verloor speeltijd aan een opkomende rookie",mod:[-6,-2]},
+{icon:"🦵",label:"Speelde het hele seizoen met tape om beide knieën",mod:[-3,0]},
 ];
 // Choice events — each presents two options with different growth/risk trade-offs, mid-season narrative moments.
 const CHOICE_EVENTS=[
@@ -11074,9 +11154,65 @@ const CHOICE_EVENTS=[
 {label:"Ga de confrontatie aan",icon:"😤",perfDelta:[2,7],repDelta:1,startsRival:true},
 {label:"Blijf professioneel en negeer het",icon:"😌",perfDelta:[0,2],repDelta:0},
 ]},
+{id:"hometown_game",prompt:"Je speelt een wedstrijd in je geboortestad, vol familie en vrienden op de tribune.",options:[
+{label:"Speel met extra vuur voor de mensen thuis",icon:"🔥",perfDelta:[3,8],repDelta:1,leader:true},
+{label:"Blokkeer de afleiding en speel je normale spel",icon:"🧠",perfDelta:[0,2],repDelta:0},
+]},
+{id:"brand_deal",prompt:"Een groot merk biedt je een lucratieve sponsordeal aan, maar het kost trainingstijd.",options:[
+{label:"Teken de deal",icon:"💰",perfDelta:[-3,0],repDelta:1},
+{label:"Wijs het af en focus op basketbal",icon:"🏀",perfDelta:[1,4],repDelta:0},
+]},
+{id:"social_media",prompt:"Een uitspraak van je op social media zorgt voor ophef in de media.",options:[
+{label:"Verdedig je uitspraak publiekelijk",icon:"📢",perfDelta:[-2,3],repDelta:-1},
+{label:"Bied excuses aan en ga verder",icon:"🙏",perfDelta:[0,2],repDelta:1},
+]},
+{id:"holdout",prompt:"Je bent het oneens met je speeltijd en overweegt een statement te maken.",options:[
+{label:"Eis publiekelijk meer minuten",icon:"📣",perfDelta:[2,6],repDelta:-2,leader:true},
+{label:"Praat het rustig uit met de coach",icon:"🤝",perfDelta:[0,3],repDelta:1},
+]},
+{id:"documentary",prompt:"Een streamingdienst wil een documentaire maken over jouw seizoen.",options:[
+{label:"Laat de camera's overal bij",icon:"🎥",perfDelta:[-2,2],repDelta:2},
+{label:"Hou het privé en focus op basketbal",icon:"🔒",perfDelta:[1,3],repDelta:0},
+]},
+{id:"charity",prompt:"Je wordt gevraagd een groot goededoelenproject in je stad te leiden.",options:[
+{label:"Zet je volledig in naast het seizoen",icon:"❤️",perfDelta:[-3,1],repDelta:3,leader:true},
+{label:"Doneer geld maar blijf op de achtergrond",icon:"💵",perfDelta:[0,2],repDelta:1},
+]},
+{id:"coach_clash",prompt:"Je hebt een meningsverschil met de hoofdcoach over de speelstijl van het team.",options:[
+{label:"Ga de confrontatie aan",icon:"🗯️",perfDelta:[1,5],repDelta:-1,leader:true},
+{label:"Schik je naar het systeem",icon:"😐",perfDelta:[-1,3],repDelta:0},
+]},
+{id:"veteran_advice",prompt:"Een gepensioneerde legende biedt aan je persoonlijk te trainen deze zomer.",options:[
+{label:"Grijp de kans met beide handen",icon:"🏅",perfDelta:[4,9],injuryRisk:0.08,repDelta:0},
+{label:"Bedank vriendelijk, je hebt je eigen routine",icon:"🙅",perfDelta:[0,2],repDelta:0},
+]},
+{id:"chemistry",prompt:"Er broeit onenigheid in de kleedkamer tussen twee sterspelers.",options:[
+{label:"Probeer te bemiddelen als leider",icon:"🕊️",perfDelta:[1,4],repDelta:2,leader:true},
+{label:"Blijf erbuiten en focus op je eigen spel",icon:"🎧",perfDelta:[0,3],repDelta:0},
+]},
+{id:"buzzer_beater",prompt:"In de laatste seconden van een cruciale wedstrijd ligt de bal in jouw handen.",options:[
+{label:"Neem het schot zelf",icon:"🎯",perfDelta:[3,8],injuryRisk:0.05,repDelta:1,leader:true},
+{label:"Speel de bal naar een vrijstaande teamgenoot",icon:"🤲",perfDelta:[0,3],repDelta:2},
+]},
+{id:"media_day",prompt:"Op Media Day krijg je een lastige vraag over je toekomst bij het team.",options:[
+{label:"Wees eerlijk over je twijfels",icon:"🎤",perfDelta:[-1,2],repDelta:-1},
+{label:"Geef een diplomatiek non-antwoord",icon:"😶",perfDelta:[0,1],repDelta:0},
+]},
+{id:"rookie_challenge",prompt:"Een talentvolle rookie daagt je publiekelijk uit voor jouw plek in de line-up.",options:[
+{label:"Reageer op het veld, niet met woorden",icon:"💪",perfDelta:[2,7],repDelta:1},
+{label:"Negeer het gepraat volledig",icon:"🙄",perfDelta:[0,2],repDelta:0},
+]},
+{id:"offseason_workout",prompt:"Je krijgt de keuze tussen een intensief zomerprogramma of extra rust.",options:[
+{label:"Ga voluit met een zwaar programma",icon:"🏋️",perfDelta:[3,7],injuryRisk:0.12,repDelta:0},
+{label:"Neem het rustig aan deze zomer",icon:"🏖️",perfDelta:[-1,2],repDelta:0},
+]},
+{id:"podcast_beef",prompt:"Een bekende basketbalpodcast twijfelt openlijk aan jouw niveau.",options:[
+{label:"Reageer met een statement-seizoen",icon:"🔥",perfDelta:[3,8],repDelta:1},
+{label:"Laat het gewoon langs je heen gaan",icon:"😌",perfDelta:[0,2],repDelta:0},
+]},
 ];
 // Rivalry storyline — a fictional rival that resurfaces in later seasons as marquee "revenge game" moments.
-const RIVAL_NAMES=["Luka Doncic","Giannis Antetokounmpo","Jayson Tatum","Nikola Jokic","Shai Gilgeous-Alexander","Anthony Edwards","Devin Booker","Victor Wembanyama","Damian Lillard","Joel Embiid","Kevin Durant","Stephen Curry","Jaylen Brown","Donovan Mitchell","Tyrese Haliburton"];
+const RIVAL_NAMES=["Luka Doncic","Giannis Antetokounmpo","Jayson Tatum","Nikola Jokic","Shai Gilgeous-Alexander","Anthony Edwards","Devin Booker","Victor Wembanyama","Damian Lillard","Joel Embiid","Kevin Durant","Stephen Curry","Jaylen Brown","Donovan Mitchell","Tyrese Haliburton","Ja Morant","Paolo Banchero","Zion Williamson","LaMelo Ball","Cade Cunningham","Franz Wagner","Scottie Barnes","Jalen Brunson","De'Aaron Fox","Trae Young"];
 function buildRevengeGameEvent(rivalName){
 return{id:"revenge_game",prompt:`Vanavond speel je tegen je rivaal ${rivalName} — het hele land kijkt mee.`,options:[
 {label:"Domineer het duel",icon:"🔥",perfDelta:[5,11],injuryRisk:0.1,repDelta:1},
@@ -11106,9 +11242,9 @@ if(Math.random()<0.55)return{kind:"choice",...pickRandom(CHOICE_EVENTS)};
 return{kind:"ambient",...pickRandom(CAREER_EVENTS)};
 }
 // Flavor reasons for an unexpected trade you didn't initiate.
-const TRADE_REASONS=["Je team is aan het herbouwen en ruimt salaris op.","Een groot pakket komt samen en jij bent de sleutel.","De coach wil een andere richting op met het team.","Salariscap-problemen dwingen een deal af.","Een rivaliserend team biedt te veel om te weigeren."];
+const TRADE_REASONS=["Je team is aan het herbouwen en ruimt salaris op.","Een groot pakket komt samen en jij bent de sleutel.","De coach wil een andere richting op met het team.","Salariscap-problemen dwingen een deal af.","Een rivaliserend team biedt te veel om te weigeren.","Een sterspeler wil per se naar jouw team en jij bent de ruilwaarde.","De general manager bouwt om een jonge kern heen.","Een nieuwe eigenaar wil het team compleet vernieuwen.","Je contract past niet meer in het salarisplaatje na een grote deal.","Het team wil meer draft picks verzamelen voor de toekomst.","Een oude coach-connectie haalt je op naar zijn nieuwe club.","De chemie in de kleedkamer klopte simpelweg niet meer.","Blessures bij andere sterren dwingen het team tot een gok op jou.","Een deadline-deal knalt in de laatste minuten binnen.","Het team wil bewust langzamer bouwen richting de toekomst."];
 // Rare, career-ending injury types — real stakes for a major injury.
-const CAREER_ENDING_INJURIES=["een achillespeesscheur","een zware knieblessure","een gescheurde kruisband","een chronische rugblessure","een reeks hersenschuddingen"];
+const CAREER_ENDING_INJURIES=["een achillespeesscheur","een zware knieblessure","een gescheurde kruisband","een chronische rugblessure","een reeks hersenschuddingen","een verbrijzelde enkel","een zenuwbeschadiging in de schouder","een reeks stressfracturen","een hartaandoening ontdekt bij een medische check","een slepende heupblessure die nooit meer goed genas"];
 const CONTRACT_OPTIONS=[
 {id:"resign",icon:"🤝",label:"Teken bij bij je huidige team"},
 {id:"testFA",icon:"🧳",label:"Test de vrije agent-markt"},
@@ -11696,10 +11832,21 @@ const firstMVP=season.awards.includes("mvp")&&!priorSeasons.some(s=>s.awards.inc
 const madeFirstPlayoffs=season.playoffs?.made&&!priorSeasons.some(s=>s.playoffs?.made);
 const firstAllStar=season.awards.includes("all-star")&&!priorSeasons.some(s=>s.awards.includes("all-star"));
 const changedTeam=priorSeasons.length&&season.team.name!==priorSeasons[priorSeasons.length-1].team.name;
+const prevRating=priorSeasons.length?priorSeasons[priorSeasons.length-1].rating:null;
+const bigJump=prevRating!=null&&season.rating-prevRating>=15;
+const bigDrop=prevRating!=null&&season.rating-prevRating<=-12;
+const scoringExplosion=season.pts>=30;
+const olympicGold=season.olympics?.medal==="gold";
+const comebackFromInjury=prevRating!=null&&priorSeasons[priorSeasons.length-1].majorInjury&&season.gp>=60;
 if(wonFirstTitle)return`📰 Landelijke koppen: "${player.name} is kampioen!"`;
 if(firstMVP)return`📰 Pers: "${player.name} kroont zich tot beste speler van de competitie."`;
 if(madeFirstPlayoffs)return`📰 Lokale pers: "${season.team.name} is terug in de play-offs dankzij ${player.name}."`;
 if(firstAllStar)return`📰 "${player.name} maakt zijn All-Star debuut."`;
+if(olympicGold)return`📰 "${player.name} keert terug als olympisch kampioen — een held in eigen land."`;
+if(comebackFromInjury)return`📰 "${player.name} is helemaal terug na de blessure — en beter dan ooit."`;
+if(scoringExplosion)return`📰 Analisten noemen ${player.name} een van de dodelijkste scorers van het seizoen.`;
+if(bigJump)return`📰 "${player.name} maakt een enorme sprong — de doorbraak waar iedereen op wachtte."`;
+if(bigDrop)return`📰 Vraagtekens in de pers: is ${player.name} zijn beste jaren voorbij?`;
 if(changedTeam)return`📰 Pers reageert verdeeld op het vertrek naar ${season.team.name}.`;
 return null;
 }
@@ -11881,7 +12028,7 @@ const boxStyle={position:"absolute",left:x,top:y-BR_BOX_H/2,width:BR_BOX_W,heigh
 if(!known){
 // Participants aren't determined yet from the viewer's perspective (their round hasn't been revealed) — no names shown, nothing to spoil.
 return(
-<div style={{...boxStyle,background:"#111",border:"1px dashed #2a2a2a"}}>
+<div style={{...boxStyle,background:"#111",border:`1px dashed ${CGOLD_DIM}66`}}>
 <div style={{color:"#555",fontSize:9,fontWeight:700,letterSpacing:1}}>TBD</div>
 </div>
 );
@@ -11898,8 +12045,8 @@ return(
 );
 }
 return(
-<div style={{...boxStyle,background:match.mineInvolved?"#241010":"#161616",border:match.mineInvolved?`1px solid ${RED}88`:"1px solid #262626"}}>
-<div style={{color:WHITE,fontSize:10,fontWeight:800,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{winner}</div>
+<div style={{...boxStyle,background:match.mineInvolved?CCARD_BG:"#161616",border:match.mineInvolved?`1px solid ${CGOLD}`:"1px solid #262626",boxShadow:match.mineInvolved?CGLOW:"none"}}>
+<div className={match.mineInvolved?"career-display":""} style={{color:WHITE,fontSize:10,fontWeight:800,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{winner}</div>
 <div style={{color:'#c98a8a',fontSize:8,textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:BR_BOX_W-10}}>{match.gamesFor}-{match.gamesAgainst} vs {loser}</div>
 </div>
 );
@@ -11944,9 +12091,9 @@ return(
 <BracketConnectorPair xA={BR_COLS.otherR1} xB={BR_COLS.otherR2+BR_BOX_W} yTop={BR_Y1[0]} yBottom={BR_Y1[1]} color={LINE}/>
 <BracketConnectorPair xA={BR_COLS.otherR1} xB={BR_COLS.otherR2+BR_BOX_W} yTop={BR_Y1[2]} yBottom={BR_Y1[3]} color={LINE}/>
 </svg>
-<div style={{position:"absolute",left:BR_COLS.myR1,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:'#c98a8a',fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.myConf?.toUpperCase()}</div>
-<div style={{position:"absolute",left:BR_COLS.finals,top:8,width:BR_BOX_W,textAlign:"center",color:"#f5a524",fontSize:9,fontWeight:700,letterSpacing:1}}>FINALS</div>
-<div style={{position:"absolute",left:BR_COLS.otherR2,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:'#c98a8a',fontSize:9,fontWeight:700,letterSpacing:1}}>{playoffs.otherConf?.toUpperCase()}</div>
+<div className="career-display" style={{position:"absolute",left:BR_COLS.myR1,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:'#c98a8a',fontSize:9,fontWeight:600,letterSpacing:1.5}}>{playoffs.myConf?.toUpperCase()}</div>
+<div className="career-display career-gold-text" style={{position:"absolute",left:BR_COLS.finals,top:8,width:BR_BOX_W,textAlign:"center",fontWeight:700,fontSize:9,letterSpacing:1.5}}>FINALS</div>
+<div className="career-display" style={{position:"absolute",left:BR_COLS.otherR2,top:8,width:BR_BOX_W*2+BR_GAP,textAlign:"center",color:'#c98a8a',fontSize:9,fontWeight:600,letterSpacing:1.5}}>{playoffs.otherConf?.toUpperCase()}</div>
 {myR[0].matchups.map((m,i)=>(<BracketMatchBox key={"m0"+i} x={BR_COLS.myR1} y={BR_Y1[i]} match={m} decided={dec[0]} known={known[0]}/>))}
 {myR[1].matchups.map((m,i)=>(<BracketMatchBox key={"m1"+i} x={BR_COLS.myR2} y={BR_Y2[i]} match={m} decided={dec[1]} known={known[1]}/>))}
 {myR[2].matchups.map((m,i)=>(<BracketMatchBox key={"m2"+i} x={BR_COLS.myR3} y={BR_Y3[i]} match={m} decided={dec[2]} known={known[2]}/>))}
@@ -11956,7 +12103,7 @@ return(
 {otherR[0].matchups.map((m,i)=>(<BracketMatchBox key={"o0"+i} x={BR_COLS.otherR1} y={BR_Y1[i]} match={m} decided={dec[0]} known={known[0]}/>))}
 </div>
 </div>
-{dec[3]&&playoffs.champion&&<div style={{textAlign:"center",color:"#f5a524",fontWeight:800,fontSize:15,marginTop:10}}>🏆 NBA KAMPIOEN!</div>}
+{dec[3]&&playoffs.champion&&<div className="career-display career-gold-text" style={{textAlign:"center",fontWeight:700,fontSize:15,marginTop:10,letterSpacing:.5}}>🏆 NBA KAMPIOEN!</div>}
 </div>
 );
 }
@@ -11968,8 +12115,8 @@ const idx=revealedRounds-1;
 const match=idx<3?playoffs.myBracket.rounds[idx].matchups.find(m=>m.mineInvolved):playoffs.finals;
 if(!match||!match.mineInvolved)return null;
 return(
-<div style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:10,padding:"10px 14px",marginTop:10}}>
-<div style={{color:'#c98a8a',fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6,textAlign:"center"}}>JOUW CIJFERS · {roundNames[idx].toUpperCase()}</div>
+<div style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:10,padding:"10px 14px",marginTop:10,boxShadow:CGLOW}}>
+<div className="career-display" style={{color:CGOLD,fontSize:10,fontWeight:600,letterSpacing:1.5,marginBottom:6,textAlign:"center"}}>JOUW CIJFERS · {roundNames[idx].toUpperCase()}</div>
 <div style={{display:"flex",justifyContent:"space-around"}}>
 <div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:15}}>{match.ppg}</div><div style={{color:'#c98a8a',fontSize:9}}>PPG</div></div>
 <div style={{textAlign:"center"}}><div style={{color:WHITE,fontWeight:800,fontSize:15}}>{match.rpg}</div><div style={{color:'#c98a8a',fontSize:9}}>RPG</div></div>
@@ -11983,12 +12130,12 @@ return(
 function PlayoffBracketModal({season,onClose}){
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:410}}>
-<div onClick={e=>e.stopPropagation()} style={{background:"#1C1C1E",borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto"}}>
-<div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
-<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:2,textAlign:"center"}}>{season.team.name} · {season.age}j</div>
-<div style={{color:'#c98a8a',fontSize:11,marginBottom:16,textAlign:"center"}}>Play-off bracket</div>
+<div onClick={e=>e.stopPropagation()} style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderRadius:"18px 18px 0 0",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxWidth:540,maxHeight:"85vh",overflowY:"auto",boxShadow:CGLOW}}>
+<div style={{width:36,height:4,background:CGOLD_DIM,borderRadius:2,margin:"0 auto 16px"}}/>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:16,marginBottom:2,textAlign:"center",letterSpacing:.3}}>{season.team.name} · {season.age}j</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,marginBottom:16,textAlign:"center",letterSpacing:1}}>PLAY-OFF BRACKET</div>
 <PlayoffBracketView playoffs={season.playoffs} revealedRounds={4}/>
-<button onClick={onClose} style={{background:'#160a0a',border:'1px solid #3a1414',color:WHITE,border:"none",borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:8}}>Sluiten</button>
+<button onClick={onClose} style={{background:"#2C1414",border:`1px solid ${CGOLD_SOFT}`,color:WHITE,borderRadius:10,padding:"12px 0",fontWeight:600,fontSize:15,cursor:"pointer",width:"100%",marginTop:8}}>Sluiten</button>
 </div>
 </div>
 );
@@ -12008,8 +12155,8 @@ for(let i=0;i<totals.allStars;i++)items.push("⭐");
 if(!items.length)return null;
 return(
 <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",marginBottom:18}}>
-{items.slice(0,24).map((ic,i)=>(<div key={i} style={{fontSize:22}}>{ic}</div>))}
-{items.length>24&&<div style={{color:'#c98a8a',fontSize:13,alignSelf:"center"}}>+{items.length-24}</div>}
+{items.slice(0,24).map((ic,i)=>(<div key={i} style={{fontSize:22,filter:"drop-shadow(0 0 6px rgba(245,197,24,.45))"}}>{ic}</div>))}
+{items.length>24&&<div style={{color:CGOLD,fontSize:13,alignSelf:"center"}}>+{items.length-24}</div>}
 </div>
 );
 }
@@ -12030,14 +12177,15 @@ return(
 );
 }
 function CareerLadderHeader(){
+const lblStyle={color:CGOLD_DIM,fontSize:8,fontWeight:700,letterSpacing:1};
 return(
-<div style={{display:"flex",alignItems:"center",gap:6,padding:"2px 2px",marginBottom:2}}>
-<div style={{width:24,textAlign:"center",color:'#c98a8a',fontSize:8,fontWeight:700,flexShrink:0}}>LFT</div>
-<div style={{flex:1,color:'#c98a8a',fontSize:8,fontWeight:700}}>TEAM</div>
-<div style={{width:26,textAlign:"center",color:'#c98a8a',fontSize:8,fontWeight:700,flexShrink:0}}>OVR</div>
-<div style={{width:22,textAlign:"center",color:'#c98a8a',fontSize:8,fontWeight:700,flexShrink:0}}>GP</div>
-<div style={{width:28,textAlign:"center",color:'#c98a8a',fontSize:8,fontWeight:700,flexShrink:0}}>PTS</div>
-<div style={{width:22,textAlign:"center",color:'#c98a8a',fontSize:8,fontWeight:700,flexShrink:0}}>AST</div>
+<div style={{display:"flex",alignItems:"center",gap:6,padding:"2px 2px",marginBottom:2,borderBottom:`1px solid ${CGOLD_SOFT}`,paddingBottom:5}}>
+<div style={{width:24,textAlign:"center",...lblStyle,flexShrink:0}}>LFT</div>
+<div style={{flex:1,...lblStyle}}>TEAM</div>
+<div style={{width:26,textAlign:"center",...lblStyle,flexShrink:0}}>OVR</div>
+<div style={{width:22,textAlign:"center",...lblStyle,flexShrink:0}}>GP</div>
+<div style={{width:28,textAlign:"center",...lblStyle,flexShrink:0}}>PTS</div>
+<div style={{width:22,textAlign:"center",...lblStyle,flexShrink:0}}>AST</div>
 </div>
 );
 }
@@ -12087,9 +12235,9 @@ const lastSeason=seasons[seasons.length-1];
 const endedByInjury=lastSeason?.careerEnding;
 return(
 <div style={{textAlign:"center"}}>
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2.5,marginBottom:6}}>CARRIÈRE VOORBIJ</div>
 <CareerOvrBadge ovr={player.overall} size={56}/>
-<div style={{color:WHITE,fontWeight:800,fontSize:20,margin:"10px 0 2px"}}>{player.name}</div>
+<div className="career-display career-gold-text" style={{fontWeight:600,fontSize:22,letterSpacing:.5,textTransform:"uppercase",margin:"10px 0 2px"}}>{player.name}</div>
 {endedByInjury?(
 <div style={{color:RED,fontSize:13,fontWeight:700,marginBottom:10}}>🚨 Carrière abrupt beëindigd door {lastSeason.injuryType} op {retiredAge}</div>
 ):(
@@ -12102,14 +12250,14 @@ return(
 {totals&&(
 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
 {[["Seizoenen",seasons.length],["Games",totals.gp],["Punten",totals.pts],["Rebounds",totals.reb],["Assists",totals.ast],["Peak rating",totals.peak],["All-Stars",totals.allStars],["Titels",totals.champs],["Caps",totals.caps],["Play-offs",totals.playoffApps],["Play-off record",`${totals.playoffSeriesWins}-${totals.playoffSeriesLosses}`],["Finals record",`${totals.finalsWins}-${totals.finalsLosses}`],["🥇 Olympisch goud",totals.olympicGolds],["Langste tijd bij 1 team",totals.maxStreak+"j"]].map(([lbl,val])=>(
-<div key={lbl} style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:10,padding:"10px 4px"}}>
-<div style={{color:WHITE,fontWeight:800,fontSize:16}}>{val}</div>
-<div style={{color:'#c98a8a',fontSize:9}}>{lbl}</div>
+<div key={lbl} style={{background:CCARD_BG,border:`1px solid ${CGOLD_SOFT}`,borderRadius:10,padding:"10px 4px",boxShadow:CGLOW}}>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:17}}>{val}</div>
+<div style={{color:'#c98a8a',fontSize:9,letterSpacing:.3}}>{lbl}</div>
 </div>
 ))}
 </div>
 )}
-<div style={{color:RED,fontWeight:800,fontSize:22,marginBottom:14}}>{score} carrièrepunten</div>
+<div className="career-display career-gold-text" style={{fontWeight:700,fontSize:30,marginBottom:14}}>{score} <span style={{fontSize:14,opacity:.8}}>carrièrepunten</span></div>
 <CareerHallOfFameCallout hallOfFame={hallOfFame}/>
 <CareerRegretCallout regret={regret}/>
 <div style={{marginBottom:18,textAlign:"left"}}>
@@ -12117,7 +12265,7 @@ return(
 </div>
 <div style={{display:"flex",gap:8}}>
 <button onClick={onDone} style={{background:'#160a0a',border:'1px solid #3a1414',color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",flex:1}}>Bekijk overzicht</button>
-{onPlayAgain&&<button onClick={onPlayAgain} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",flex:1}}>Speel opnieuw</button>}
+{onPlayAgain&&<button onClick={onPlayAgain} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",flex:1}}>Speel opnieuw</button>}
 </div>
 </div>
 );
@@ -12172,12 +12320,30 @@ return(
 
 // ── Main Career Sim orchestrator: hub (past careers + leaderboard) → create (name/pos/draft) → mode pick → live sim → result
 // ── OVR badge — colored tier square, like Copero's rating chip
+// ── Team badge — colored monogram using the team's real color pair; renders TEAM_LOGOS[abbr] as an image instead if you've set one.
+function TeamBadge({abbr,size=38}){
+const logo=TEAM_LOGOS[abbr];
+if(logo){
+return(
+<div style={{width:size,height:size,borderRadius:"50%",overflow:"hidden",flexShrink:0,background:"#0a0606",border:`1px solid ${CGOLD_SOFT}`,boxShadow:CGLOW,display:"flex",alignItems:"center",justifyContent:"center"}}>
+<img src={logo} alt={abbr} style={{width:"82%",height:"82%",objectFit:"contain"}}/>
+</div>
+);
+}
+const c=TEAM_COLORS[abbr]||["#3a1414","#160a0a"];
+return(
+<div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:`radial-gradient(120% 120% at 30% 20%, ${c[0]} 0%, ${c[1]} 100%)`,border:`1px solid ${CGOLD_SOFT}`,boxShadow:CGLOW}}>
+<span className="career-display" style={{color:"#fff",fontWeight:700,fontSize:Math.round(size*0.34),letterSpacing:.5,textShadow:"0 1px 2px rgba(0,0,0,.5)"}}>{abbr}</span>
+</div>
+);
+}
 function CareerOvrBadge({ovr,size=62}){
 const tier=ovr>=90?"#f5a524":ovr>=80?"#e0862a":ovr>=70?RED:ovr>=60?"#8E8E93":"#4a4a4a";
+const isElite=ovr>=90;
 return(
-<div style={{background:tier,borderRadius:14,width:size,height:size,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-<div style={{color:"rgba(0,0,0,0.5)",fontSize:9,fontWeight:800,letterSpacing:1}}>OVR</div>
-<div style={{color:"#000",fontSize:Math.round(size*0.36),fontWeight:900,lineHeight:1}}>{ovr}</div>
+<div className={isElite?"career-gold-ring":""} style={{background:`radial-gradient(120% 120% at 30% 20%, ${tier}ee 0%, ${tier} 45%, #000 130%)`,border:`1px solid ${isElite?CGOLD:"rgba(0,0,0,.4)"}`,borderRadius:14,width:size,height:size,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0,position:"relative",overflow:"hidden"}}>
+<div className="career-display" style={{color:"rgba(0,0,0,0.55)",fontSize:9,fontWeight:700,letterSpacing:1.5}}>OVR</div>
+<div className="career-display" style={{color:"#000",fontSize:Math.round(size*0.38),fontWeight:700,lineHeight:1}}>{ovr}</div>
 </div>
 );
 }
@@ -12187,15 +12353,18 @@ const rep=reputation!=null?reputationLabel(reputation):null;
 return(
 <div style={{display:"flex",gap:10,marginBottom:16}}>
 <CareerOvrBadge ovr={rating}/>
-<div style={{flex:1,background:'#160a0a',border:'1px solid #3a1414',borderRadius:14,padding:"10px 14px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+<div style={{flex:1,background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:14,padding:"10px 14px",minWidth:0,display:"flex",flexDirection:"column",justifyContent:"center",boxShadow:CGLOW,position:"relative",overflow:"hidden"}}>
 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
 {player.nationality&&<span style={{background:"#2C1414",color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>{player.nationality.flag} {player.nationality.code}</span>}
-<span style={{background:"#2C1414",color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>#{player.number||19}</span>
+<span style={{background:"#2C1414",color:CGOLD,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px",border:`1px solid ${CGOLD_SOFT}`}}>#{player.number||19}</span>
 <span style={{background:RED,color:WHITE,fontSize:9,fontWeight:800,borderRadius:8,padding:"2px 7px"}}>{player.pos}</span>
 {age!=null&&<span style={{color:'#c98a8a',fontSize:11,marginLeft:"auto"}}>{age}j</span>}
 </div>
-<div style={{color:WHITE,fontWeight:800,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{player.name}</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:16,letterSpacing:.5,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{player.name}</div>
+<div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+{team&&<TeamBadge abbr={team.abbr} size={16}/>}
 <div style={{color:'#c98a8a',fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{team?team.name:"Free agent"}{salary?` · ${formatMoney(salary)}/jr`:""}</div>
+</div>
 {rep&&<div style={{color:rep.color,fontSize:10,fontWeight:700,marginTop:2}}>{rep.label}</div>}
 </div>
 </div>
@@ -12204,35 +12373,35 @@ return(
 // ── One choice, rendered as a card (icon + label + optional sub-line + colored effect tag) — used for every in-season decision
 function DecisionCard({icon,label,sub,tag,tagColor,onClick}){
 return(
-<div onClick={onClick} style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:14,padding:"16px 10px",textAlign:"center",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",minHeight:112}}>
-<div style={{fontSize:26,marginBottom:8}}>{icon}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:12.5,marginBottom:sub?2:0}}>{label}</div>
+<div onClick={onClick} style={{background:CCARD_BG,border:`1px solid ${CGOLD_SOFT}`,borderRadius:14,padding:"16px 10px",textAlign:"center",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",minHeight:112,boxShadow:CGLOW,transition:"border-color .15s"}}>
+<div style={{fontSize:26,marginBottom:8,filter:"drop-shadow(0 2px 4px rgba(0,0,0,.5))"}}>{icon}</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:12.5,letterSpacing:.3,marginBottom:sub?2:0}}>{label}</div>
 {sub&&<div style={{color:'#c98a8a',fontSize:10,marginBottom:8}}>{sub}</div>}
-{tag&&<div style={{marginTop:"auto",background:tagColor||"#2C1414",color:WHITE,fontSize:9,fontWeight:700,borderRadius:8,padding:"3px 8px"}}>{tag}</div>}
+{tag&&<div style={{marginTop:"auto",background:tagColor||"#2C1414",color:WHITE,fontSize:9,fontWeight:700,borderRadius:8,padding:"3px 8px",border:`1px solid ${tagColor?"rgba(0,0,0,.25)":CGOLD_SOFT}`}}>{tag}</div>}
 </div>
 );
 }
 // ── A concrete team offer — team + tier + contract length combined with the salary being offered, like Copero's academy-offer cards
 function TeamOfferCard({offer,onClick}){
 return(
-<div onClick={onClick} style={{display:"flex",alignItems:"center",gap:12,background:'#160a0a',border:'1px solid #3a1414',borderRadius:14,padding:"14px",marginBottom:10,cursor:"pointer"}}>
-<div style={{fontSize:24,flexShrink:0}}>🏀</div>
+<div onClick={onClick} style={{display:"flex",alignItems:"center",gap:12,background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:14,padding:"14px",marginBottom:10,cursor:"pointer",boxShadow:CGLOW,transition:"border-color .15s"}}>
+<TeamBadge abbr={offer.team.abbr} size={38}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{offer.team.name}</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:14,letterSpacing:.3,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{offer.team.name}</div>
 <div style={{color:'#c98a8a',fontSize:11}}>{teamTierLabel(offer.teamState.strength)} · {offer.years} jaar</div>
 </div>
-<div style={{color:"#27AE60",fontWeight:800,fontSize:15,whiteSpace:"nowrap",flexShrink:0}}>{formatMoney(offer.salaryPerYear)}/jr</div>
+<div className="career-display career-gold-text" style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",flexShrink:0}}>{formatMoney(offer.salaryPerYear)}/jr</div>
 </div>
 );
 }
 // ── Jersey mockup with live name/number preview, used during player creation
 function CareerJerseyPreview({name,number}){
 return(
-<div style={{display:"flex",justifyContent:"center",marginBottom:18}}>
+<div className="career-gold-ring" style={{display:"flex",justifyContent:"center",marginBottom:18,borderRadius:20,padding:"10px 0",background:"radial-gradient(circle at 50% 30%, #1a1010 0%, #0a0606 75%)"}}>
 <svg width="150" height="150" viewBox="0 0 150 150">
-<path d="M45 20 L60 12 Q75 22 90 12 L105 20 L118 42 L104 52 L104 130 Q75 136 46 130 L46 52 L32 42 Z" fill={RED} stroke="#000" strokeWidth="2"/>
-<text x="75" y="70" textAnchor="middle" fill={WHITE} fontSize="12" fontWeight="800" fontFamily="inherit">{(name||"SPELER").toUpperCase()}</text>
-<text x="75" y="108" textAnchor="middle" fill={WHITE} fontSize="34" fontWeight="900" fontFamily="inherit">{number||"19"}</text>
+<path d="M45 20 L60 12 Q75 22 90 12 L105 20 L118 42 L104 52 L104 130 Q75 136 46 130 L46 52 L32 42 Z" fill={RED} stroke={CGOLD} strokeWidth="1.5"/>
+<text x="75" y="70" textAnchor="middle" fill={CGOLD} fontSize="11" fontWeight="700" fontFamily="'Oswald',inherit" letterSpacing="1">{(name||"SPELER").toUpperCase()}</text>
+<text x="75" y="110" textAnchor="middle" fill={WHITE} fontSize="36" fontWeight="700" fontFamily="'Oswald',inherit">{number||"19"}</text>
 </svg>
 </div>
 );
@@ -12937,7 +13106,7 @@ if(stage==="hub"){
 return(
 <div>
 {!authUserId&&<div style={{color:'#c98a8a',fontSize:12,marginBottom:12,textAlign:"center"}}>Log in via Trivia/Predictions om een carrière te starten en op te slaan.</div>}
-<button onClick={startCreate} disabled={!authUserId} data-testid="career-start-btn" style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:15,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:12,opacity:authUserId?1:0.4}}>🏀 Nieuwe carrière starten</button>
+<button onClick={startCreate} disabled={!authUserId} data-testid="career-start-btn" style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:15,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:12,opacity:authUserId?1:0.4}}>🏀 Nieuwe carrière starten</button>
 <button onClick={()=>setStage("league")} disabled={!authUserId} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:authUserId?"pointer":"default",width:"100%",marginBottom:20,opacity:authUserId?1:0.4}}>👥 2-Speler Liga</button>
 {myCareers.length>0&&(
 <div style={{marginBottom:20}}>
@@ -12965,7 +13134,7 @@ return(
 if(stage==="league"){
 const backBtn=<button onClick={()=>{leaveLeague();setStage("hub");}} style={{background:"transparent",border:"none",color:'#c98a8a',fontSize:12,cursor:"pointer",marginBottom:14}}>‹ Terug naar hub</button>;
 const panelStyle={background:"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 60%,#000 100%)",borderRadius:18,padding:"18px 14px",border:"1px solid #3a1414",boxShadow:"0 0 24px rgba(232,49,42,0.15) inset"};
-const btnPrimary={background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10};
+const btnPrimary={background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10};
 const btnSecondary={background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:10};
 // ── Not in a league yet: create or join
 if(!leagueId){
@@ -13048,13 +13217,16 @@ return(
 <div>
 {backBtn}
 <div style={{...panelStyle,textAlign:"center"}}>
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>DRAFT NIGHT</div>
-<div style={{fontSize:38,marginBottom:14}}>🎡</div>
-<div style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:16,padding:"26px 16px",marginBottom:20}}>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2.5,marginBottom:6}}>DRAFT NIGHT</div>
+<div style={{fontSize:38,marginBottom:14,filter:"drop-shadow(0 2px 6px rgba(0,0,0,.6))"}}>🎡</div>
+<div className={leagueDraftNightDisplay&&!leagueDraftNightSpinning?"career-gold-ring":""} style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:16,padding:"26px 16px",marginBottom:20,boxShadow:CGLOW}}>
 {leagueDraftNightDisplay?(
 <>
-<div style={{color:leagueDraftNightSpinning?'#c98a8a':"#f5a524",fontWeight:900,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{leagueDraftNightDisplay.pick}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:16}}>{leagueDraftNightDisplay.team.name}</div>
+<div className="career-display" style={{color:leagueDraftNightSpinning?'#c98a8a':CGOLD,fontWeight:700,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{leagueDraftNightDisplay.pick}</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+<TeamBadge abbr={leagueDraftNightDisplay.team.abbr} size={26}/>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:16,textTransform:"uppercase",letterSpacing:.5}}>{leagueDraftNightDisplay.team.name}</div>
+</div>
 </>
 ):(
 <div style={{color:'#c98a8a',fontSize:14}}>Het wiel begint te draaien...</div>
@@ -13064,7 +13236,10 @@ return(
 {!leagueDraftNightSpinning&&leagueDraftNightResult&&(
 <>
 <div style={{color:WHITE,fontSize:14,marginBottom:6}}>Je bent gedraft als <b>pick #{leagueDraftNightResult.pick}</b> door de</div>
-<div style={{color:"#f5a524",fontWeight:800,fontSize:18,marginBottom:18}}>{leagueDraftNightResult.team.name}</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:18}}>
+<TeamBadge abbr={leagueDraftNightResult.team.abbr} size={30}/>
+<div className="career-display career-gold-text" style={{fontWeight:700,fontSize:18,textTransform:"uppercase"}}>{leagueDraftNightResult.team.name}</div>
+</div>
 <button onClick={()=>confirmLeagueBuild(leagueDraftNightResult)} style={btnPrimary}>Start je carrière ▸</button>
 </>
 )}
@@ -13077,10 +13252,10 @@ const ATTR_GRAD={sco:["#ff5b52","#7a0f0a"],plm:["#4fc3ff","#0d3a63"],reb:["#3ddc
 return(
 <div>
 {backBtn}
-<div style={panelStyle}>
-<input value={leagueBuildName} onChange={e=>setLeagueBuildName(e.target.value)} placeholder="Spelernaam" style={{width:"100%",boxSizing:"border-box",background:"#160a0a",border:"1px solid #3a1414",borderRadius:10,padding:"10px 12px",color:WHITE,fontSize:14,marginBottom:14}}/>
+<div className="career-gold-ring" style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:18,padding:"18px 14px",boxShadow:CGLOW}}>
+<input value={leagueBuildName} onChange={e=>setLeagueBuildName(e.target.value)} placeholder="Spelernaam" style={{width:"100%",boxSizing:"border-box",background:"#160a0a",border:`1px solid ${CGOLD_SOFT}`,borderRadius:10,padding:"10px 12px",color:WHITE,fontSize:14,marginBottom:14}}/>
 <div style={{textAlign:"center",marginBottom:14}}>
-<span style={{color:remaining===0?"#3ddc84":"#ffe066",fontWeight:900,fontSize:24}}>{remaining}</span>
+<span className="career-display" style={{color:remaining===0?"#3ddc84":CGOLD,fontWeight:700,fontSize:24}}>{remaining}</span>
 <span style={{color:'#c98a8a',fontSize:10,letterSpacing:1,textTransform:"uppercase"}}> punten over</span>
 </div>
 <div style={{display:"flex",justifyContent:"space-between",gap:4,marginBottom:14,overflowX:"auto"}}>
@@ -13091,13 +13266,13 @@ const pct=Math.max(2,Math.min(100,((val-CAREER_ATTR_FLOOR)/(99-CAREER_ATTR_FLOOR
 const[top,bot]=ATTR_GRAD[a.key];
 return(
 <div key={a.key} style={{display:"flex",flexDirection:"column",alignItems:"center",flex:"0 0 auto",width:44}}>
-<div style={{color:WHITE,fontWeight:900,fontSize:14,marginBottom:4}}>{val}</div>
-<div style={{position:"relative",width:22,height:110,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:"1px solid #3a1414"}}>
+<div className="career-display" style={{color:WHITE,fontWeight:700,fontSize:14,marginBottom:4}}>{val}</div>
+<div style={{position:"relative",width:22,height:110,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:`1px solid ${CGOLD_SOFT}`}}>
 <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${pct}%`,background:`linear-gradient(180deg,${top},${bot})`,borderRadius:11}}/>
 </div>
 <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:6}}>
-<button onClick={()=>leagueAdjustAttr(a.key,5)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>+</button>
-<button onClick={()=>leagueAdjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>−</button>
+<button onClick={()=>leagueAdjustAttr(a.key,5)} style={{background:"#2C1414",color:CGOLD,border:`1px solid ${CGOLD_SOFT}`,borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>+</button>
+<button onClick={()=>leagueAdjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:`1px solid ${CGOLD_SOFT}`,borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer"}}>−</button>
 </div>
 <div style={{color:'#c98a8a',fontSize:8,fontWeight:700,textAlign:"center",marginTop:5,textTransform:"uppercase"}}>{a.icon}<br/>{a.label}</div>
 </div>
@@ -13215,7 +13390,7 @@ return(
 <input value={nationalitySearch} onChange={e=>setNationalitySearch(e.target.value)} placeholder="Zoek land..." style={{...IS,marginBottom:14}}/>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,maxHeight:420,overflowY:"auto",marginBottom:16}}>
 {filtered.map(n=>(
-<div key={n.code} onClick={()=>chooseNationality(n)} style={{display:"flex",alignItems:"center",gap:8,background:'#160a0a',border:'1px solid #3a1414',borderRadius:10,padding:"10px 12px",cursor:"pointer"}}>
+<div key={n.code} onClick={()=>chooseNationality(n)} style={{display:"flex",alignItems:"center",gap:8,background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:10,padding:"10px 12px",cursor:"pointer"}}>
 <span style={{fontSize:20,flexShrink:0}}>{n.flag}</span>
 <span style={{color:WHITE,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.name}</span>
 </div>
@@ -13229,20 +13404,20 @@ return(
 const attrDef=CAREER_ATTRS[draftStep];
 return(
 <div>
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>DRAFT · RONDE {draftStep+1}/6</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:18,marginBottom:4}}>{attrDef.icon} {attrDef.label}</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2}}>DRAFT · RONDE {draftStep+1}/6</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:18,marginBottom:4,marginTop:4,letterSpacing:.3}}>{attrDef.icon} {attrDef.label}</div>
 <div style={{color:'#c98a8a',fontSize:12,marginBottom:16}}>Kies een legend — dit bepaalt het PLAFOND van je {attrDef.label.toLowerCase()} (met een beetje willekeur). Je verdeelt zo dadelijk een beperkt puntenbudget om te bepalen hoe dicht je daar echt bij komt.</div>
 {(draftTrio||[]).map(l=>(
-<div key={l.name} onClick={()=>pickLegendForAttr(l)} style={{display:"flex",alignItems:"center",gap:12,background:'#160a0a',border:'1px solid #3a1414',borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer"}}>
+<div key={l.name} onClick={()=>pickLegendForAttr(l)} style={{display:"flex",alignItems:"center",gap:12,background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:12,padding:"14px",marginBottom:10,cursor:"pointer",boxShadow:CGLOW}}>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:14}}>{l.name}</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:14,letterSpacing:.3}}>{l.name}</div>
 <div style={{color:'#c98a8a',fontSize:11}}>{l.pos}</div>
 </div>
-<div style={{color:RED,fontWeight:800,fontSize:20}}>{l[attrDef.key]}</div>
+<div className="career-display career-gold-text" style={{fontWeight:700,fontSize:20}}>{l[attrDef.key]}</div>
 </div>
 ))}
 <div style={{display:"flex",gap:6,justifyContent:"center",marginTop:6}}>
-{CAREER_ATTRS.map((a,i)=>(<div key={a.key} style={{width:8,height:8,borderRadius:4,background:i<draftStep?RED:i===draftStep?"#f5a524":"#2C1414"}}/>))}
+{CAREER_ATTRS.map((a,i)=>(<div key={a.key} style={{width:8,height:8,borderRadius:4,background:i<draftStep?CGOLD:i===draftStep?"#f5a524":"#2C1414"}}/>))}
 </div>
 </div>
 );
@@ -13256,21 +13431,21 @@ sco:["#ff5b52","#7a0f0a"],plm:["#4fc3ff","#0d3a63"],reb:["#3ddc84","#0d4225"],
 def:["#b47bff","#3b1a63"],ath:["#ffb545","#7a4d0a"],iq:["#ffe066","#7a5c0a"],
 };
 return(
-<div style={{background:"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 60%,#000 100%)",borderRadius:18,padding:"18px 12px",border:"1px solid #3a1414",boxShadow:"0 0 24px rgba(232,49,42,0.15) inset"}}>
+<div className="career-gold-ring" style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:18,padding:"18px 12px",boxShadow:CGLOW}}>
 <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
 <span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>HT: 6'7"</span>
-<span style={{color:"#5a2020"}}>|</span>
+<span style={{color:CGOLD_DIM}}>|</span>
 <span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>WT: 217 lbs</span>
-<span style={{color:"#5a2020"}}>|</span>
+<span style={{color:CGOLD_DIM}}>|</span>
 <span style={{color:WHITE,fontSize:11,fontWeight:800,letterSpacing:0.5}}>WS: 6'9"</span>
 </div>
 <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8,marginBottom:14}}>
-<span style={{background:"linear-gradient(180deg,#ffe066,#f5a524)",color:"#3a1a00",fontWeight:900,fontSize:12,padding:"3px 10px",borderRadius:6,letterSpacing:0.5}}>{draftPos||"PG"}</span>
-<span style={{color:"#ffe066",fontWeight:800,fontSize:14,letterSpacing:0.5}}>{draftName?draftName.toUpperCase():"YOUR BUILD"}</span>
+<span className="career-display" style={{background:"linear-gradient(180deg,#ffe9a8,#f5c518)",color:"#3a1a00",fontWeight:700,fontSize:12,padding:"3px 10px",borderRadius:6,letterSpacing:0.5}}>{draftPos||"PG"}</span>
+<span className="career-display career-gold-text" style={{fontWeight:700,fontSize:14,letterSpacing:0.5}}>{draftName?draftName.toUpperCase():"YOUR BUILD"}</span>
 </div>
-{isGoatDraft&&<div style={{color:"#f5a524",fontSize:11,fontWeight:700,textAlign:"center",marginBottom:10}}>🐐 GENETIC FREAK — +{CAREER_GOAT_BUDGET_BONUS} BONUS POINTS</div>}
+{isGoatDraft&&<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,textAlign:"center",marginBottom:10}}>🐐 GENETIC FREAK — +{CAREER_GOAT_BUDGET_BONUS} BONUS POINTS</div>}
 <div style={{textAlign:"center",marginBottom:16}}>
-<span style={{color:remaining===0?"#3ddc84":"#ffe066",fontWeight:900,fontSize:28,textShadow:"0 0 10px rgba(255,224,102,0.4)"}}>{remaining}</span>
+<span className="career-display" style={{color:remaining===0?"#3ddc84":CGOLD,fontWeight:700,fontSize:28,textShadow:"0 0 10px rgba(245,197,24,.4)"}}>{remaining}</span>
 <span style={{color:"#c98a8a",fontSize:10,letterSpacing:1,textTransform:"uppercase"}}> {remaining===1?"point left":"points left"}</span>
 </div>
 <div style={{display:"flex",justifyContent:"space-between",gap:4,marginBottom:14,overflowX:"auto",paddingBottom:4}}>
@@ -13283,22 +13458,22 @@ const capPct=Math.max(0,Math.min(100,((ceiling-CAREER_ATTR_FLOOR)/(99-CAREER_ATT
 const[top,bot]=ATTR_GRAD[a.key]||[RED,"#3a0a08"];
 return(
 <div key={a.key} style={{display:"flex",flexDirection:"column",alignItems:"center",flex:"0 0 auto",width:44}}>
-<div style={{color:atCeiling?"#ffe066":WHITE,fontWeight:900,fontSize:14,marginBottom:4,textShadow:atCeiling?"0 0 8px rgba(255,224,102,0.6)":"none"}}>{val}</div>
-<div style={{position:"relative",width:22,height:130,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:"1px solid #3a1414"}}>
+<div className="career-display" style={{color:atCeiling?CGOLD:WHITE,fontWeight:700,fontSize:14,marginBottom:4,textShadow:atCeiling?"0 0 8px rgba(245,197,24,.6)":"none"}}>{val}</div>
+<div style={{position:"relative",width:22,height:130,background:"#1a0a0a",borderRadius:11,overflow:"hidden",border:`1px solid ${CGOLD_SOFT}`}}>
 <div style={{position:"absolute",left:0,right:0,bottom:0,height:`${pct}%`,background:`linear-gradient(180deg,${top},${bot})`,borderRadius:11,transition:"height 0.2s"}}/>
-<div style={{position:"absolute",left:0,right:0,bottom:`${capPct}%`,height:2,background:"#ffe066",boxShadow:"0 0 4px #ffe066"}}/>
+<div style={{position:"absolute",left:0,right:0,bottom:`${capPct}%`,height:2,background:CGOLD,boxShadow:`0 0 4px ${CGOLD}`}}/>
 </div>
 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,marginTop:6}}>
-<button onClick={()=>adjustAttr(a.key,5)} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>+</button>
-<button onClick={()=>adjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:"1px solid #4a1c1c",borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>−</button>
+<button onClick={()=>adjustAttr(a.key,5)} style={{background:"#2C1414",color:CGOLD,border:`1px solid ${CGOLD_SOFT}`,borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>+</button>
+<button onClick={()=>adjustAttr(a.key,-5)} style={{background:"#2C1414",color:"#c98a8a",border:`1px solid ${CGOLD_SOFT}`,borderRadius:6,width:26,height:22,fontWeight:800,fontSize:13,cursor:"pointer",lineHeight:1}}>−</button>
 </div>
 <div style={{color:"#c98a8a",fontSize:8,fontWeight:700,letterSpacing:0.5,textAlign:"center",marginTop:5,textTransform:"uppercase"}}>{a.icon}<br/>{a.label}</div>
 </div>
 );
 })}
 </div>
-<button onClick={autoBalanceAttrs} style={{background:"#2C1414",color:"#ffe066",border:"1px solid #4a1c1c",borderRadius:14,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:10}}>⚖️ Auto-balance</button>
-<button onClick={confirmBuild} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10,boxShadow:"0 0 14px rgba(232,49,42,0.5)"}}>CONFIRM BUILD</button>
+<button onClick={autoBalanceAttrs} style={{background:"#2C1414",color:CGOLD,border:`1px solid ${CGOLD_SOFT}`,borderRadius:14,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:10}}>⚖️ Auto-balance</button>
+<button onClick={confirmBuild} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10,boxShadow:"0 0 16px rgba(245,197,24,.35), 0 0 14px rgba(232,49,42,.5)"}}>CONFIRM BUILD</button>
 <button onClick={()=>{setDraftStep(0);setDraftAttrs({});setDraftTrio(null);setDraftLegendNames([]);setDraftTrio(draftLegendTrio(NBA_LEGENDS,[]));setStage("create");}} style={{background:"transparent",border:"none",color:"#c98a8a",fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>‹ Start over</button>
 </div>
 );
@@ -13357,7 +13532,7 @@ return(
 </div>
 )}
 <button onClick={()=>startDraftNight("quick")} style={{background:"#2C1414",color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>⚡ Snelle carrière (direct resultaat)</button>
-<button onClick={()=>startDraftNight("standard")} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
+<button onClick={()=>startDraftNight("standard")} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:14,cursor:"pointer",width:"100%",marginBottom:10}}>📅 Volledige carrière (elk seizoen eigen keuzes)</button>
 <button onClick={backToHub} style={{background:"transparent",border:"none",color:'#c98a8a',fontSize:12,cursor:"pointer",width:"100%",textAlign:"center"}}>Annuleren</button>
 </div>
 );
@@ -13366,13 +13541,16 @@ return(
 if(stage==="draftNight"){
 return(
 <div style={{textAlign:"center"}}>
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:6}}>DRAFT NIGHT</div>
-<div style={{fontSize:38,marginBottom:14}}>🎡</div>
-<div style={{background:'#160a0a',border:'1px solid #3a1414',borderRadius:16,padding:"26px 16px",marginBottom:20,border:draftSpinning?"1px solid #333":`1px solid ${RED}55`}}>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2.5,marginBottom:6}}>DRAFT NIGHT</div>
+<div style={{fontSize:38,marginBottom:14,filter:"drop-shadow(0 2px 6px rgba(0,0,0,.6))"}}>🎡</div>
+<div className={draftDisplay&&!draftSpinning?"career-gold-ring":""} style={{background:CCARD_BG,borderTop:`1px solid ${CGOLD_DIM}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:16,padding:"26px 16px",marginBottom:20,boxShadow:CGLOW}}>
 {draftDisplay?(
 <>
-<div style={{color:draftSpinning?'#c98a8a':"#f5a524",fontWeight:900,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{draftDisplay.pick}</div>
-<div style={{color:WHITE,fontWeight:700,fontSize:16}}>{draftDisplay.team.name}</div>
+<div className="career-display" style={{color:draftSpinning?'#c98a8a':CGOLD,fontWeight:700,fontSize:34,marginBottom:6,transition:"color 0.2s"}}>PICK #{draftDisplay.pick}</div>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+<TeamBadge abbr={draftDisplay.team.abbr} size={26}/>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:16,textTransform:"uppercase",letterSpacing:.5}}>{draftDisplay.team.name}</div>
+</div>
 </>
 ):(
 <div style={{color:'#c98a8a',fontSize:14}}>Het wiel begint te draaien...</div>
@@ -13382,8 +13560,11 @@ return(
 {!draftSpinning&&draftResult&&(
 <>
 <div style={{color:WHITE,fontSize:14,marginBottom:6}}>Je bent gedraft als <b>pick #{draftResult.pick}</b> door de</div>
-<div style={{color:"#f5a524",fontWeight:800,fontSize:18,marginBottom:18}}>{draftResult.team.name}</div>
-<button onClick={()=>beginSim(pendingMode,draftResult)} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Start je carrière ▸</button>
+<div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:18}}>
+<TeamBadge abbr={draftResult.team.abbr} size={30}/>
+<div className="career-display career-gold-text" style={{fontWeight:700,fontSize:18,textTransform:"uppercase"}}>{draftResult.team.name}</div>
+</div>
+<button onClick={()=>beginSim(pendingMode,draftResult)} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Start je carrière ▸</button>
 </>
 )}
 </div>
@@ -13460,7 +13641,7 @@ const tags={resign:{tag:"Loyaliteit ↑",color:"#27AE60"},testFA:{tag:"Open mark
 return(
 <div>
 {headerEl}
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTONDERHANDELING</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2,marginBottom:4}}>CONTRACTONDERHANDELING</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Je contract bij {teamState.team.name} loopt af. Wat nu?</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
 {CONTRACT_OPTIONS.map(o=>(<DecisionCard key={o.id} icon={o.icon} label={o.label} tag={tags[o.id]?.tag} tagColor={tags[o.id]?.color} onClick={()=>chooseContractOption(o.id)}/>))}
@@ -13472,13 +13653,14 @@ if(seasonStage==="teamBrowser"&&teamBrowserList){
 return(
 <div>
 {headerEl}
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>TRADE-AANVRAAG</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2,marginBottom:4}}>TRADE-AANVRAAG</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Kies een team om een trade naartoe te eisen. Niet elk team hapt toe.</div>
 <div style={{maxHeight:440,overflowY:"auto",marginBottom:10}}>
 {teamBrowserList.map((t,i)=>(
-<div key={i} onClick={()=>t.interested&&chooseForceTradeTeam(t)} style={{display:"flex",alignItems:"center",gap:10,background:'#160a0a',border:'1px solid #3a1414',borderRadius:10,padding:"10px 12px",marginBottom:6,opacity:t.interested?1:0.5,cursor:t.interested?"pointer":"default"}}>
+<div key={i} onClick={()=>t.interested&&chooseForceTradeTeam(t)} style={{display:"flex",alignItems:"center",gap:10,background:CCARD_BG,borderTop:`1px solid ${t.interested?CGOLD_DIM:"#3a1414"}`,borderLeft:CCARD_BORDER,borderRight:CCARD_BORDER,borderBottom:CCARD_BORDER,borderRadius:10,padding:"10px 12px",marginBottom:6,opacity:t.interested?1:0.5,cursor:t.interested?"pointer":"default"}}>
+<TeamBadge abbr={t.team.abbr} size={32}/>
 <div style={{flex:1,minWidth:0}}>
-<div style={{color:WHITE,fontWeight:700,fontSize:13}}>{t.team.name}{t.isOriginal?" 🏠":""}</div>
+<div className="career-display" style={{color:WHITE,fontWeight:600,fontSize:13,letterSpacing:.2}}>{t.team.name}{t.isOriginal?" 🏠":""}</div>
 <div style={{color:t.interested?"#27AE60":RED,fontSize:11}}>{t.interested?(t.isOriginal?t.reason:"Geïnteresseerd"):t.reason}</div>
 </div>
 </div>
@@ -13492,7 +13674,7 @@ if(seasonStage==="teamOffer"&&teamOffers){
 return(
 <div>
 {headerEl}
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTAANBIEDINGEN</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2,marginBottom:4}}>CONTRACTAANBIEDINGEN</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>Drie teams willen je. Kies je nieuwe club:</div>
 {teamOffers.map((o,i)=>(<TeamOfferCard key={i} offer={o} onClick={()=>chooseTeamOffer(o)}/>))}
 </div>
@@ -13502,7 +13684,7 @@ if(seasonStage==="contractLength"&&pendingContractBase){
 return(
 <div>
 {headerEl}
-<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>CONTRACTDUUR & SALARIS</div>
+<div className="career-display" style={{color:CGOLD,fontSize:11,fontWeight:600,letterSpacing:2,marginBottom:4}}>CONTRACTDUUR & SALARIS</div>
 <div style={{color:WHITE,fontWeight:800,fontSize:17,marginBottom:14}}>{pendingContractBase.icon} {pendingContractBase.label} — voor hoelang?</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
 {CONTRACT_LENGTHS.map(lo=>{
@@ -13545,7 +13727,7 @@ return(
 <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pctBefore}%`,background:"#4a1c1c",borderRadius:5}}/>
 <div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pctAfter}%`,background:"linear-gradient(90deg,#ffb545,#ffe066)",borderRadius:5,transition:"width 0.5s ease"}}/>
 </div>
-<button onClick={continueAfterTraining} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Doorgaan ▸</button>
+<button onClick={continueAfterTraining} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Doorgaan ▸</button>
 </div>
 </div>
 );
@@ -13596,8 +13778,8 @@ return(
 )}
 <PlayoffBracketView playoffs={po} revealedRounds={revealedRounds}/>
 <BracketRoundStats playoffs={po} revealedRounds={revealedRounds}/>
-{!done&&<button onClick={revealNextRound} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>{roundBtnLabel}</button>}
-{done&&<button onClick={finishBracketViewing} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Ga verder met carrière ▸</button>}
+{!done&&<button onClick={revealNextRound} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>{roundBtnLabel}</button>}
+{done&&<button onClick={finishBracketViewing} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Ga verder met carrière ▸</button>}
 </div>
 );
 }
@@ -13610,7 +13792,7 @@ return(
 {last&&<CareerSeasonCard season={last}/>}
 <div style={{color:WHITE,fontSize:13,fontWeight:600,margin:"18px 0 10px",textAlign:"center"}}>Ga je door, of stop je nu?</div>
 <button onClick={continueCareer} style={{background:"#2C1414",color:WHITE,border:"none",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%",marginBottom:8}}>💪 Nog een seizoen proberen</button>
-<button onClick={retireNow} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>🏁 Stop nu, op eigen voorwaarden</button>
+<button onClick={retireNow} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:12,padding:"12px 0",fontWeight:700,fontSize:13,cursor:"pointer",width:"100%"}}>🏁 Stop nu, op eigen voorwaarden</button>
 </div>
 );
 }
@@ -13620,7 +13802,7 @@ return(
 {headerEl}
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN AFGEROND</div>
 {last&&<CareerSeasonCard season={last}/>}
-<button onClick={continueCareer} style={{background:"linear-gradient(180deg,#ff5b52,#c4231d)",color:WHITE,border:"none",boxShadow:"0 0 14px rgba(232,49,42,0.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Volgende seizoen ▸</button>
+<button onClick={continueCareer} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Volgende seizoen ▸</button>
 </div>
 );
 }

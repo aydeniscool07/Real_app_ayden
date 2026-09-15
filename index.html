@@ -1830,6 +1830,20 @@ return(
 );
 }
 
+// Fouler Award ("Draymond Green Award") — a referee's whistle
+function FoulerIcon({size=28,color="#8E44AD",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="38" cy="55" r="28" fill="none" stroke={c} strokeWidth="8"/>
+<rect x="58" y="30" width="30" height="18" rx="6" fill={c}/>
+<rect x="30" y="42" width="16" height="6" rx="2" fill={c}/>
+<circle cx="38" cy="55" r="5" fill={c}/>
+</svg>
+);
+}
+
+
 // Assists Title — Two arrows connecting players
 function AssistsIcon({size=28,color="#3498DB",grayed=false}){
 const c=grayed?"#5a5a5a":color;
@@ -1928,6 +1942,7 @@ const AWARD_TYPES=[
 {id:"clutch",       label:"Clutch Player vd Maand",    color:"#E8312A", Icon:ClutchIcon,   desc:"Beste in de slotfase"},
 {id:"alllba1",      label:"All-LBA 1e Team",           color:"#f5a524", Icon:AllLBA1Icon,  desc:"Eerste team selectie", multi:true, maxPick:2},
 {id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
+{id:"fouler",       label:"Draymond Green Award",      color:"#8E44AD", Icon:FoulerIcon,   desc:"Meeste fouls gem. — voor 'fair play'"},
 ];
 function getAwardType(id){return AWARD_TYPES.find(a=>a.id===id)||AWARD_TYPES[0];}
 // Seizoensawards krijgen de seizoensnaam in de titel i.p.v. "van de Maand"/"vd Maand" — bv. "MVP 'Herfst 2026'"
@@ -2506,12 +2521,12 @@ if(!periodGames.length)return null;
 const byPid={};
 periodGames.forEach(g=>{
 if(!g.playerId)return;
-const t=byPid[g.playerId]||(byPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,gp:0,effSum:0,cham:0,games:[]});
-t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;t.gp+=1;t.effSum+=+calcFps(g)||0;
+const t=byPid[g.playerId]||(byPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,pf:0,gp:0,effSum:0,cham:0,games:[]});
+t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;t.pf+=+g.pf||0;t.gp+=1;t.effSum+=+calcFps(g)||0;
 if(g.team==="chameleon")t.cham+=1;
 t.games.push(g);
 });
-const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,cham:t.cham,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
+const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,pfpg:t.pf/t.gp,cham:t.cham,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
 if(!rows.length)return null;
 const top=key=>rows.slice().sort((a,b)=>b[key]-a[key])[0];
 const topTwo=key=>rows.slice().sort((a,b)=>b[key]-a[key]);
@@ -2540,6 +2555,7 @@ const ru=ranked.find(r=>!(r.made===top.made&&r.pct===top.pct));
 return{ids:winners.map(r=>r.pid),reason:`${top.made}/${top.att} FT (${top.pct}%)${winners.length>1?" · gedeeld":""}`,gap:ru?top.made-ru.made:null,runnerUpId:ru?ru.pid:null};
 }
 case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`,...withGap("dpg",r)};}
+case"fouler":{const r=top("pfpg");if(!r.pfpg)return null;return{ids:[r.pid],reason:`${r.pfpg.toFixed(1)} fouls gem.`,...withGap("pfpg",r)};}
 case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`,...withGap("cham",r,0)};}
 case"alllba1":{
 const ranked=rows.map(r=>{const wl=getWinLoss(r.games);const tot=wl.w+wl.l+wl.d;return{pid:r.pid,pct:tot?wl.w/tot:0,tot,w:wl.w,l:wl.l};}).filter(r=>r.tot>=2).sort((a,b)=>b.pct-a.pct||b.w-a.w);
@@ -3444,6 +3460,7 @@ const [expandedSniperId,setExpandedSniperId]=useState(null); // 2PT Lab: welke s
 const [expandedMerchantId,setExpandedMerchantId]=useState(null); // FT Lab: welke speler-kaart is uitgeklapt
 const [expandedDuoKey,setExpandedDuoKey]=useState(null); // Eff Lab: welk duo is uitgeklapt
 const [expandedClutchId,setExpandedClutchId]=useState(null); // Clutch Lab: welke speler-kaart is uitgeklapt
+const [expandedFoulId,setExpandedFoulId]=useState(null); // Foul Lab: welke speler-kaart is uitgeklapt
 const [expandedRecord,setExpandedRecord]=useState(null); // Records: welk record-kaartje is uitgeklapt
 const [statsSearch,setStatsSearch]=useState(""); // Speler-zoekfilter voor de grote lijsten
 const searchMatch=name=>!statsSearch.trim()||name.toLowerCase().includes(statsSearch.trim().toLowerCase());
@@ -3561,6 +3578,25 @@ return{player,made:t.made,att,pct:twoPtPctOf(t.made,att),games:t.games,gp:t.game
 }).filter(Boolean);
 return rows.sort((a,b)=>b.made-a.made||b.pct-a.pct);
 },[monthGames,players]);
+
+// Foul Lab — every player with ≥1 personal foul this period, incl. per-game breakdown.
+// Ranked the same way as the Draymond Green Award: most fouls per game (pfpg), total fouls as tiebreaker.
+const foulRows=useMemo(()=>{
+const byPid={};
+monthGames.forEach(g=>{
+if(!g.playerId||!gameCounts(g))return;
+const t=byPid[g.playerId]||(byPid[g.playerId]={pf:0,games:[]});
+t.pf+=+g.pf||0;t.games.push(g);
+});
+const rows=Object.entries(byPid).map(([pid,t])=>{
+const player=players.find(p=>p.id===pid);
+if(!player||t.pf<=0)return null;
+const gp=t.games.length;
+return{player,pf:t.pf,gp,pfpg:+(t.pf/gp).toFixed(2),games:t.games};
+}).filter(Boolean);
+return rows.sort((a,b)=>b.pfpg-a.pfpg||b.pf-a.pf);
+},[monthGames,players]);
+const maxFoulPfpg=Math.max(0.0001,...foulRows.map(r=>r.pfpg));
 
 // Biggest riser/faller: compares each player's eff this calendar month to last calendar month
 // (only meaningful in month view — season/all-time have no single "previous period" to compare to).
@@ -4892,6 +4928,56 @@ return(
 </div>
 );
 })}
+</div>
+)}
+</div>
+);
+})}
+</div>
+</div>
+)}
+
+{/* Foul Lab */}
+{foulRows.length>0&&(
+<div style={{marginTop:8,marginBottom:24}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>✋ FOUL LAB — {monthLabel.toUpperCase()}</div>
+<div style={{color:GREY,fontSize:12,marginBottom:16,lineHeight:1.5}}>
+Zelfde rangschikking als de Draymond Green Award: <span style={{color:WHITE,fontWeight:700}}>eerst op fouls gem. per game, totaal fouls als tiebreaker</span>. Voor "fair play".
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:10}}>
+{foulRows.filter(r=>searchMatch(r.player.name)).map((r,i)=>{
+const isOpen=expandedFoulId===r.player.id;
+const barPct=Math.round((r.pfpg/maxFoulPfpg)*100);
+const sortedGames=[...r.games].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+return(
+<div key={r.player.id} onClick={()=>setExpandedFoulId(isOpen?null:r.player.id)} style={{background:INPUTBG,borderRadius:12,padding:"12px 14px",cursor:"pointer",border:isOpen?"1px solid #8E44AD55":"1px solid transparent",transition:"border-color .2s"}}>
+<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+<div style={{width:22,height:22,borderRadius:"50%",background:i===0?"#8E44AD":"#333",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:11,flexShrink:0,color:WHITE}}>{i+1}</div>
+<Avatar player={r.player} size={32}/>
+<div style={{flex:1,minWidth:0}}>
+<div style={{fontWeight:700,fontSize:14,color:WHITE,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.player.name}</div>
+<div style={{color:GREY,fontSize:11}}>{r.gp}G</div>
+</div>
+<div style={{textAlign:"right",flexShrink:0}}>
+<div style={{color:"#8E44AD",fontWeight:800,fontSize:18}}>{r.pfpg}</div>
+<div style={{color:GREY,fontSize:10}}>{r.pf} totaal</div>
+</div>
+<span style={{color:GREY,fontSize:14,transform:isOpen?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}>▾</span>
+</div>
+<div style={{height:8,background:"#222",borderRadius:4,overflow:"hidden"}}>
+<div style={{height:"100%",width:`${barPct}%`,background:`linear-gradient(90deg,${i===0?"#8E44AD":"#444"},${i===0?"#c39bd3":"#666"})`,borderRadius:4,transition:"width .4s ease"}}/>
+</div>
+{isOpen&&(
+<div onClick={e=>e.stopPropagation()} style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${DIVIDER}`,display:"flex",flexDirection:"column",gap:6,cursor:"default"}}>
+<div style={{display:"grid",gridTemplateColumns:"1fr 50px",gap:4,fontSize:9,color:GREY,fontWeight:700,padding:"0 4px"}}>
+<div>DATUM</div><div style={{textAlign:"right"}}>PF</div>
+</div>
+{sortedGames.map((g,gi)=>(
+<div key={gi} style={{display:"grid",gridTemplateColumns:"1fr 50px",gap:4,fontSize:11,padding:"5px 4px",background:gi%2===0?"rgba(255,255,255,0.02)":"transparent",borderRadius:6,alignItems:"center"}}>
+<div style={{color:WHITE}}>{g.date?.slice(5)||"—"}</div>
+<div style={{textAlign:"right",color:"#8E44AD",fontWeight:800}}>{g.pf||0}</div>
+</div>
+))}
 </div>
 )}
 </div>
@@ -11057,33 +11143,33 @@ PHX:["#1D1160","#E56020"],POR:["#E03A3E","#000000"],SAC:["#5A2D81","#63727A"],SA
 // this is a client-only static file so it can't read local disk paths), then uncomment the matching line below and paste the URL in.
 // Any team left commented out (or missing) automatically falls back to the color-badge monogram.
 const TEAM_LOGOS={
-ATL:"https://imgur.com/gallery/atlanta-hawks-T6YkV5Q#hyBYbyH",
-BOS:"https://imgur.com/gallery/boston-celtics-logo-vXz7QiR#NteU0zN",
-BKN:"https://imgur.com/gallery/brooklyn-nets-Yo6jvba#7p23DMv",
-CHA:"https://imgur.com/gallery/charlotte-hornets-cdGODJl#cuyjr5t",
-CHI:"https://imgur.com/gallery/chicago-bulls-FBziBdv#TGeRko0",
-CLE:"https://imgur.com/gallery/cleveland-cavaliers-DiNbQ0d#ipaBmO3",
-DET:"https://imgur.com/gallery/detroit-pistons-WFsS7lt#LKWRkJl",
-IND:"https://imgur.com/gallery/indiana-pacers-5XpYdwM#ZPbK3xx",
-MIA:"https://imgur.com/gallery/miami-heat-DGVrUYD#kh6WicF",
-MIL:"https://imgur.com/gallery/milwaukee-bucks-just-ripped-off-jagermeister-MK5EhrX",
-NYK:"https://imgur.com/gallery/new-york-knicks-CW6PyBH#9quYaJk",
-ORL:"https://imgur.com/gallery/orlando-magic-sticks-ZOgsl#TEoJiLT",
-PHI:"https://imgur.com/gallery/philadelphia-69ers-VJ9zAxd#aiycPSF",
-TOR:"https://imgur.com/gallery/redesigned-toronto-raptors-logo-with-more-accurate-velociraptor-wwSc2c2#wf6vbpB",
-// WAS:"",
-DAL:"https://imgur.com/gallery/dallas-mavericks-F1fieOw#M7sdYi8",
-DEN:"https://imgur.com/gallery/denver-nuggets-01hL8nS#ceBax03",
-GSW:"https://imgur.com/gallery/golden-state-warriors-logo-awuqhVb#If7tbl6",
-HOU:"https://imgur.com/gallery/houston-rockets-logo-concepts-v2-sfe5z87#NrpHvgg",
-LAC:"https://imgur.com/gallery/la-clippers-logo-GkDRxOW#ymqa1VW",
-LAL:"https://imgur.com/gallery/lakers-2zWOI8L#7b3AHLj",
+// ATL:"https://your-host/atl.png",
+// BOS:"https://your-host/bos.png",
+// BKN:"https://your-host/bkn.png",
+// CHA:"https://your-host/cha.png",
+// CHI:"https://your-host/chi.png",
+// CLE:"https://your-host/cle.png",
+// DET:"https://your-host/det.png",
+// IND:"https://your-host/ind.png",
+// MIA:"https://your-host/mia.png",
+// MIL:"https://your-host/mil.png",
+// NYK:"https://your-host/nyk.png",
+// ORL:"https://your-host/orl.png",
+// PHI:"https://your-host/phi.png",
+// TOR:"https://your-host/tor.png",
+// WAS:"https://your-host/was.png",
+// DAL:"https://your-host/dal.png",
+// DEN:"https://your-host/den.png",
+// GSW:"https://your-host/gsw.png",
+// HOU:"https://your-host/hou.png",
+// LAC:"https://your-host/lac.png",
+// LAL:"https://your-host/lal.png",
 // MEM:"https://your-host/mem.png",
-MIN:"https://imgur.com/gallery/crying-jordan-minnesota-CnPClPA#4RaOwtk",
+// MIN:"https://your-host/min.png",
 // NOP:"https://your-host/nop.png",
-OKC:"https://imgur.com/gallery/oklahoma-city-thunder-L4UZPCF",
+// OKC:"https://your-host/okc.png",
 // PHX:"https://your-host/phx.png",
-POR:"https://imgur.com/gallery/portland-trailblazers-qMpz91P",
+// POR:"https://your-host/por.png",
 // SAC:"https://your-host/sac.png",
 // SAS:"https://your-host/sas.png",
 // UTA:"https://your-host/uta.png",
@@ -12323,14 +12409,15 @@ return(
 // ── Team badge — colored monogram using the team's real color pair; renders TEAM_LOGOS[abbr] as an image instead if you've set one.
 function TeamBadge({abbr,size=38}){
 const logo=TEAM_LOGOS[abbr];
-if(logo){
+const[failed,setFailed]=React.useState(false);
+const c=TEAM_COLORS[abbr]||["#3a1414","#160a0a"];
+if(logo&&!failed){
 return(
 <div style={{width:size,height:size,borderRadius:"50%",overflow:"hidden",flexShrink:0,background:"#0a0606",border:`1px solid ${CGOLD_SOFT}`,boxShadow:CGLOW,display:"flex",alignItems:"center",justifyContent:"center"}}>
-<img src={logo} alt={abbr} style={{width:"82%",height:"82%",objectFit:"contain"}}/>
+<img src={logo} alt={abbr} onError={()=>setFailed(true)} style={{width:"82%",height:"82%",objectFit:"contain"}}/>
 </div>
 );
 }
-const c=TEAM_COLORS[abbr]||["#3a1414","#160a0a"];
 return(
 <div style={{width:size,height:size,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:`radial-gradient(120% 120% at 30% 20%, ${c[0]} 0%, ${c[1]} 100%)`,border:`1px solid ${CGOLD_SOFT}`,boxShadow:CGLOW}}>
 <span className="career-display" style={{color:"#fff",fontWeight:700,fontSize:Math.round(size*0.34),letterSpacing:.5,textShadow:"0 1px 2px rgba(0,0,0,.5)"}}>{abbr}</span>

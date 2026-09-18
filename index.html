@@ -1414,8 +1414,6 @@ return(
 function AdminDashboardModal({appSettings,botSettings,players,games,scheduledGames,larpPosts,triviaUsers,manualAwards,onSaveAppSettings,onSaveBotSettings,onClose,onQuickAction}){
 const [showBotSettings,setShowBotSettings]=useState(false);
 const {BG2,IS}=styles();
-const triviaEnabled=appSettings?.triviaEnabled!==false;
-const nbaPredictionsEnabled=appSettings?.nbaPredictionsEnabled!==false;
 const [bdlKeyInput,setBdlKeyInput]=useState(appSettings?.balldontlieApiKey||"");
 const ann=appSettings?.announcement||null;
 const [annIcon,setAnnIcon]=useState(ann?.icon||"📢");
@@ -1473,28 +1471,24 @@ return(
 <button onClick={()=>onQuickAction("hallOfFame")} style={{background:INPUTBG,color:WHITE,border:"none",borderRadius:10,padding:"12px 8px",fontWeight:600,fontSize:13,cursor:"pointer"}}>🏆 Award uitreiken</button>
 </div>
 
-<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>INSTELLINGEN</div>
-
-<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8}}>TABBLADEN</div>
+<div style={{color:GREY,fontSize:11,marginBottom:10}}>Een uitgeschakeld tabblad is verborgen voor iedereen behalve admins.</div>
+{NAV_TABS.map(({id,icon,label,key})=>{
+const on=appSettings?.[key]!==false;
+return(
+<div key={id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
 <div>
-<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🧠 Trivia tab</div>
-<div style={{color:GREY,fontSize:11,marginTop:2}}>{triviaEnabled?"Zichtbaar voor iedereen":"Verborgen voor niet-admins"}</div>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>{icon} {label}</div>
+<div style={{color:GREY,fontSize:11,marginTop:2}}>{on?"Zichtbaar voor iedereen":"Verborgen voor niet-admins"}</div>
 </div>
-<button onClick={()=>onSaveAppSettings({triviaEnabled:!triviaEnabled})} style={{background:triviaEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-{triviaEnabled?"Uitschakelen":"Inschakelen"}
+<button onClick={()=>onSaveAppSettings({[key]:!on})} style={{background:on?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
+{on?"Uitschakelen":"Inschakelen"}
 </button>
 </div>
+);
+})}
 
-<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
-<div>
-<div style={{color:WHITE,fontSize:13,fontWeight:600}}>🔮 NBA Predictions tab</div>
-<div style={{color:GREY,fontSize:11,marginTop:2}}>{nbaPredictionsEnabled?"Zichtbaar voor iedereen":"Verborgen voor niet-admins"}</div>
-</div>
-<button onClick={()=>onSaveAppSettings({nbaPredictionsEnabled:!nbaPredictionsEnabled})} style={{background:nbaPredictionsEnabled?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-{nbaPredictionsEnabled?"Uitschakelen":"Inschakelen"}
-</button>
-</div>
-
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8,marginTop:4}}>INSTELLINGEN</div>
 <div style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
 <div style={{color:WHITE,fontSize:13,fontWeight:600,marginBottom:2}}>🔑 BALLDONTLIE API key</div>
 <div style={{color:GREY,fontSize:11,marginBottom:8}}>Nodig om het NBA-schema te verversen (gratis account op balldontlie.io).</div>
@@ -3110,7 +3104,7 @@ return(
 );
 }
 
-function PlayerProfileModal({player,allGames,allPlayers,scheduledGames=[],highlights,manualAwards,seasons=[],onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
+function PlayerProfileModal({player,allGames,allPlayers,scheduledGames=[],highlights,manualAwards,seasons=[],onevones=[],onClose,onEditPlayer,onPerfClick,onOpenHighlight,onViewAllHighlights,onCompare,isAdmin}){
 const pg=allGames.filter(g=>g.playerId===player.id).sort((a,b)=>b.date.localeCompare(a.date));
 const playerHighlights=(highlights||[]).filter(h=>h.playerId===player.id);
 const randomHighlight=useMemo(()=>playerHighlights.length?playerHighlights[Math.floor(Math.random()*playerHighlights.length)]:null,[playerHighlights.length,player.id]);
@@ -3131,6 +3125,25 @@ record=`${myWins}-${oppWins}`;
 }
 return{opponent:opp,meetings:riv.meetings,record};
 },[allGames,allPlayers,player.id]);
+// 1v1s this player took part in. Kept entirely separate from `pg` / any stat average — 1v1s never
+// feed PPG/RPG/APG or anything else on this profile; this is a standalone bragging-rights block.
+const oneVOne=useMemo(()=>{
+const mine=(onevones||[]).filter(m=>m.playerAId===player.id||m.playerBId===player.id)
+.sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+if(!mine.length)return null;
+let w=0,l=0,d=0;
+const byOpp={};
+mine.forEach(m=>{
+const isA=m.playerAId===player.id;
+const mine_=isA?m.scoreA:m.scoreB, theirs=isA?m.scoreB:m.scoreA;
+const oppId=isA?m.playerBId:m.playerAId;
+if(!byOpp[oppId])byOpp[oppId]={w:0,l:0};
+if(mine_>theirs){w++;byOpp[oppId].w++;}
+else if(mine_<theirs){l++;byOpp[oppId].l++;}
+else d++;
+});
+return{matches:mine,w,l,d,byOpp};
+},[onevones,player.id]);
 // Status history: every scheduled game where this player was ever marked Questionable/Out, newest first —
 // scheduledGames already carry a date + injuryReport, so this is just reading that as a timeline.
 const statusHistory=useMemo(()=>{
@@ -3234,6 +3247,39 @@ return(
 </div>
 )}
 </div>
+</div>
+)}
+{oneVOne&&(
+<div data-testid="onevone-section" style={{marginBottom:20}}>
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>⚔️ 1V1 RECORD</div>
+<div style={{color:GREY,fontSize:10,marginBottom:10}}>Telt niet mee voor de statistieken hierboven.</div>
+<div style={{display:"flex",gap:8,marginBottom:10}}>
+{[["Gespeeld",oneVOne.matches.length,WHITE],["Gewonnen",oneVOne.w,"#81C784"],["Verloren",oneVOne.l,RED]].map(([lbl,val,col])=>(
+<div key={lbl} style={{flex:1,background:INPUTBG,borderRadius:10,padding:"10px 4px",textAlign:"center"}}>
+<div style={{color:col,fontWeight:800,fontSize:18}}>{val}</div>
+<div style={{color:GREY,fontSize:10}}>{lbl}</div>
+</div>
+))}
+</div>
+<div style={{display:"flex",flexDirection:"column",gap:6}}>
+{oneVOne.matches.slice(0,6).map(m=>{
+const isA=m.playerAId===player.id;
+const mineScore=isA?m.scoreA:m.scoreB, theirScore=isA?m.scoreB:m.scoreA;
+const opp=allPlayers.find(p=>p.id===(isA?m.playerBId:m.playerAId));
+const won=mineScore>theirScore, tie=mineScore===theirScore;
+return(
+<div key={m.id} style={{display:"flex",alignItems:"center",gap:10,background:INPUTBG,borderRadius:10,padding:"8px 12px"}}>
+<span style={{color:tie?GREY:won?"#81C784":RED,fontSize:11,fontWeight:800,width:14,flexShrink:0}}>{tie?"–":won?"W":"L"}</span>
+<div style={{flex:1,minWidth:0}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>vs {opp?.name||"?"}</div>
+<div style={{color:GREY,fontSize:11}}>{m.date}{m.note?` · ${m.note}`:""}</div>
+</div>
+<span style={{color:WHITE,fontSize:13,fontWeight:700,flexShrink:0}}>{mineScore}–{theirScore}</span>
+</div>
+);
+})}
+</div>
+{oneVOne.matches.length>6&&<div style={{color:GREY,fontSize:11,marginTop:6}}>+{oneVOne.matches.length-6} eerdere 1v1s</div>}
 </div>
 )}
 {statusHistory.length>0&&(
@@ -15636,6 +15682,144 @@ return(
 // ══════════════════════════════════════════
 // ── MAIN APP
 // ══════════════════════════════════════════
+// ── 1v1s — separate lightweight log for 1-on-1 matchups. Deliberately NOT mixed into `games`/player
+// stat averages: 1v1s aren't 5v5 team basketball, so they never touch PPG/RPG/APG or any player-profile stat.
+function onevoneId(){return "1v1_"+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+// Single source of truth for tab visibility — each tab's `key` maps to an appSettings flag an admin can flip off.
+const NAV_TABS=[
+{id:"performances",icon:"🏀",label:"Performances",key:"performancesEnabled"},
+{id:"fullgames",icon:"📅",label:"Games",key:"fullgamesEnabled"},
+{id:"monthly",icon:"📊",label:"Stats",key:"statsEnabled"},
+{id:"larp",icon:"🐦",label:"LARP",key:"larpEnabled"},
+{id:"players",icon:"👥",label:"Players",key:"playersEnabled"},
+{id:"onevones",icon:"⚔️",label:"1v1s",key:"onevonesEnabled"},
+{id:"trivia",icon:"🧠",label:"Trivia",key:"triviaEnabled"},
+{id:"nbapred",icon:"🎮",label:"Minigames",key:"nbaPredictionsEnabled"},
+];
+function OnevonesSection({onevones,players,isAdmin,onSave,onDelete}){
+const [showForm,setShowForm]=useState(false);
+const sorted=useMemo(()=>onevones.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")),[onevones]);
+// Simple head-to-head tally per player, computed from logged 1v1s only — shown as a small leaderboard, never fed into player profiles.
+const tally=useMemo(()=>{
+const t={};
+onevones.forEach(m=>{
+if(!t[m.playerAId])t[m.playerAId]={w:0,l:0};
+if(!t[m.playerBId])t[m.playerBId]={w:0,l:0};
+if(m.scoreA===m.scoreB)return;
+const winnerId=m.scoreA>m.scoreB?m.playerAId:m.playerBId;
+const loserId=m.scoreA>m.scoreB?m.playerBId:m.playerAId;
+t[winnerId].w++;t[loserId].l++;
+});
+return Object.entries(t).map(([pid,rec])=>({pid,...rec})).sort((a,b)=>(b.w-b.l)-(a.w-a.l));
+},[onevones]);
+return(
+<div>
+<div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+<span style={{color:GREY,fontSize:13}}>{onevones.length} 1v1{onevones.length===1?"":"s"} gelogd</span>
+{isAdmin&&<button onClick={()=>setShowForm(true)} style={{background:"transparent",border:"none",color:RED,fontSize:15,fontWeight:600,cursor:"pointer"}}>+ Log 1v1</button>}
+</div>
+<div style={{padding:"0 16px 8px",color:GREY,fontSize:11,lineHeight:1.5}}>
+1v1s tellen niet mee voor spelersstatistieken (PPG/RPG/APG etc.) — dat blijft puur 5v5. Dit is losstaande bragging rights.
+</div>
+{tally.length>0&&(
+<div style={{display:"flex",gap:8,overflowX:"auto",padding:"4px 16px 14px"}}>
+{tally.map(({pid,w,l})=>{
+const p=players.find(x=>x.id===pid);
+if(!p)return null;
+return(
+<div key={pid} style={{flexShrink:0,background:INPUTBG,borderRadius:10,padding:"8px 12px",textAlign:"center",minWidth:70}}>
+<Avatar player={p} size={32}/>
+<div style={{color:WHITE,fontSize:11,fontWeight:700,marginTop:4,whiteSpace:"nowrap"}}>{p.name}</div>
+<div style={{color:GREY,fontSize:11}}><span style={{color:"#81C784"}}>{w}W</span>–<span style={{color:RED}}>{l}L</span></div>
+</div>
+);
+})}
+</div>
+)}
+{sorted.length===0&&(
+<div style={{textAlign:"center",padding:"60px 20px",color:GREY}}>
+<div style={{fontSize:48,marginBottom:12}}>⚔️</div>
+<div style={{color:WHITE,fontSize:17,fontWeight:600,marginBottom:6}}>Nog geen 1v1s gelogd</div>
+{isAdmin&&<button onClick={()=>setShowForm(true)} style={{background:RED,color:WHITE,border:"none",borderRadius:20,padding:"12px 28px",fontWeight:700,fontSize:15,cursor:"pointer",marginTop:8}}>+ Log 1v1</button>}
+</div>
+)}
+{sorted.map(m=>{
+const pa=players.find(p=>p.id===m.playerAId),pb=players.find(p=>p.id===m.playerBId);
+if(!pa||!pb)return null;
+const aWon=m.scoreA>m.scoreB,bWon=m.scoreB>m.scoreA;
+return(
+<div key={m.id} style={{background:BG,borderBottom:`1px solid ${DIVIDER}`,padding:"14px 16px"}}>
+<div style={{display:"flex",alignItems:"center",gap:10}}>
+<div style={{flex:1,display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+<Avatar player={pa} size={38}/>
+<span style={{color:aWon?WHITE:GREY,fontWeight:aWon?700:500,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pa.name}</span>
+</div>
+<div style={{fontWeight:800,fontSize:17,color:WHITE,flexShrink:0}}>{m.scoreA}–{m.scoreB}</div>
+<div style={{flex:1,display:"flex",alignItems:"center",gap:8,justifyContent:"flex-end",minWidth:0}}>
+<span style={{color:bWon?WHITE:GREY,fontWeight:bWon?700:500,fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pb.name}</span>
+<Avatar player={pb} size={38}/>
+</div>
+</div>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8}}>
+<span style={{color:GREY,fontSize:12}}>{m.date}{m.note?` · ${m.note}`:""}</span>
+{isAdmin&&<button onClick={()=>onDelete(m.id)} style={{background:"transparent",border:"none",color:DARKGREY,cursor:"pointer",fontSize:18,padding:"0 2px",lineHeight:1}}>×</button>}
+</div>
+</div>
+);
+})}
+{showForm&&<Log1v1Modal players={players} onSave={m=>{onSave(m);setShowForm(false);}} onClose={()=>setShowForm(false)}/>}
+</div>
+);
+}
+function Log1v1Modal({players,onSave,onClose}){
+const [playerAId,setPlayerAId]=useState(players[0]?.id||"");
+const [playerBId,setPlayerBId]=useState(players[1]?.id||"");
+const [scoreA,setScoreA]=useState("");
+const [scoreB,setScoreB]=useState("");
+const [date,setDate]=useState(()=>new Date().toISOString().slice(0,10));
+const [note,setNote]=useState("");
+const valid=playerAId&&playerBId&&playerAId!==playerBId&&scoreA!==""&&scoreB!=="";
+return(
+<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:200,display:"flex",alignItems:"flex-end"}} onClick={onClose}>
+<div onClick={e=>e.stopPropagation()} style={{background:"#111",borderRadius:"20px 20px 0 0",padding:"20px 16px calc(20px + env(safe-area-inset-bottom,0px))",width:"100%",maxHeight:"85vh",overflowY:"auto"}}>
+<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+<span style={{color:WHITE,fontSize:18,fontWeight:700}}>Log 1v1</span>
+<button onClick={onClose} style={{background:"transparent",border:"none",color:GREY,fontSize:22,cursor:"pointer"}}>×</button>
+</div>
+<div style={{display:"flex",gap:10,marginBottom:12}}>
+<div style={{flex:1}}>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>SPELER A</label>
+<select value={playerAId} onChange={e=>setPlayerAId(e.target.value)} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14}}>
+{players.map(p=>(<option key={p.id} value={p.id}>{p.name}</option>))}
+</select>
+</div>
+<div style={{flex:1}}>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>SPELER B</label>
+<select value={playerBId} onChange={e=>setPlayerBId(e.target.value)} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14}}>
+{players.map(p=>(<option key={p.id} value={p.id}>{p.name}</option>))}
+</select>
+</div>
+</div>
+<div style={{display:"flex",gap:10,marginBottom:12}}>
+<div style={{flex:1}}>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>SCORE A</label>
+<input type="number" value={scoreA} onChange={e=>setScoreA(e.target.value)} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14,boxSizing:"border-box"}}/>
+</div>
+<div style={{flex:1}}>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>SCORE B</label>
+<input type="number" value={scoreB} onChange={e=>setScoreB(e.target.value)} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14,boxSizing:"border-box"}}/>
+</div>
+</div>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>DATUM</label>
+<input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14,boxSizing:"border-box",marginBottom:12}}/>
+<label style={{color:GREY,fontSize:11,fontWeight:600,display:"block",marginBottom:4}}>NOTITIE (optioneel)</label>
+<input type="text" value={note} onChange={e=>setNote(e.target.value)} placeholder="bv. best of 5, park run" style={{width:"100%",background:INPUTBG,border:"none",borderRadius:10,padding:"10px 8px",color:WHITE,fontSize:14,boxSizing:"border-box",marginBottom:18}}/>
+<button disabled={!valid} onClick={()=>onSave({id:onevoneId(),playerAId,playerBId,scoreA:Number(scoreA),scoreB:Number(scoreB),date,note,createdAt:new Date().toISOString()})} style={{width:"100%",background:valid?RED:DARKGREY,color:WHITE,border:"none",borderRadius:14,padding:"14px 0",fontWeight:700,fontSize:15,cursor:valid?"pointer":"default"}}>Opslaan</button>
+</div>
+</div>
+);
+}
+
 function App(){
 const [showSplash,setShowSplash]=React.useState(()=>!sessionStorage.getItem("lba_splashed"));
 function dismissSplash(){sessionStorage.setItem("lba_splashed","1");setShowSplash(false);}
@@ -15688,6 +15872,17 @@ const [nbaSeasonActuals,setNbaSeasonActuals]=useState(null);
 const [nbaCareerSims,setNbaCareerSims]=useState([]);
 const [nbaRefreshing,setNbaRefreshing]=useState(false);
 const [nbaRefreshError,setNbaRefreshError]=useState("");
+const [onevones,setOnevones]=useState([]);
+
+// If the active tab gets disabled by an admin while a non-admin is on it, fall back to the first visible tab.
+useEffect(()=>{
+if(isAdmin||!appSettings)return;
+const current=NAV_TABS.find(t=>t.id===tab);
+if(current&&appSettings[current.key]===false){
+const fallback=NAV_TABS.find(t=>appSettings[t.key]!==false);
+if(fallback)changeTab(fallback.id);
+}
+},[appSettings,isAdmin]);
 
 // Fetch user IP for wallet identification
 useEffect(()=>{
@@ -15730,6 +15925,7 @@ bReady=true;if(pReady&&gReady&&cReady&&sReady&&bReady){clearTimeout(timeout);set
 uL=_onSnapshot(_col(_db,"larp_posts"),s=>{
 setLarpPosts(s.docs.map(d=>d.data()));
 },(err)=>console.error("Larp posts listener error:",err));
+_onSnapshot(_col(_db,"onevones"),s=>{setOnevones(s.docs.map(d=>d.data()));},(err)=>console.error("1v1s listener error:",err));
 _onSnapshot(_col(_db,"fantasy_users"),s=>{setTriviaUsers(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia users error:",err));
 _onSnapshot(_col(_db,"trivia_results"),s=>{setTriviaResults(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia results error:",err));
 _onSnapshot(_col(_db,"trivia_questions"),s=>{setTriviaQuestions(s.docs.map(d=>d.data()));},(err)=>console.error("Trivia questions error:",err));
@@ -16365,6 +16561,8 @@ showSaved();
 // LARP handlers
 async function createLarpPost(p){setSaveStatus("saving");try{await fbSave("larp_posts",p);showSaved();}catch(e){console.error(e);showError();}}
 async function deleteLarpPost(id){setSaveStatus("saving");try{await fbDel("larp_posts",id);await Promise.all(larpReplies.filter(r=>r.postId===id).map(r=>fbDel("larp_replies",r.id)));showSaved();}catch(e){console.error(e);showError();}}
+async function save1v1(m){setSaveStatus("saving");try{await fbSave("onevones",m);showSaved();}catch(e){console.error(e);showError();}}
+async function delete1v1(id){setSaveStatus("saving");try{await fbDel("onevones",id);showSaved();}catch(e){console.error(e);showError();}}
 async function pinLarpPost(id){
 setSaveStatus("saving");
 try{
@@ -16607,9 +16805,9 @@ Nu updaten
 )}
 </div>
 
-{/* Tabs — 5 tabs now */}
+{/* Tabs — top segmented bar shows the 5 "core" tabs; filtered by admin-controlled visibility */}
 <div style={{display:"flex",borderBottom:`1px solid ${DIVIDER}`}}>
-{[{id:"performances",label:"Performances"},{id:"fullgames",label:"Games"},{id:"monthly",label:"Stats"},{id:"larp",label:"LARP"},{id:"players",label:"Players"}].map(({id,label})=>(
+{NAV_TABS.filter(({id,key})=>id!=="onevones"&&id!=="trivia"&&id!=="nbapred"&&(isAdmin||appSettings?.[key]!==false)).map(({id,label})=>(
 <button key={id} data-testid={`top-tab-${id}`} onClick={()=>changeTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"12px 0",color:tab===id?WHITE:GREY,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${RED}`:"2px solid transparent"}}>{label}</button>
 ))}
 </div>
@@ -16689,6 +16887,9 @@ return(
 </div>
 )}
 
+{/* 1V1S TAB */}
+{tab==="onevones"&&<OnevonesSection onevones={onevones} players={players} isAdmin={isAdmin} onSave={save1v1} onDelete={delete1v1}/>}
+
 {/* FANTASY TAB */}
 {tab==="trivia"&&(
 <TriviaTab
@@ -16760,7 +16961,7 @@ return (
 
 {/* Bottom Nav */}
 <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a0a0a",borderTop:`1px solid ${DIVIDER}`,display:"flex",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-{[{id:"performances",icon:"🏀",label:"Performances"},{id:"fullgames",icon:"📅",label:"Games"},{id:"monthly",icon:"📊",label:"Stats"},{id:"larp",icon:"🐦",label:"LARP"},{id:"players",icon:"👥",label:"Players"},{id:"trivia",icon:"🧠",label:"Trivia"},{id:"nbapred",icon:"🎮",label:"Minigames"}].filter(({id})=>(id!=="trivia"||isAdmin||appSettings?.triviaEnabled!==false)&&(id!=="nbapred"||isAdmin||appSettings?.nbaPredictionsEnabled!==false)).map(({id,icon,label})=>(
+{NAV_TABS.filter(({id,key})=>isAdmin||appSettings?.[key]!==false).map(({id,icon,label})=>(
 <button key={id} data-testid={`bottom-tab-${id}`} onClick={()=>changeTab(id)} style={{flex:1,background:"transparent",border:"none",cursor:"pointer",padding:"10px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
 <span style={{fontSize:22}}>{icon}</span>
 <span style={{fontSize:10,fontWeight:600,color:tab===id?RED:GREY}}>{label}</span>
@@ -16779,7 +16980,7 @@ return (
 {editingGame&&<EditGameModal game={editingGame} players={players} allGames={games} onSave={saveGameEdit} onClose={()=>setEditingGame(null)}/>}
 {modal?.type==="editPlayer"&&editPlayer&&<PlayerFormModal player={editPlayer} onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal?.type==="playerProfile"&&profilePlayer&&(
-<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} scheduledGames={scheduledGames} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]}
+<PlayerProfileModal player={profilePlayer} allGames={games} allPlayers={players} scheduledGames={scheduledGames} highlights={highlights} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]} onevones={onevones}
 onClose={()=>setModal(null)} onEditPlayer={()=>setModal({type:"editPlayer",pid:profilePlayer.id})}
 onPerfClick={g=>setModal({type:"perfDetail",gameId:g.id})}
 onOpenHighlight={hl=>setHighlightView(hl)}

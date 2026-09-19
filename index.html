@@ -1922,6 +1922,28 @@ return(
 );
 }
 
+// Iso Award — twee tegenover elkaar staande figuren met een bal ertussen, voor de 1v1-koning
+function IsoIcon({size=28,color="#9B59B6",grayed=false}){
+const c=grayed?"#5a5a5a":color;
+return(
+<svg width={size} height={size} viewBox="0 0 100 100" style={{opacity:grayed?0.55:1,filter:grayed?"grayscale(1)":"none"}}>
+<circle cx="22" cy="20" r="9" fill={c}/>
+<path d="M22 29 L22 54" stroke={c} strokeWidth="9" strokeLinecap="round"/>
+<path d="M22 34 L36 42" stroke={c} strokeWidth="6" fill="none" strokeLinecap="round"/>
+<path d="M22 54 L13 74 L16 88" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<path d="M22 54 L32 70 L29 86" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+<circle cx="78" cy="20" r="9" fill={c} opacity="0.55"/>
+<path d="M78 29 L78 54" stroke={c} strokeWidth="9" strokeLinecap="round" opacity="0.55"/>
+<path d="M78 34 L64 42" stroke={c} strokeWidth="6" fill="none" strokeLinecap="round" opacity="0.55"/>
+<path d="M78 54 L87 74 L84 88" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity="0.55"/>
+<path d="M78 54 L68 70 L71 86" stroke={c} strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round" opacity="0.55"/>
+<circle cx="50" cy="48" r="11" fill={c}/>
+<path d="M39 48 L61 48 M50 37 L50 59" stroke="rgba(0,0,0,0.4)" strokeWidth="1.8"/>
+<path d="M14 95 C30 84 70 84 86 95" stroke={c} strokeWidth="3" fill="none" strokeDasharray="4 3" opacity="0.7"/>
+</svg>
+);
+}
+
 // Award type definitions — NBA-style per maand uitreiken
 const AWARD_TYPES=[
 {id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
@@ -1936,6 +1958,7 @@ const AWARD_TYPES=[
 {id:"clutch",       label:"Clutch Player vd Maand",    color:"#E8312A", Icon:ClutchIcon,   desc:"Beste in de slotfase"},
 {id:"alllba1",      label:"All-LBA 1e Team",           color:"#f5a524", Icon:AllLBA1Icon,  desc:"Eerste team selectie", multi:true, maxPick:2},
 {id:"alllba2",      label:"All-LBA 2e Team",           color:"#BDC3C7", Icon:AllLBA2Icon,  desc:"Tweede team selectie", multi:true, maxPick:2},
+{id:"iso",          label:"Iso Award",                 color:"#9B59B6", Icon:IsoIcon,      desc:"Meeste 1v1s gewonnen"},
 {id:"fouler",       label:"Draymond Green Award",      color:"#8E44AD", Icon:FoulerIcon,   desc:"Meeste fouls gem. — voor 'fair play'"},
 ];
 function getAwardType(id){return AWARD_TYPES.find(a=>a.id===id)||AWARD_TYPES[0];}
@@ -2508,9 +2531,36 @@ return(
 );
 }
 
+// Iso Award: meeste gewonnen 1v1s in de periode. Gelijkspel in wins → hoogste win% (dan minste verliezen).
+// Draws tellen niet als winst. 1v1s staan los van de gewone game-stats en beïnvloeden die nergens.
+function computeIsoRanking(onevones,players){
+const byPid={};
+(onevones||[]).forEach(m=>{
+if(!m.playerAId||!m.playerBId)return;
+[m.playerAId,m.playerBId].forEach(pid=>{if(!byPid[pid])byPid[pid]={w:0,l:0,d:0};});
+if(m.scoreA===m.scoreB){byPid[m.playerAId].d++;byPid[m.playerBId].d++;return;}
+const win=m.scoreA>m.scoreB?m.playerAId:m.playerBId;
+const lose=m.scoreA>m.scoreB?m.playerBId:m.playerAId;
+byPid[win].w++;byPid[lose].l++;
+});
+return Object.entries(byPid)
+.filter(([pid])=>players.find(p=>p.id===pid))
+.map(([pid,r])=>{const tot=r.w+r.l+r.d;return{pid,...r,tot,pct:tot?Math.round(r.w/tot*100):0};})
+.filter(r=>r.w>0)
+.sort((a,b)=>b.w-a.w||b.pct-a.pct||a.l-b.l);
+}
+
 // ── Admin: Give Awards Modal
 // Berekent per award-type wie de stats van deze periode (maand of seizoen) als winnaar aanwijzen (admin beslist alsnog zelf)
-function computeAwardSuggestion(awardId,periodGames,prevPeriodGames,players,periodLbl){
+function computeAwardSuggestion(awardId,periodGames,prevPeriodGames,players,periodLbl,periodOnevones=[]){
+// Iso is de enige award die niet op 5v5-games draait, dus die wordt vóór de games-check afgehandeld:
+// een periode kan wél 1v1s hebben zonder gelogde teamgames.
+if(awardId==="iso"){
+const ranked=computeIsoRanking(periodOnevones,players);
+if(!ranked.length)return null;
+const r=ranked[0],ru=ranked[1];
+return{ids:[r.pid],reason:`${r.w} 1v1${r.w===1?"":"s"} gewonnen (${r.w}-${r.l}${r.d?`-${r.d}`:""}, ${r.pct}%)`,gap:ru?r.w-ru.w:null,runnerUpId:ru?ru.pid:null};
+}
 if(!periodGames.length)return null;
 const byPid={};
 periodGames.forEach(g=>{
@@ -2592,7 +2642,7 @@ default:return null;
 }
 }
 
-function AwardGiveModal({players,games=[],manualAwards,seasons=[],onSave,onDelete,onClose}){
+function AwardGiveModal({players,games=[],onevones=[],manualAwards,seasons=[],onSave,onDelete,onClose}){
 const {IS,BR,BG2}=styles();
 const d=new Date();
 const defaultMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
@@ -2634,7 +2684,15 @@ const prevMonth=`${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,
 return games.filter(g=>g.date&&g.playerId&&g.date.slice(0,7)===prevMonth);
 },[scope,activeSeason,selMonth,seasons,games]);
 
-const suggestion=useMemo(()=>computeAwardSuggestion(selAward,periodGames,prevPeriodGames,players,periodLbl),[selAward,periodGames,prevPeriodGames,players,periodLbl]);
+const periodOnevones=useMemo(()=>{
+if(scope==="season"){
+if(!activeSeason)return [];
+return (onevones||[]).filter(m=>m.date&&m.date>=activeSeason.startDate&&m.date<=activeSeason.endDate);
+}
+return (onevones||[]).filter(m=>m.date&&m.date.slice(0,7)===selMonth);
+},[scope,activeSeason,selMonth,onevones]);
+
+const suggestion=useMemo(()=>computeAwardSuggestion(selAward,periodGames,prevPeriodGames,players,periodLbl,periodOnevones),[selAward,periodGames,prevPeriodGames,players,periodLbl,periodOnevones]);
 const suggestedPlayers=(suggestion?.ids||[]).map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
 const suggestionAlreadyPicked=suggestion&&suggestion.ids.length===selPlayers.length&&suggestion.ids.every(id=>selPlayers.includes(id));
 
@@ -2881,7 +2939,7 @@ return(
 );
 }
 
-function HallOfFameModal({players,allGames,manualAwards,isAdmin,seasons=[],onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
+function HallOfFameModal({players,allGames,onevones=[],manualAwards,isAdmin,seasons=[],onClose,onOpenPlayer,onSaveAward,onDeleteAward}){
 const projected=useMemo(()=>computeProjectedMonthMvp(allGames,players),[allGames,players]);
 const [showGiveAward,setShowGiveAward]=useState(false);
 
@@ -2908,7 +2966,7 @@ return byType;
 
 return(
 <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:360}}>
-{showGiveAward&&<AwardGiveModal players={players} games={allGames} manualAwards={manualAwards} seasons={seasons} onSave={async(a)=>{await onSaveAward(a);}} onDelete={async(id)=>{await onDeleteAward(id);}} onClose={()=>setShowGiveAward(false)}/>}
+{showGiveAward&&<AwardGiveModal players={players} games={allGames} onevones={onevones} manualAwards={manualAwards} seasons={seasons} onSave={async(a)=>{await onSaveAward(a);}} onDelete={async(id)=>{await onDeleteAward(id);}} onClose={()=>setShowGiveAward(false)}/>}
 <div onClick={e=>e.stopPropagation()} className="fade-in" data-testid="hall-of-fame-modal" style={{background:"#111",borderRadius:"18px 18px 0 0",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",padding:"20px 20px calc(20px + env(safe-area-inset-bottom,0px))"}}>
 <div style={{width:36,height:4,background:DARKGREY,borderRadius:2,margin:"0 auto 16px"}}/>
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
@@ -3492,7 +3550,7 @@ return(
 }
 
 // ── Monthly Stats Tab
-function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
+function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onevones=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
 const{IS}=styles();
 const now=new Date();
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
@@ -3560,6 +3618,16 @@ return games.filter(g=>g.date&&g.date>=activeSeason.startDate&&g.date<=activeSea
 return games.filter(g=>gameYearMonth(g)===selMonth);
 },[games,rangeMode,activeSeason,selMonth]);
 const monthLabel=rangeMode==="alltime"?"All-Time":rangeMode==="season"?(activeSeason?activeSeason.name:"Geen seizoen geselecteerd"):`${MONTHS[parseInt(mo)-1]} ${yr}`;
+
+// Dezelfde periodefilter als monthGames, maar voor 1v1s — alleen gebruikt door de Iso Award.
+const periodOnevones=useMemo(()=>{
+if(rangeMode==="alltime")return onevones||[];
+if(rangeMode==="season"){
+if(!activeSeason)return[];
+return (onevones||[]).filter(m=>m.date&&m.date>=activeSeason.startDate&&m.date<=activeSeason.endDate);
+}
+return (onevones||[]).filter(m=>m.date&&m.date.slice(0,7)===selMonth);
+},[onevones,rangeMode,activeSeason,selMonth]);
 
 // Stats per player this month
 const playerStats=useMemo(()=>{
@@ -3831,15 +3899,15 @@ return `${MONTHS[prevD.getMonth()]} ${prevD.getFullYear()}`;
 
 // Award Race Panel: live, read-only preview per award (zelfde logica als het admin award-modal)
 const awardRace=useMemo(()=>{
-if(!monthGames.length)return [];
+if(!monthGames.length&&!periodOnevones.length)return [];
 return AWARD_TYPES.map(at=>{
-const sug=computeAwardSuggestion(at.id,monthGames,prevPeriodGames,players,monthLabel);
+const sug=computeAwardSuggestion(at.id,monthGames,prevPeriodGames,players,monthLabel,periodOnevones);
 if(!sug)return null;
 const leadPlayers=sug.ids.map(pid=>players.find(p=>p.id===pid)).filter(Boolean);
 if(!leadPlayers.length)return null;
 return{at,sug,leadPlayers};
 }).filter(Boolean);
-},[monthGames,prevPeriodGames,players,monthLabel]);
+},[monthGames,prevPeriodGames,players,monthLabel,periodOnevones]);
 
 // Milestone Watch: carrière-mijlpalen (over de volledige geschiedenis) die er bijna aankomen
 const milestoneWatch=useMemo(()=>{
@@ -16832,7 +16900,7 @@ onClick={()=>setModal({type:"perfDetail",gameId:g.id})}/>
 )}
 
 {/* STATS TAB */}
-{tab==="monthly"&&<MonthlyStats games={games.filter(gameCounts)} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
+{tab==="monthly"&&<MonthlyStats games={games.filter(gameCounts)} players={players} scheduledGames={scheduledGames} manualAwards={manualAwards} onevones={onevones} onOpenPlayer={pid=>setModal({type:"playerProfile",pid})} seasons={appSettings?.seasons||[]} isAdmin={isAdmin} onSaveSeasons={seasons=>saveAppSettings({seasons})}/>}
 
 {/* FULL GAMES TAB */}
 {tab==="fullgames"&&<FullGamesSection scheduledGames={scheduledGames} pastGames={games} players={players} onAddScheduledGame={saveScheduledGame} onEditScheduledGame={saveScheduledGame} onDeleteScheduledGame={deleteScheduledGame} onSaveFullMatch={saveGames} isAdmin={isAdmin}/>}
@@ -16972,7 +17040,7 @@ return (
 {/* Modals */}
 {showLineupEditor&&<LineupEditor players={players} games={games} onClose={()=>setShowLineupEditor(false)}/>}
 {showPlaybook&&<PlaybookModal onClose={()=>setShowPlaybook(false)}/>}
-{showHallOfFame&&<HallOfFameModal players={players} allGames={games} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}} onSaveAward={saveAward} onDeleteAward={deleteAward}/>}
+{showHallOfFame&&<HallOfFameModal players={players} allGames={games} onevones={onevones} manualAwards={manualAwards} isAdmin={isAdmin} seasons={appSettings?.seasons||[]} onClose={()=>setShowHallOfFame(false)} onOpenPlayer={pid=>{setShowHallOfFame(false);setModal({type:"playerProfile",pid});}} onSaveAward={saveAward} onDeleteAward={deleteAward}/>}
 {modal==="addPlayer"&&<PlayerFormModal onSave={savePlayer} onClose={()=>setModal(null)} onDelete={deletePlayer}/>}
 {modal==="logGame"&&<LogGameModal players={players} onSave={saveGames} onClose={()=>setModal(null)}/>}
 {modal==="notifSettings"&&<NotifSettingsModal onClose={()=>setModal(null)}/>}

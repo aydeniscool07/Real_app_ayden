@@ -11411,6 +11411,87 @@ const CHOICE_EVENTS=[
 {label:"Laat het gewoon langs je heen gaan",icon:"😌",perfDelta:[0,2],repDelta:0},
 ]},
 ];
+// ── Outcome system ─────────────────────────────────────────────────────────────
+// Elke keuze bij een seizoensmoment rolt een uitkomst-tier. Dezelfde keuze kan dus een
+// seizoen maken of juist volledig mislukken — bold keuzes hebben meer spreiding naar beide kanten,
+// veilige keuzes landen meestal in het midden maar kunnen alsnog tegenvallen.
+const OUTCOME_TIERS=[
+{key:"great",   label:"Perfect uitgepakt",  icon:"🌟", color:"#ffe066", repMul:1.5, scale:[1.0,1.5],  injuryMul:0.4},
+{key:"good",    label:"Goed gegaan",        icon:"✅", color:"#3ddc84", repMul:1,   scale:[0.6,1.0],  injuryMul:0.8},
+{key:"mixed",   label:"Gemengd resultaat",  icon:"➖", color:"#c98a8a", repMul:0.5, scale:[0.15,0.5], injuryMul:1},
+{key:"bad",     label:"Tegengevallen",      icon:"⚠️", color:"#f5a524", repMul:-0.5,scale:[-0.6,-0.1],injuryMul:1.4},
+{key:"disaster",label:"Volledig ontspoord", icon:"💀", color:"#E8312A", repMul:-1.5,scale:[-1.4,-0.7],injuryMul:2.2},
+];
+const OUTCOME_FLAVOR={
+great:["Alles viel perfect op zijn plek.","Dit werd hét keerpunt van je seizoen.","Het pakte beter uit dan wie dan ook had verwacht.","De hele competitie had het erover.","Achteraf de beste beslissing van je carrière."],
+good:["Het werkte precies zoals je hoopte.","Een solide zet die zijn vruchten afwierp.","Niets spectaculairs, maar het hielp echt.","De staf was zichtbaar tevreden."],
+mixed:["Het bracht wat het bracht — niet meer, niet minder.","Winst op het ene vlak, verlies op het andere.","Het veranderde uiteindelijk weinig.","Een dubbel gevoel achteraf."],
+bad:["Achteraf gezien geen slimme zet.","Het pakte anders uit dan gehoopt.","Het kostte je meer dan het opleverde.","De timing bleek volkomen verkeerd."],
+disaster:["Dit ontspoorde volledig.","Een keuze die je het hele seizoen bleef achtervolgen.","Het liep van kwaad tot erger.","Dit hakte er maanden in."],
+};
+// Bold keuzes = hoge upside en/of blessurerisico. Die krijgen een bredere, riskantere verdeling.
+function optionBoldness(opt){
+const hi=opt.perfDelta?.[1]??0, lo=opt.perfDelta?.[0]??0;
+return Math.min(1,Math.max(0,(hi/10)*0.6+((opt.injuryRisk||0)/0.3)*0.4+(lo<0?0.1:0)));
+}
+function outcomeWeights(opt){
+const b=optionBoldness(opt);
+return{
+great:   6+b*26,
+good:    32-b*8,
+mixed:   34-b*14,
+bad:     20+b*2,
+disaster:3+b*12,
+};
+}
+// Kans dat het "goed" gaat (great+good) — getoond op de keuzekaart zodat de speler bewust kan gokken.
+function optionSuccessChance(opt){
+const w=outcomeWeights(opt);
+const tot=Object.values(w).reduce((a,c)=>a+c,0);
+return Math.round(((w.great+w.good)/tot)*100);
+}
+function rollOutcomeTier(opt){
+const w=outcomeWeights(opt);
+const tot=Object.values(w).reduce((a,c)=>a+c,0);
+let r=Math.random()*tot;
+for(const t of OUTCOME_TIERS){r-=w[t.key];if(r<=0)return t;}
+return OUTCOME_TIERS[2];
+}
+// Zet een keuze + uitkomst-tier om in concrete gevolgen: prestatie, reputatie, blessurekans, extra's.
+function resolveOptionOutcome(opt){
+const tier=rollOutcomeTier(opt);
+const bold=optionBoldness(opt);
+const base=careerRoll(opt.perfDelta[0],opt.perfDelta[1]);
+const span=Math.max(2,Math.abs(opt.perfDelta[1]-opt.perfDelta[0])+Math.abs(opt.perfDelta[1]));
+const mul=careerRoll(tier.scale[0]*100,tier.scale[1]*100)/100;
+const perfDelta=Math.round(base>=0?base*Math.max(mul,tier.scale[0]):base+span*(1-mul)*0.5);
+// De klap bij een slechte uitkomst schaalt mee met hoe gedurfd de keuze was: een veilige optie
+// kan tegenvallen, maar sloopt je seizoen nooit zoals een risicovolle gok dat kan.
+const downside=-Math.abs(Math.round(span*Math.abs(mul)*(0.2+bold*0.45)))-(bold>0.5?1:0);
+const finalPerf=tier.key==="disaster"||tier.key==="bad"?downside:Math.max(0,perfDelta);
+const repBase=opt.repDelta||0;
+const repDelta=Math.round(repBase*tier.repMul)+(tier.key==="great"?1:tier.key==="disaster"?-1:0);
+const injChance=(opt.injuryRisk||0)*tier.injuryMul;
+const extraInjury=injChance&&Math.random()<injChance?Math.round(careerRoll(6,16)):0;
+return{
+tier,
+perfDelta:finalPerf,
+repDelta,
+extraInjury,
+flavor:pickRandom(OUTCOME_FLAVOR[tier.key]),
+// Alleen bij een top-uitkomst krijg je het volledige leiderschaps-/rivaliteitseffect.
+leader:!!opt.leader&&(tier.key==="great"||tier.key==="good"),
+startsRival:!!opt.startsRival&&tier.key!=="disaster",
+};
+}
+// Ambient events krijgen dezelfde behandeling: een zwaai naar boven of beneden t.o.v. de basiswaarde.
+function resolveAmbientOutcome(evt){
+const base=careerRoll(evt.mod[0],evt.mod[1]);
+const swing=careerRoll(-40,55)/100;
+const perfDelta=Math.round(base+Math.abs(base||3)*swing);
+const tier=perfDelta>=5?OUTCOME_TIERS[0]:perfDelta>=1?OUTCOME_TIERS[1]:perfDelta>=-1?OUTCOME_TIERS[2]:perfDelta>=-5?OUTCOME_TIERS[3]:OUTCOME_TIERS[4];
+return{tier,perfDelta,flavor:pickRandom(OUTCOME_FLAVOR[tier.key])};
+}
 // Rivalry storyline — a fictional rival that resurfaces in later seasons as marquee "revenge game" moments.
 const RIVAL_NAMES=["Luka Doncic","Giannis Antetokounmpo","Jayson Tatum","Nikola Jokic","Shai Gilgeous-Alexander","Anthony Edwards","Devin Booker","Victor Wembanyama","Damian Lillard","Joel Embiid","Kevin Durant","Stephen Curry","Jaylen Brown","Donovan Mitchell","Tyrese Haliburton","Ja Morant","Paolo Banchero","Zion Williamson","LaMelo Ball","Cade Cunningham","Franz Wagner","Scottie Barnes","Jalen Brunson","De'Aaron Fox","Trae Young"];
 function buildRevengeGameEvent(rivalName){
@@ -12676,6 +12757,7 @@ const [leagueDraftNightSpinning,setLeagueDraftNightSpinning]=useState(false);
 const [leagueDraftNightDisplay,setLeagueDraftNightDisplay]=useState(null);
 const [leagueDraftNightResult,setLeagueDraftNightResult]=useState(null);
 const [currentEvent,setCurrentEvent]=useState(null);
+const [eventOutcome,setEventOutcome]=useState(null); // uitkomst-reveal na een keuze of ambient event
 const [retired,setRetired]=useState(false);
 const [saved,setSaved]=useState(false);
 
@@ -12938,27 +13020,35 @@ setCurrentEvent(evt);
 setSeasonStage("event");
 return;
 }
-const eventObj={icon:evt.icon,label:evt.label,perfDelta:careerRoll(evt.mod[0],evt.mod[1])};
-setPendingSeason(p=>({...(p||{}),event:eventObj}));
-afterEventStage({training,event:eventObj});
+// Ambient events krijgen nu ook een eigen uitkomst-roll en reveal-scherm.
+const res=resolveAmbientOutcome(evt);
+const eventObj={icon:evt.icon,label:evt.label,perfDelta:res.perfDelta};
+setPendingSeason(p=>({...(p||{}),training,event:eventObj}));
+setEventOutcome({...res,icon:evt.icon,title:evt.label,choiceLabel:null,extraInjury:0,repDelta:0,eventObj});
+setSeasonStage("eventResult");
 }
 function chooseEventOption(opt){
-const perfDelta=careerRoll(opt.perfDelta[0],opt.perfDelta[1]);
-const extraInjury=(opt.injuryRisk&&Math.random()<opt.injuryRisk)?Math.round(careerRoll(6,16)):0;
-const eventObj={icon:opt.icon,label:currentEvent.prompt,choiceLabel:opt.label,perfDelta,extraInjury};
-if(opt.repDelta)setReputation(r=>r+opt.repDelta);
-if(opt.leader)setLeadershipCount(c=>c+1);
-if(opt.startsRival){
+const res=resolveOptionOutcome(opt);
+const eventObj={icon:opt.icon,label:currentEvent.prompt,choiceLabel:opt.label,perfDelta:res.perfDelta,extraInjury:res.extraInjury,outcomeTier:res.tier.key,outcomeLabel:res.tier.label};
+if(res.repDelta)setReputation(r=>r+res.repDelta);
+if(res.leader)setLeadershipCount(c=>c+1);
+if(res.startsRival){
 setRival(r=>r?{...r,intensity:r.intensity+1}:{name:pickRandom(RIVAL_NAMES),intensity:1});
 }
 if(currentEvent.id==="revenge_game"){
 eventObj.rivalName=rival?.name;
-eventObj.rivalBox=simulateRivalGameBox(player,trueRating,perfDelta);
+eventObj.rivalBox=simulateRivalGameBox(player,trueRating,res.perfDelta);
 setRival(r=>r?{...r,intensity:Math.max(0,r.intensity-2)}:r);
 }
 setPendingSeason(p=>({...(p||{}),event:eventObj}));
+setEventOutcome({...res,icon:opt.icon,title:currentEvent.prompt,choiceLabel:opt.label,eventObj});
 setCurrentEvent(null);
-afterEventStage({event:eventObj});
+setSeasonStage("eventResult");
+}
+function continueAfterEventOutcome(){
+const eventObj=eventOutcome?.eventObj;
+setEventOutcome(null);
+afterEventStage(eventObj?{event:eventObj}:{});
 }
 function afterEventStage(partial){
 partial=partial||{};
@@ -13938,9 +14028,55 @@ return(
 <div>
 {headerEl}
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:4}}>SEIZOENSMOMENT</div>
-<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:16}}>{currentEvent.prompt}</div>
+<div style={{color:WHITE,fontWeight:800,fontSize:16,marginBottom:6}}>{currentEvent.prompt}</div>
+<div style={{color:'#8a6a6a',fontSize:11,marginBottom:14}}>Elke keuze kan goed of verkeerd uitpakken — het percentage is de kans op een positieve uitkomst.</div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-{currentEvent.options.map((o,i)=>(<DecisionCard key={i} icon={o.icon} label={o.label} tag={o.injuryRisk?"⚠️ Risico":"Veilig"} tagColor={o.injuryRisk?"#f5a524":"#27AE60"} onClick={()=>chooseEventOption(o)}/>))}
+{currentEvent.options.map((o,i)=>{
+const chance=optionSuccessChance(o);
+return(<DecisionCard key={i} icon={o.icon} label={o.label} sub={`${chance}% kans op succes`} tag={o.injuryRisk?"⚠️ Risico":"Veilig"} tagColor={o.injuryRisk?"#f5a524":"#27AE60"} onClick={()=>chooseEventOption(o)}/>);
+})}
+</div>
+</div>
+);
+}
+if(seasonStage==="eventResult"&&eventOutcome){
+const t=eventOutcome.tier;
+const pd=eventOutcome.perfDelta;
+return(
+<div>
+{headerEl}
+<div style={{background:`radial-gradient(ellipse at top, ${t.color}22 0%, #0a0505 60%, #000 100%)`,borderRadius:18,padding:"28px 20px",border:`1px solid ${t.color}55`,textAlign:"center"}}>
+<div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>UITKOMST</div>
+<div style={{fontSize:40,marginBottom:8,animation:"careerPopIn 0.4s ease"}}>{t.icon}</div>
+<div className="career-display" style={{color:t.color,fontWeight:700,fontSize:20,letterSpacing:.5,textTransform:"uppercase",marginBottom:6}}>{t.label}</div>
+{eventOutcome.choiceLabel&&<div style={{color:WHITE,fontSize:13,fontWeight:600,marginBottom:4}}>{eventOutcome.icon} {eventOutcome.choiceLabel}</div>}
+<div style={{color:'#c98a8a',fontSize:12,fontStyle:"italic",marginBottom:6}}>{eventOutcome.title}</div>
+<div style={{color:'#e0c0c0',fontSize:13,marginBottom:18}}>{eventOutcome.flavor}</div>
+<div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap",marginBottom:20}}>
+<div style={{background:"#1a0a0a",border:`1px solid ${pd>=0?"#3ddc8455":"#E8312A55"}`,borderRadius:10,padding:"10px 16px",minWidth:92}}>
+<div style={{color:pd>=0?"#3ddc84":"#E8312A",fontWeight:900,fontSize:22}}>{pd>=0?"+":""}{pd}</div>
+<div style={{color:'#c98a8a',fontSize:10}}>Prestatie</div>
+</div>
+{!!eventOutcome.repDelta&&(
+<div style={{background:"#1a0a0a",border:`1px solid ${eventOutcome.repDelta>=0?"#3ddc8455":"#E8312A55"}`,borderRadius:10,padding:"10px 16px",minWidth:92}}>
+<div style={{color:eventOutcome.repDelta>=0?"#3ddc84":"#E8312A",fontWeight:900,fontSize:22}}>{eventOutcome.repDelta>=0?"+":""}{eventOutcome.repDelta}</div>
+<div style={{color:'#c98a8a',fontSize:10}}>Reputatie</div>
+</div>
+)}
+{!!eventOutcome.extraInjury&&(
+<div style={{background:"#1a0a0a",border:"1px solid #E8312A55",borderRadius:10,padding:"10px 16px",minWidth:92}}>
+<div style={{color:"#E8312A",fontWeight:900,fontSize:22}}>🚑 {eventOutcome.extraInjury}</div>
+<div style={{color:'#c98a8a',fontSize:10}}>Games gemist</div>
+</div>
+)}
+{eventOutcome.leader&&(
+<div style={{background:"#1a0a0a",border:"1px solid #ffe06655",borderRadius:10,padding:"10px 16px",minWidth:92}}>
+<div style={{color:"#ffe066",fontWeight:900,fontSize:22}}>👑</div>
+<div style={{color:'#c98a8a',fontSize:10}}>Leiderschap</div>
+</div>
+)}
+</div>
+<button onClick={continueAfterEventOutcome} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%"}}>Doorgaan ▸</button>
 </div>
 </div>
 );

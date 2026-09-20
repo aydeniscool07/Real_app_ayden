@@ -12060,11 +12060,25 @@ if(seasonRating>=88&&Math.random()<0.35)awards.push("all-nba");
 if(seasonRating>=95&&Math.random()<0.18)awards.push("mvp");
 if(player.attrs.def>=90&&seasonRating>=85&&Math.random()<0.15)awards.push("dpoy");
 if(playoffs.champion)awards.push("championship");
+// A ring — or a deep run, or nailing a big event choice — leaves a real, immediate mark on this player's
+// overall, not just a slower next-season growth-curve nudge. A disaster event/a lost season can cost a bit too.
+let outcomeBump=0;
+if(playoffs.champion)outcomeBump+=careerRoll(3,6);
+else if(playoffs.made&&(playoffs.eliminatedRoundIndex==null||playoffs.eliminatedRoundIndex>=2))outcomeBump+=careerRoll(1,3);
+else if(playoffs.made&&(playoffs.eliminatedRoundIndex==null||playoffs.eliminatedRoundIndex>=1))outcomeBump+=careerRoll(0,1.5);
+if(pending.event?.outcomeTier==="great")outcomeBump+=careerRoll(1,2.5);
+else if(pending.event?.outcomeTier==="disaster")outcomeBump-=careerRoll(1,3);
+let finalAttrs=newAttrs,finalOverall=newOverall;
+if(Math.abs(outcomeBump)>=0.5){
+finalAttrs=shiftAttrsToOverallTarget(newAttrs,player.pos,outcomeBump,player.ceilings);
+finalOverall=careerOverall(finalAttrs,player.pos);
+}
+const overallBump=finalOverall-newOverall;
 const teamGrowthBonus=teamSuccessGrowthBonus(strength,playoffs);
-const carryTrueRating=Math.round(Math.min(newOverall+3,newTrue+teamGrowthBonus));
+const carryTrueRating=Math.round(Math.min(finalOverall+3,newTrue+teamGrowthBonus));
 const teamTier=teamTierLabel(strength);
-const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,potentialCeilingHit,careerEnding,injuryType,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,recovery:pending.recovery||null,trade:pending.trade||null,nationalTeam:!!pending.nationalTeam,olympics:pending.olympics||null,awards,playoffs,teamGrowthBonus};
-return{season,newTrueRating:carryTrueRating,newTeamState:ts,newAttrs,newOverall};
+const season={age,team:ts.team,teamTier,wins,losses,seed:playoffs.seed,role,rating:seasonRating,gp,pts,reb,ast,stl,blk,salary,majorInjury,potentialCeilingHit,careerEnding,injuryType,training:pending.training||null,event:pending.event||null,contract:pending.contract||null,recovery:pending.recovery||null,trade:pending.trade||null,nationalTeam:!!pending.nationalTeam,olympics:pending.olympics||null,awards,playoffs,teamGrowthBonus,overallBump,overallAfter:finalOverall};
+return{season,newTrueRating:carryTrueRating,newTeamState:ts,newAttrs:finalAttrs,newOverall:finalOverall};
 }
 // ── Auto-pick every choice for a season (used by Quick mode — no UI, just resolves). contractYearsLeft<=0 triggers a fresh negotiation.
 // National-team callup odds scale smoothly with rating instead of a hard cutoff, so call-ups (and Olympic years) actually show up across a normal career.
@@ -12216,6 +12230,11 @@ return(
 <div style={{textAlign:"right"}}>
 <div style={{color:RED,fontWeight:800,fontSize:16}}>{season.rating}</div>
 <div style={{color:'#c98a8a',fontSize:9}}>RATING</div>
+{!!season.overallBump&&Math.abs(season.overallBump)>=1&&(
+<div style={{color:season.overallBump>0?"#ffe066":"#E8312A",fontWeight:800,fontSize:11,marginTop:2}}>
+{season.overallBump>0?"▲":"▼"} {season.overallBump>0?"+":""}{Math.round(season.overallBump)} OVR
+</div>
+)}
 </div>
 </div>
 <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:4,marginBottom:8}}>
@@ -13022,7 +13041,7 @@ return;
 }
 // Ambient events krijgen nu ook een eigen uitkomst-roll en reveal-scherm.
 const res=resolveAmbientOutcome(evt);
-const eventObj={icon:evt.icon,label:evt.label,perfDelta:res.perfDelta};
+const eventObj={icon:evt.icon,label:evt.label,perfDelta:res.perfDelta,outcomeTier:res.tier.key,outcomeLabel:res.tier.label};
 setPendingSeason(p=>({...(p||{}),training,event:eventObj}));
 setEventOutcome({...res,icon:evt.icon,title:evt.label,choiceLabel:null,extraInjury:0,repDelta:0,eventObj});
 setSeasonStage("eventResult");
@@ -14138,6 +14157,13 @@ return(
 <div>
 {headerEl}
 <div style={{color:'#c98a8a',fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:10}}>SEIZOEN AFGEROND</div>
+{last&&!!last.overallBump&&Math.abs(last.overallBump)>=1&&(
+<div className="career-gold-ring" style={{background:last.overallBump>0?"radial-gradient(ellipse at top,#3a2a0a 0%,#0a0505 65%,#000 100%)":"radial-gradient(ellipse at top,#2a0d0d 0%,#0a0505 65%,#000 100%)",border:`1px solid ${last.overallBump>0?"#ffe06666":"#E8312A66"}`,borderRadius:14,padding:"14px 16px",marginBottom:12,textAlign:"center"}}>
+<div style={{fontSize:26,marginBottom:4}}>{last.overallBump>0?"📈":"📉"}</div>
+<div className="career-display" style={{color:last.overallBump>0?"#ffe066":"#E8312A",fontWeight:700,fontSize:18,letterSpacing:.5}}>{last.overallBump>0?"+":""}{Math.round(last.overallBump)} OVERALL</div>
+<div style={{color:'#c98a8a',fontSize:11,marginTop:2}}>{last.awards.includes("championship")?"De ring heeft je speelniveau permanent verhoogd.":last.overallBump>0?"Een sterk seizoen liet zijn sporen na op je niveau.":"Een tegenvallend seizoen kostte je wat scherpte."}</div>
+</div>
+)}
 {last&&<CareerSeasonCard season={last}/>}
 <button onClick={continueCareer} style={{background:"linear-gradient(180deg,#f5c518 0%,#ff5b52 22%,#c4231d 75%,#7a1512 100%)",color:WHITE,border:"none",boxShadow:"0 0 16px rgba(245,197,24,.3), 0 0 14px rgba(232,49,42,.4)",borderRadius:14,padding:"14px 0",fontWeight:800,fontSize:14,cursor:"pointer",width:"100%",marginTop:10}}>Volgende seizoen ▸</button>
 </div>

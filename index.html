@@ -1195,6 +1195,148 @@ function mvpScore(eff, gamesCount) {
   return eff + GAMES_BONUS_PER_GAME * Math.min(g, GAMES_BONUS_CAP_GAMES);
 }
 function gameYearMonth(g){return g.date?g.date.slice(0,7):"";}
+
+// ── ESPN "Stats & Info"-achtige willekeurige statline ──────────────────────────────────────────
+// Eén keer geëvalueerd bij het laden van de app (module-scope, dus één seed per launch, niet per tab-bezoek).
+// Elke sjabloon graaft een specifiek, vaak absurd record uit de echte LBA-geschiedenis.
+const ESPN_STAT_SEED=Math.random();
+function mulberry32(seed){
+let a=seed>>>0;
+return function(){a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};
+}
+function espnFmtDate(d){if(!d)return"";const dt=new Date(d);return isNaN(dt)?d:`${dt.getDate()}/${dt.getMonth()+1}`;}
+function espnPName(pid,players){return players.find(p=>p.id===pid)?.name||"?";}
+const ESPN_STAT_TEMPLATES=[
+// Hoogste single-game output per categorie
+(games,players,rng)=>{
+const withPts=games.filter(g=>g.playerId&&+g.pts>0);
+if(!withPts.length)return null;
+const top=withPts.reduce((a,b)=>(+b.pts>+a.pts?b:a));
+const rest=withPts.filter(g=>g!==top);
+const secondBest=rest.length?Math.max(...rest.map(g=>+g.pts||0)):0;
+if(+top.pts<=secondBest)return null;
+return{icon:"🔥",label:"ALL-TIME RECORD",text:`${espnPName(top.playerId,players)} staat alleen op de troon met ${top.pts} punten in één wedstrijd (${espnFmtDate(top.date)}) — niemand anders in de LBA-geschiedenis kwam boven de ${secondBest}.`};
+},
+// Stat-stuffer: minimaal 1 in elke categorie
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.pts>0&&+g.reb>0&&+g.ast>0&&+g.stl>0&&+g.blk>0);
+if(!q.length)return null;
+const g=q[Math.floor(rng()*q.length)];
+return{icon:"🧩",label:"COMPLETE STATLIJN",text:`${espnPName(g.playerId,players)} is een van slechts ${q.length} speler${q.length===1?"":"s"} met minstens 1 punt, rebound, assist, steal én block in dezelfde wedstrijd (${espnFmtDate(g.date)}).`};
+},
+// Meeste assists zonder zelf te scoren
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.ast>0&&+g.pts===0);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.ast>+a.ast?b:a));
+return{icon:"🤲",label:"PURE PASSER",text:`${espnPName(top.playerId,players)} deelde ${top.ast} assists uit op ${espnFmtDate(top.date)} zonder zelf ook maar 1 punt te maken — de definitie van een pure playmaker.`};
+},
+// Meeste turnovers in één wedstrijd
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.to>0);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.to>+a.to?b:a));
+return{icon:"🎯",label:"SLORDIGSTE AVOND",text:`${espnPName(top.playerId,players)} verloor de bal ${top.to}x in één wedstrijd (${espnFmtDate(top.date)}) — het slechtste balbehoud van iemand in de LBA dit seizoen.`};
+},
+// Meeste 3PM in één wedstrijd
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.threept>0);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.threept>+a.threept?b:a));
+return{icon:"🎯",label:"BARRAGE VAN AFSTAND",text:`${espnPName(top.playerId,players)} raakte ${top.threept} driepunters in één wedstrijd (${espnFmtDate(top.date)}) — de beste long-range avond in de LBA.`};
+},
+// Meeste steals + blocks samen
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&(+g.stl>0||+g.blk>0));
+if(!q.length)return null;
+const withCombo=q.map(g=>({g,combo:(+g.stl||0)+(+g.blk||0)})).filter(x=>x.combo>0);
+if(!withCombo.length)return null;
+const top=withCombo.reduce((a,b)=>(b.combo>a.combo?b:a));
+return{icon:"🛡️",label:"DEFENSIEF MONSTER",text:`${espnPName(top.g.playerId,players)} combineerde ${top.g.stl||0} steals en ${top.g.blk||0} blocks in dezelfde wedstrijd (${espnFmtDate(top.g.date)}) — ${top.combo} defensieve plays in totaal.`};
+},
+// Meeste fouls in één wedstrijd
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.pf>0);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.pf>+a.pf?b:a));
+return{icon:"🟨",label:"FOUL TROUBLE",text:`${espnPName(top.playerId,players)} stapelde ${top.pf} fouls op in één wedstrijd (${espnFmtDate(top.date)}) — meer dan wie dan ook dit seizoen.`};
+},
+// Perfecte free throw avond op volume
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.fta>=4&&+g.ftm===+g.fta);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.fta>+a.fta?b:a));
+return{icon:"💯",label:"PERFECT VAN DE LIJN",text:`${espnPName(top.playerId,players)} ging ${top.ftm}-voor-${top.fta} vanaf de vrijworplijn (${espnFmtDate(top.date)}) — foutloos op serieus volume.`};
+},
+// Beste single-game boven eigen seizoensgemiddelde
+(games,players,rng)=>{
+const byPid={};
+games.forEach(g=>{if(!g.playerId)return;(byPid[g.playerId]=byPid[g.playerId]||[]).push(g);});
+const entries=Object.entries(byPid).filter(([,gs])=>gs.length>=5);
+if(!entries.length)return null;
+let best=null;
+entries.forEach(([pid,gs])=>{
+const avg=gs.reduce((s,g)=>s+(+g.pts||0),0)/gs.length;
+gs.forEach(g=>{
+const diff=(+g.pts||0)-avg;
+if(!best||diff>best.diff)best={pid,g,diff,avg};
+});
+});
+if(!best||best.diff<4)return null;
+return{icon:"📈",label:"CAREER NIGHT",text:`${espnPName(best.pid,players)} scoorde ${best.g.pts} punten op ${espnFmtDate(best.g.date)} — ${Math.round(best.diff)} meer dan zijn eigen seizoensgemiddelde van ${best.avg.toFixed(1)}. Zijn beste avond, met afstand.`};
+},
+// Langste streak in dubbele cijfers
+(games,players,rng)=>{
+const byPid={};
+games.forEach(g=>{if(!g.playerId)return;(byPid[g.playerId]=byPid[g.playerId]||[]).push(g);});
+let best=null;
+Object.entries(byPid).forEach(([pid,gs])=>{
+const sorted=gs.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+let cur=0,max=0;
+sorted.forEach(g=>{if(+g.pts>=10){cur++;max=Math.max(max,cur);}else cur=0;});
+if(max>=3&&(!best||max>best.streak))best={pid,streak:max};
+});
+if(!best)return null;
+return{icon:"🔥",label:"ACTIEVE REEKS",text:`${espnPName(best.pid,players)} scoorde in ${best.streak} opeenvolgende wedstrijden in dubbele cijfers — de langste zo'n reeks in de LBA.`};
+},
+// Meeste rebounds in één wedstrijd
+(games,players,rng)=>{
+const q=games.filter(g=>g.playerId&&+g.reb>0);
+if(!q.length)return null;
+const top=q.reduce((a,b)=>(+b.reb>+a.reb?b:a));
+return{icon:"🧱",label:"GLASS CLEANER",text:`${espnPName(top.playerId,players)} pakte ${top.reb} rebounds in één wedstrijd (${espnFmtDate(top.date)}) — het hoogste aantal in de LBA dit seizoen.`};
+},
+// Speler met de meeste gespeelde wedstrijden (iron man)
+(games,players,rng)=>{
+const byPid={};
+games.forEach(g=>{if(!g.playerId)return;byPid[g.playerId]=(byPid[g.playerId]||0)+1;});
+const entries=Object.entries(byPid);
+if(!entries.length)return null;
+const [pid,count]=entries.reduce((a,b)=>(b[1]>a[1]?b:a));
+if(count<10)return null;
+return{icon:"🦾",label:"IRON MAN",text:`${espnPName(pid,players)} heeft ${count} wedstrijden gespeeld — niemand in de LBA staat aan meer games geregistreerd.`};
+},
+// Beste assist/turnover ratio op volume
+(games,players,rng)=>{
+const byPid={};
+games.forEach(g=>{if(!g.playerId)return;const t=byPid[g.playerId]=byPid[g.playerId]||{ast:0,to:0,gp:0};t.ast+=+g.ast||0;t.to+=+g.to||0;t.gp+=1;});
+const entries=Object.entries(byPid).filter(([,v])=>v.gp>=5&&v.to>0);
+if(!entries.length)return null;
+const ranked=entries.map(([pid,v])=>({pid,ratio:v.ast/v.to,...v})).sort((a,b)=>b.ratio-a.ratio);
+const top=ranked[0];
+if(top.ratio<1.5)return null;
+return{icon:"🧠",label:"BALVASTHEID",text:`${espnPName(top.pid,players)} heeft een assist/turnover-ratio van ${top.ratio.toFixed(2)} over ${top.gp} wedstrijden (${top.ast} assists tegenover slechts ${top.to} turnovers) — verreweg de beste in de LBA.`};
+},
+];
+function pickEspnStatline(games,players){
+if(!games?.length||!players?.length)return null;
+const rng=mulberry32(Math.floor(ESPN_STAT_SEED*2147483647));
+const order=ESPN_STAT_TEMPLATES.map((fn,i)=>({fn,r:rng()})).sort((a,b)=>a.r-b.r);
+for(const{fn}of order){
+try{const res=fn(games,players,rng);if(res)return res;}catch(e){/* skip a template that can't compute on this data */}
+}
+return null;
+}
 function getWinLoss(playerGames){
 let w=0,l=0,d=0;
 playerGames.forEach(g=>{
@@ -3553,6 +3695,7 @@ return(
 function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onevones=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
 const{IS}=styles();
 const now=new Date();
+const espnStat=useMemo(()=>pickEspnStatline(games,players),[games,players]);
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [rangeMode,setRangeMode]=useState("month"); // "month" | "season" | "alltime"
 const [selSeasonId,setSelSeasonId]=useState(seasons[0]?.id||null);
@@ -4189,6 +4332,17 @@ return (
 <button data-testid="open-card-mvp" onClick={()=>setCardFor(mvp.player)} style={{marginTop:12,width:"100%",background:"rgba(255,255,255,0.06)",border:"none",color:WHITE,borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:13,cursor:"pointer"}}>🎴 Maak spelerskaart</button>
 </div>
 );})()}
+
+{/* ESPN Stats & Info-achtige random statline — 1x gekozen per app-launch */}
+{espnStat&&(
+<div style={{background:"linear-gradient(155deg,#1a1010 0%,#120a0a 60%,#0a0606 100%)",border:"1px solid #f5c51833",borderRadius:14,padding:"14px 16px",marginBottom:20,boxShadow:"0 0 0 1px rgba(245,197,24,.14), 0 6px 20px -8px rgba(0,0,0,.7)"}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+<span style={{fontSize:18}}>{espnStat.icon}</span>
+<span className="career-display" style={{color:"#f5c518",fontSize:10,fontWeight:600,letterSpacing:2}}>STATS & INFO · {espnStat.label}</span>
+</div>
+<div style={{color:WHITE,fontSize:13,lineHeight:1.5}}>{espnStat.text}</div>
+</div>
+)}
 
 {/* Stat leaders */}
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:12}}>STAT LEADERS — {monthLabel.toUpperCase()}</div>

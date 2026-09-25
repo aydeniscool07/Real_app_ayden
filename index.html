@@ -77,6 +77,10 @@ input[type="file"]{display:none}
 .career-gold-ring{box-shadow:0 0 0 1px rgba(245,197,24,.35),0 0 18px -4px rgba(245,197,24,.55),inset 0 1px 0 rgba(255,255,255,.08)}
 @keyframes careerSheen{0%{background-position:-200% 0}100%{background-position:200% 0}}
 .career-sheen{background:linear-gradient(120deg,transparent 30%,rgba(245,197,24,.16) 50%,transparent 70%);background-size:200% 100%;animation:careerSheen 3.2s ease-in-out infinite}
+@keyframes espnMarquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.espn-ticker-track{display:flex;width:max-content;animation:espnMarquee 28s linear infinite}
+@keyframes espnSlideUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.espn-cycle-enter{animation:espnSlideUp .35s ease}
 </style>
 <style>
 /* Boot-error fallback (shown if React fails to mount) */
@@ -1329,13 +1333,21 @@ return{icon:"🧠",label:"BALVASTHEID",text:`${espnPName(top.pid,players)} heeft
 },
 ];
 function pickEspnStatline(games,players){
-if(!games?.length||!players?.length)return null;
+const all=pickEspnStatlines(games,players,1);
+return all[0]||null;
+}
+// Picks up to `count` distinct statlines (same launch-seed, so the same 3 show all session) —
+// used to drive the cycling card + scrolling bottom ticker.
+function pickEspnStatlines(games,players,count=3){
+if(!games?.length||!players?.length)return[];
 const rng=mulberry32(Math.floor(ESPN_STAT_SEED*2147483647));
 const order=ESPN_STAT_TEMPLATES.map((fn,i)=>({fn,r:rng()})).sort((a,b)=>a.r-b.r);
+const out=[];
 for(const{fn}of order){
-try{const res=fn(games,players,rng);if(res)return res;}catch(e){/* skip a template that can't compute on this data */}
+if(out.length>=count)break;
+try{const res=fn(games,players,rng);if(res&&!out.some(o=>o.text===res.text))out.push(res);}catch(e){/* skip a template that can't compute on this data */}
 }
-return null;
+return out;
 }
 function getWinLoss(playerGames){
 let w=0,l=0,d=0;
@@ -3695,7 +3707,20 @@ return(
 function MonthlyStats({games,players,scheduledGames=[],manualAwards=[],onevones=[],onOpenPlayer,seasons=[],isAdmin=false,onSaveSeasons}){
 const{IS}=styles();
 const now=new Date();
-const espnStat=useMemo(()=>pickEspnStatline(games,players),[games,players]);
+const espnStats=useMemo(()=>pickEspnStatlines(games,players,3),[games,players]);
+const [espnIdx,setEspnIdx]=useState(0);
+const [espnDocked,setEspnDocked]=useState(false);
+useEffect(()=>{
+if(espnStats.length<2)return;
+const t=setInterval(()=>setEspnIdx(i=>(i+1)%espnStats.length),5000);
+return()=>clearInterval(t);
+},[espnStats.length]);
+useEffect(()=>{
+function onScroll(){setEspnDocked(window.scrollY>260);}
+window.addEventListener("scroll",onScroll,{passive:true});
+onScroll();
+return()=>window.removeEventListener("scroll",onScroll);
+},[]);
 const [selMonth,setSelMonth]=useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`);
 const [rangeMode,setRangeMode]=useState("month"); // "month" | "season" | "alltime"
 const [selSeasonId,setSelSeasonId]=useState(seasons[0]?.id||null);
@@ -4333,14 +4358,41 @@ return (
 </div>
 );})()}
 
-{/* ESPN Stats & Info-achtige random statline — 1x gekozen per app-launch */}
-{espnStat&&(
-<div style={{background:"linear-gradient(155deg,#1a1010 0%,#120a0a 60%,#0a0606 100%)",border:"1px solid #f5c51833",borderRadius:14,padding:"14px 16px",marginBottom:20,boxShadow:"0 0 0 1px rgba(245,197,24,.14), 0 6px 20px -8px rgba(0,0,0,.7)"}}>
+{/* ESPN Stats & Info-achtige random statlines — 3x gekozen per app-launch, cyclen elke 5s.
+    Zodra je naar beneden scrollt, dockt dit als een scrollende ticker-banner onderaan het scherm. */}
+{espnStats.length>0&&!espnDocked&&(()=>{const s=espnStats[espnIdx];return(
+<div key={espnIdx} className="espn-cycle-enter" style={{background:"linear-gradient(155deg,#1a1010 0%,#120a0a 60%,#0a0606 100%)",border:"1px solid #f5c51833",borderRadius:14,padding:"14px 16px",marginBottom:20,boxShadow:"0 0 0 1px rgba(245,197,24,.14), 0 6px 20px -8px rgba(0,0,0,.7)"}}>
 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-<span style={{fontSize:18}}>{espnStat.icon}</span>
-<span className="career-display" style={{color:"#f5c518",fontSize:10,fontWeight:600,letterSpacing:2}}>STATS & INFO · {espnStat.label}</span>
+<span style={{fontSize:18}}>{s.icon}</span>
+<span className="career-display" style={{color:"#f5c518",fontSize:10,fontWeight:600,letterSpacing:2}}>STATS & INFO · {s.label}</span>
+{espnStats.length>1&&(
+<span style={{marginLeft:"auto",display:"flex",gap:4}}>
+{espnStats.map((_,i)=>(<span key={i} style={{width:5,height:5,borderRadius:99,background:i===espnIdx?"#f5c518":"#3a2a1a"}}/>))}
+</span>
+)}
 </div>
-<div style={{color:WHITE,fontSize:13,lineHeight:1.5}}>{espnStat.text}</div>
+<div style={{color:WHITE,fontSize:13,lineHeight:1.5}}>{s.text}</div>
+</div>
+);})()}
+
+{/* Gedockte scrollende ticker-banner onderaan het scherm, verschijnt zodra er gescrold wordt */}
+{espnStats.length>0&&espnDocked&&(
+<div style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",zIndex:55,background:"linear-gradient(90deg,#160a0a 0%,#0a0505 100%)",borderTop:"1px solid #f5c51855",borderBottom:"1px solid #3a1414",display:"flex",alignItems:"center",height:34,overflow:"hidden"}}>
+<div className="career-display" style={{flexShrink:0,background:"linear-gradient(180deg,#f5c518,#c4231d)",color:"#000",fontSize:10,fontWeight:700,letterSpacing:1.5,padding:"0 10px",height:"100%",display:"flex",alignItems:"center",zIndex:2,boxShadow:"4px 0 8px -2px rgba(0,0,0,.6)"}}>STATS & INFO</div>
+<div style={{flex:1,overflow:"hidden",position:"relative",height:"100%"}}>
+<div className="espn-ticker-track" style={{position:"absolute",top:0,left:0,height:"100%",alignItems:"center"}}>
+{[0,1].map(rep=>(
+<div key={rep} style={{display:"flex",alignItems:"center"}}>
+{espnStats.map((s,i)=>(
+<span key={i} style={{display:"flex",alignItems:"center",whiteSpace:"nowrap",padding:"0 22px",fontSize:12,color:WHITE}}>
+<span style={{marginRight:6}}>{s.icon}</span>{s.text}
+<span style={{color:"#f5c518",marginLeft:22}}>●</span>
+</span>
+))}
+</div>
+))}
+</div>
+</div>
 </div>
 )}
 

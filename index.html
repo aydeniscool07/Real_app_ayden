@@ -1220,6 +1220,62 @@ return shape==="bug"?(
 <span style={{background:ESPN_RED,color:"#fff",fontSize:12,fontWeight:900,fontStyle:"italic",fontFamily:"Arial Black, Arial, sans-serif",letterSpacing:-0.5,padding:"2px 6px 1px",textTransform:"uppercase",display:"inline-block"}}>espn</span>
 );
 }
+// ── LBA Nieuwsbanner (alle tabs behalve Stats en Minigames) ─────────────────────────────────────
+// Admin beheert: eigen tekstberichten + automatische uitslagen/box scores + recente awards.
+function buildNewsItems(games,manualAwards,players,cfg){
+const out=[];
+(cfg.items||[]).forEach(it=>{if(it&&it.text)out.push({icon:"📢",label:"NIEUWS",text:it.text});});
+if(cfg.showGames!==false){
+const byMatch={};
+(games||[]).filter(g=>gameCounts(g)).forEach(g=>{const k=g.matchId||g.id;if(!k)return;(byMatch[k]=byMatch[k]||[]).push(g);});
+const matches=Object.values(byMatch).sort((a,b)=>(b[0].date||"").localeCompare(a[0].date||"")).slice(0,Math.max(1,cfg.gameCount||4));
+matches.forEach(rows=>{
+const r0=rows.find(g=>g.teamAScore&&g.teamBScore);
+if(!r0)return;
+const tAN=r0.teamAName||"Team A",tBN=r0.teamBName||"Team B";
+const top=rows.reduce((a,b)=>(+b.pts>+a.pts?b:a));
+const nm=(players||[]).find(p=>p.id===top.playerId)?.name;
+const box=nm&&+top.pts>0?` · Topscorer ${nm}: ${top.pts} PTS${+top.reb?`, ${top.reb} REB`:""}${+top.ast?`, ${top.ast} AST`:""}`:"";
+out.push({icon:"🏀",label:"UITSLAG",text:`${tAN} ${r0.teamAScore}–${r0.teamBScore} ${tBN} (${espnFmtDate(r0.date)})${box}`});
+});
+}
+if(cfg.showAwards!==false){
+(manualAwards||[]).slice().sort((a,b)=>(b.month||"").localeCompare(a.month||"")).slice(0,3).forEach(a=>{
+const at=getAwardType(a.awardId);
+const names=(Array.isArray(a.playerIds)?a.playerIds:a.playerId?[a.playerId]:[]).map(id=>(players||[]).find(p=>p.id===id)?.name).filter(Boolean);
+if(!at||!names.length)return;
+out.push({icon:"🏆",label:"AWARD",text:`${at.label}: ${names.join(", ")}${a.lbl?` (${a.lbl})`:""}`});
+});
+}
+return out;
+}
+function NewsTicker({games,players,manualAwards,cfg}){
+const items=useMemo(()=>buildNewsItems(games,manualAwards,players,cfg||{}),[games,manualAwards,players,cfg]);
+if(!items.length)return null;
+const chars=items.reduce((n,x)=>n+x.text.length+x.label.length+6,0);
+return(
+<div style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",zIndex:55,background:"#000",borderTop:`2px solid ${ESPN_RED}`,display:"flex",alignItems:"stretch",height:32,overflow:"hidden"}}>
+{CUSTOM_STAT_LOGO_URL?<StatsInfoLogo shape="bug"/>:(
+<div style={{flexShrink:0,background:ESPN_RED,color:"#fff",fontSize:12,fontWeight:900,fontStyle:"italic",fontFamily:"Arial Black, Arial, sans-serif",letterSpacing:-0.5,padding:"0 12px",display:"flex",alignItems:"center",zIndex:2,textTransform:"uppercase",clipPath:"polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%)",paddingRight:20}}>LBA nieuws</div>
+)}
+<div style={{flex:1,overflow:"hidden",position:"relative",background:"#000"}}>
+<div className="espn-ticker-track" style={{position:"absolute",top:0,left:0,height:"100%",alignItems:"center",animationDuration:`${Math.max(30,Math.round(chars*0.16))}s`}}>
+{[0,1].map(rep=>(
+<div key={rep} style={{display:"flex",alignItems:"center"}}>
+{items.map((it,i)=>(
+<span key={i} style={{display:"flex",alignItems:"center",whiteSpace:"nowrap",padding:"0 20px",fontSize:12,color:"#fff"}}>
+<span className="career-display" style={{color:ESPN_RED,fontWeight:700,letterSpacing:.5,marginRight:8,textTransform:"uppercase"}}>{it.label}</span>
+<span style={{marginRight:6}}>{it.icon}</span>{it.text}
+<span style={{color:ESPN_RED,marginLeft:20,fontWeight:900}}>■</span>
+</span>
+))}
+</div>
+))}
+</div>
+</div>
+</div>
+);
+}
 function gameYearMonth(g){return g.date?g.date.slice(0,7):"";}
 
 // ── ESPN "Stats & Info"-achtige willekeurige statline ──────────────────────────────────────────
@@ -1703,6 +1759,10 @@ return(
 function AdminDashboardModal({appSettings,botSettings,players,games,scheduledGames,larpPosts,triviaUsers,manualAwards,onSaveAppSettings,onSaveBotSettings,onClose,onQuickAction}){
 const [showBotSettings,setShowBotSettings]=useState(false);
 const {BG2,IS}=styles();
+const [newsInput,setNewsInput]=useState("");
+const nt=appSettings?.newsTicker||{};
+const ntItems=nt.items||[];
+const saveNt=patch=>onSaveAppSettings({newsTicker:{...nt,...patch}});
 const [bdlKeyInput,setBdlKeyInput]=useState(appSettings?.balldontlieApiKey||"");
 const ann=appSettings?.announcement||null;
 const [annIcon,setAnnIcon]=useState(ann?.icon||"📢");
@@ -1776,6 +1836,28 @@ return(
 </div>
 );
 })}
+
+<div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8,marginTop:4}}>NIEUWSBANNER</div>
+<div style={{color:GREY,fontSize:11,marginBottom:10}}>Scrollende banner onderaan alle tabs, behalve Stats en Minigames.</div>
+{[["enabled","📰 Nieuwsbanner aan",nt.enabled!==false],["showGames","🏀 Uitslagen & box scores (automatisch)",nt.showGames!==false],["showAwards","🏆 Recente awards (automatisch)",nt.showAwards!==false]].map(([k,lbl,on])=>(
+<div key={k} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600}}>{lbl}</div>
+<button onClick={()=>saveNt({[k]:!on})} style={{background:on?RED:"#2C2C2E",color:WHITE,border:"none",borderRadius:16,padding:"6px 14px",fontWeight:700,fontSize:12,cursor:"pointer"}}>{on?"Uitschakelen":"Inschakelen"}</button>
+</div>
+))}
+<div style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
+<div style={{color:WHITE,fontSize:13,fontWeight:600,marginBottom:8}}>📢 Eigen berichten</div>
+<div style={{display:"flex",gap:8,marginBottom:ntItems.length?10:0}}>
+<input value={newsInput} onChange={e=>setNewsInput(e.target.value)} placeholder="bv. Zaterdag 15:00 wedstrijd bij het park" style={{...IS,padding:"9px 10px",fontSize:13}}/>
+<button onClick={()=>{const t=newsInput.trim();if(!t)return;saveNt({items:[...ntItems,{id:"n_"+Date.now().toString(36),text:t}]});setNewsInput("");}} style={{background:"#2C2C2E",color:WHITE,border:"none",borderRadius:10,padding:"9px 14px",fontWeight:700,fontSize:12,cursor:"pointer",flexShrink:0}}>Toevoegen</button>
+</div>
+{ntItems.map(it=>(
+<div key={it.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderTop:"1px solid #1c1c1c"}}>
+<div style={{flex:1,color:WHITE,fontSize:12}}>{it.text}</div>
+<button onClick={()=>saveNt({items:ntItems.filter(x=>x.id!==it.id)})} style={{background:"transparent",border:"none",color:GREY,fontSize:18,cursor:"pointer"}}>×</button>
+</div>
+))}
+</div>
 
 <div style={{color:GREY,fontSize:11,fontWeight:700,letterSpacing:1.5,marginBottom:8,marginTop:4}}>INSTELLINGEN</div>
 <div style={{background:"#0a0a0a",border:"1px solid #222",borderRadius:12,padding:"12px 14px",marginBottom:10}}>
@@ -3845,11 +3927,15 @@ const now=new Date();
 const espnStats=useMemo(()=>pickEspnStatlines(games,players,5),[games,players]);
 const [espnIdx,setEspnIdx]=useState(0);
 const [espnDocked,setEspnDocked]=useState(false);
+// Leestijd schaalt mee met de lengte van de huidige statline: kort = ~7s, lange zinnen ~12s+.
 useEffect(()=>{
 if(espnStats.length<2)return;
-const t=setInterval(()=>setEspnIdx(i=>(i+1)%espnStats.length),5000);
-return()=>clearInterval(t);
-},[espnStats.length]);
+const cur=espnStats[espnIdx];
+const len=cur?(cur.text.length+cur.label.length):0;
+const ms=Math.max(7000,4000+len*75);
+const t=setTimeout(()=>setEspnIdx(i=>(i+1)%espnStats.length),ms);
+return()=>clearTimeout(t);
+},[espnIdx,espnStats]);
 useEffect(()=>{
 function onScroll(){setEspnDocked(window.scrollY>260);}
 window.addEventListener("scroll",onScroll,{passive:true});
@@ -4523,7 +4609,7 @@ return (
 <div style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",zIndex:55,background:"#000",borderTop:`2px solid ${ESPN_RED}`,display:"flex",alignItems:"stretch",height:32,overflow:"hidden"}}>
 <StatsInfoLogo shape="bug"/>
 <div style={{flex:1,overflow:"hidden",position:"relative",height:"100%",background:"#000"}}>
-<div className="espn-ticker-track" style={{position:"absolute",top:0,left:0,height:"100%",alignItems:"center"}}>
+<div className="espn-ticker-track" style={{position:"absolute",top:0,left:0,height:"100%",alignItems:"center",animationDuration:`${Math.max(40,Math.round(espnStats.reduce((n,x)=>n+x.text.length+x.label.length+6,0)*0.16))}s`}}>
 {[0,1].map(rep=>(
 <div key={rep} style={{display:"flex",alignItems:"center"}}>
 {espnStats.map((s,i)=>(
@@ -17321,7 +17407,7 @@ if(connectionIssue)return(
 );
 
 return(
-<div style={{background:BG,minHeight:"100vh",paddingBottom:80}}>
+<div style={{background:BG,minHeight:"100vh",paddingBottom:(tab!=="monthly"&&tab!=="nbapred"&&appSettings?.newsTicker?.enabled!==false)?114:80}}>
 {showSplash&&<SplashScreen onDone={dismissSplash}/>}
 {!showSplash&&showAnnouncement&&appSettings?.announcement&&<AnnouncementModal announcement={appSettings.announcement} players={players} games={games} manualAwards={manualAwards} onClose={dismissAnnouncement}/>}
 {showConfetti&&<Confetti onDone={()=>setShowConfetti(false)}/>}
@@ -17522,13 +17608,16 @@ onToggleSeasonLock={(v)=>saveAppSettings({nbaSeasonLocked:v})}
 />
 )}
 
+{/* LBA nieuwsbanner — niet op Stats (heeft eigen ticker) en niet op Minigames (career sim / GM sim) */}
+{tab!=="monthly"&&tab!=="nbapred"&&appSettings?.newsTicker?.enabled!==false&&<NewsTicker games={games} players={players} manualAwards={manualAwards} cfg={appSettings?.newsTicker}/>}
+
 {/* Pinned LARP Banner — bottom (above tabs) */}
 {(() => {
 const pinnedLarp = larpPosts.find(p => p.pinned);
 if (!pinnedLarp) return null;
 const preview = (pinnedLarp.text||"").slice(0,80) || (pinnedLarp.gif?"[GIF]":"") || (pinnedLarp.performanceId?"[Performance]":"");
 return (
-<div data-testid="pinned-banner-bottom" onClick={() => changeTab("larp")} style={{position:"fixed",left:0,right:0,bottom:"calc(58px + env(safe-area-inset-bottom,0px))",background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",borderTop:`1px solid ${RED}55`,borderBottom:`1px solid ${RED}22`,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,zIndex:50,backdropFilter:"blur(8px)"}}>
+<div data-testid="pinned-banner-bottom" onClick={() => changeTab("larp")} style={{position:"fixed",left:0,right:0,bottom:`calc(${(tab!=="monthly"&&tab!=="nbapred"&&appSettings?.newsTicker?.enabled!==false)?90:58}px + env(safe-area-inset-bottom,0px))`,background:"linear-gradient(135deg,#1a0a0a,#2a0a0a)",borderTop:`1px solid ${RED}55`,borderBottom:`1px solid ${RED}22`,padding:"10px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:12,zIndex:50,backdropFilter:"blur(8px)"}}>
 <span style={{fontSize:18}}>📌</span>
 <div style={{flex:1,minWidth:0}}>
 <div style={{color:RED,fontSize:10,fontWeight:700,letterSpacing:1.5,marginBottom:2}}>GEPIIND · {pinnedLarp.tempName}</div>

@@ -2320,7 +2320,7 @@ const AWARD_TYPES=[
 {id:"mvp",          label:"MVP van de Maand",          color:"#f5a524", Icon:TrophyIcon,   desc:"Most Valuable Player"},
 {id:"dpoy",         label:"Defensive Player vd Maand", color:"#5B9BD5", Icon:DPOYIcon,     desc:"Defensive Player of the Month"},
 {id:"mip",          label:"Most Improved Player",      color:"#27AE60", Icon:MIPIcon,      desc:"Grootste verbetering"},
-{id:"sixth",        label:"Kameleon vd Maand",         color:"#27AE60", Icon:SixthManIcon, desc:"De meest veelzijdige speler"},
+{id:"sixth",        label:"Kameleon vd Maand",         color:"#27AE60", Icon:SixthManIcon, desc:"Beste kameleon: kwaliteit van je optredens × speeltijd"},
 {id:"scoring",      label:"Scoring Title",             color:"#E8312A", Icon:ScoringIcon,  desc:"Meeste punten gem."},
 {id:"rebounds",     label:"Rebounds Title",            color:"#E67E22", Icon:ReboundsIcon, desc:"Meeste rebounds gem."},
 {id:"assists",      label:"Assists Title",             color:"#3498DB", Icon:AssistsIcon,  desc:"Meeste assists gem."},
@@ -2936,12 +2936,15 @@ if(!periodGames.length)return null;
 const byPid={};
 periodGames.forEach(g=>{
 if(!g.playerId)return;
-const t=byPid[g.playerId]||(byPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,pf:0,gp:0,effSum:0,cham:0,games:[]});
+const t=byPid[g.playerId]||(byPid[g.playerId]={pts:0,reb:0,ast:0,stl:0,blk:0,pf:0,gp:0,effSum:0,cham:0,chamEff:0,games:[]});
 t.pts+=+g.pts||0;t.reb+=+g.reb||0;t.ast+=+g.ast||0;t.stl+=+g.stl||0;t.blk+=+g.blk||0;t.pf+=+g.pf||0;t.gp+=1;t.effSum+=+calcFps(g)||0;
-if(g.team==="chameleon")t.cham+=1;
+if(g.team==="chameleon"){t.cham+=1;t.chamEff+=+calcFps(g)||0;}
 t.games.push(g);
 });
-const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,pfpg:t.pf/t.gp,cham:t.cham,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
+const rows=Object.entries(byPid).map(([pid,t])=>({pid,gp:t.gp,eff:t.effSum/t.gp,ppg:t.pts/t.gp,rpg:t.reb/t.gp,apg:t.ast/t.gp,dpg:(t.stl+t.blk)/t.gp,pfpg:t.pf/t.gp,cham:t.cham,chamAvg:t.cham?t.chamEff/t.cham:0,
+// Kameleon-score = kwaliteit (gem. prestatie als kameleon) × speeltijd (√ aantal optredens, dus meer spelen helpt
+// maar met afnemende meerwaarde). Zo wint niet automatisch wie het vaakst is ingevallen, maar wie ook echt goed speelde.
+chamScore:t.cham?(t.chamEff/t.cham)*Math.sqrt(t.cham):0,games:t.games})).filter(r=>players.find(p=>p.id===r.pid));
 if(!rows.length)return null;
 const top=key=>rows.slice().sort((a,b)=>b[key]-a[key])[0];
 const topTwo=key=>rows.slice().sort((a,b)=>b[key]-a[key]);
@@ -2971,7 +2974,12 @@ return{ids:winners.map(r=>r.pid),reason:`${top.made}/${top.att} FT (${top.pct}%)
 }
 case"dpoy":{const r=top("dpg");return{ids:[r.pid],reason:`${r.dpg.toFixed(1)} stl+blk gem.`,...withGap("dpg",r)};}
 case"fouler":{const r=top("pfpg");if(!r.pfpg)return null;return{ids:[r.pid],reason:`${r.pfpg.toFixed(1)} fouls gem.`,...withGap("pfpg",r)};}
-case"sixth":{const r=top("cham");if(!r.cham)return null;return{ids:[r.pid],reason:`${r.cham}× als kameleon gespeeld`,...withGap("cham",r,0)};}
+case"sixth":{
+const cr=rows.filter(x=>x.cham>0).sort((a,b)=>b.chamScore-a.chamScore);
+if(!cr.length)return null;
+const r=cr[0],ru=cr[1];
+return{ids:[r.pid],reason:`${r.chamAvg.toFixed(1)} eff gem. over ${r.cham}× als kameleon (score ${r.chamScore.toFixed(1)})`,gap:ru?+(r.chamScore-ru.chamScore).toFixed(1):null,runnerUpId:ru?ru.pid:null};
+}
 case"alllba1":{
 const ranked=rows.map(r=>{const wl=getWinLoss(r.games);const tot=wl.w+wl.l+wl.d;return{pid:r.pid,pct:tot?wl.w/tot:0,tot,w:wl.w,l:wl.l};}).filter(r=>r.tot>=2).sort((a,b)=>b.pct-a.pct||b.w-a.w);
 return ranked.length?{ids:ranked.slice(0,2).map(r=>r.pid),reason:`Beste win% ${periodLbl||"deze periode"} (${ranked.slice(0,2).map(r=>`${r.w}-${r.l}`).join(", ")})`}:null;
